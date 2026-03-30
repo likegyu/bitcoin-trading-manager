@@ -816,6 +816,73 @@ async def account_endpoint():
     return data
 
 
+@app.get("/api/setup/status")
+async def setup_status():
+    """
+    어떤 API 키가 빠져 있는지 반환.
+    값이 채워져 있는지만 확인 — 실제 유효성 검증은 하지 않음.
+    """
+    import config as _cfg
+    return {
+        "claude":   bool(_cfg.CLAUDE_API_KEY),
+        "binance":  bool(_cfg.BINANCE_API_KEY and _cfg.BINANCE_SECRET_KEY),
+        "fred":     bool(_cfg.FRED_API_KEY),
+    }
+
+
+class SetupSaveRequest(BaseModel):
+    claude_api_key:     str = ""
+    binance_api_key:    str = ""
+    binance_secret_key: str = ""
+    fred_api_key:       str = ""
+
+
+@app.post("/api/setup/save")
+async def setup_save(body: SetupSaveRequest):
+    """
+    입력받은 키를 .env 파일에 저장하고 config 모듈을 재로드.
+    로컬 실행 전용.
+    """
+    import config as _cfg
+    from pathlib import Path
+
+    env_path = Path(__file__).resolve().parent / ".env"
+
+    # 기존 .env 읽기 (없으면 빈 dict)
+    existing: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                existing[k.strip()] = v.strip()
+
+    # 새 값 병합 (빈 문자열이면 기존 값 유지)
+    updates = {
+        "CLAUDE_API_KEY":     body.claude_api_key,
+        "BINANCE_API_KEY":    body.binance_api_key,
+        "BINANCE_SECRET_KEY": body.binance_secret_key,
+        "FRED_API_KEY":       body.fred_api_key,
+    }
+    for k, v in updates.items():
+        if v:
+            existing[k] = v
+
+    # .env 재작성
+    lines = ["# API 키 — 절대 외부에 공유하지 마세요!\n"]
+    for k, v in existing.items():
+        lines.append(f"{k}={v}\n")
+    env_path.write_text("".join(lines), encoding="utf-8")
+
+    # os.environ + config 모듈 인메모리 갱신 (서버 재시작 없이 반영)
+    for k, v in existing.items():
+        os.environ[k] = v
+    import importlib
+    importlib.reload(_cfg)
+
+    return {"ok": True}
+
+
 @app.get("/")
 async def root():
     html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")

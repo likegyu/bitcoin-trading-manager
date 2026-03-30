@@ -472,6 +472,64 @@ body {
 }
 .btn-clear:hover { background: #F5F0EB; border-color: #D6C4B4; }
 
+/* ══ 셋업 모달 ════════════════════════════════ */
+#setup-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(250,248,245,.92); z-index: 1000;
+  align-items: center; justify-content: center;
+}
+#setup-overlay.visible { display: flex; }
+.setup-card {
+  background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 18px;
+  padding: 32px 36px; width: 480px; max-width: calc(100vw - 32px);
+  animation: fadein .22s ease;
+}
+.setup-header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.setup-title  { font-size: 18px; font-weight: 800; color: #1C1917; }
+.setup-desc   { font-size: 13px; color: #78716C; margin-bottom: 24px; line-height: 1.6; }
+.setup-group  { margin-bottom: 18px; }
+.setup-group-label {
+  font-size: 10px; font-weight: 700; color: #A8978A;
+  text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px;
+}
+.setup-field  { margin-bottom: 8px; }
+.setup-field label {
+  display: block; font-size: 12px; font-weight: 600; color: #57534E; margin-bottom: 4px;
+}
+.setup-input {
+  width: 100%; background: #FFFFFF; border: 1px solid #E8DDD4;
+  border-radius: 8px; padding: 8px 12px;
+  font-size: 13px; color: #1C1917; font-family: 'Inter', sans-serif;
+  outline: none; transition: border-color .15s;
+}
+.setup-input:focus { border-color: #EA580C; }
+.setup-input::placeholder { color: #C4B5AA; }
+.setup-optional {
+  font-size: 10.5px; color: #A8978A; margin-top: 2px;
+}
+.setup-key-hint {
+  font-size: 11px; color: #A8978A; margin-top: 4px; line-height: 1.5;
+}
+.setup-key-hint a { color: #EA580C; text-decoration: none; }
+.setup-key-hint a:hover { text-decoration: underline; }
+.setup-footer { display: flex; gap: 10px; margin-top: 24px; }
+.btn-setup-save {
+  flex: 1; background: #EA580C; color: #FFF; font-weight: 700; font-size: 14px;
+  border: none; border-radius: 10px; padding: 11px 0;
+  cursor: pointer; transition: background .15s;
+}
+.btn-setup-save:hover { background: #C2410C; }
+.btn-setup-save:disabled { background: #F0C4AD; cursor: not-allowed; }
+.btn-setup-skip {
+  background: #FFFFFF; color: #78716C; font-weight: 600; font-size: 13px;
+  border: 1px solid #E8DDD4; border-radius: 10px; padding: 11px 20px;
+  cursor: pointer; transition: all .15s;
+}
+.btn-setup-skip:hover { background: #F5F0EB; }
+.setup-saved-msg {
+  font-size: 12px; color: #16A34A; margin-top: 10px; text-align: center; display: none;
+}
+
 /* ══ 스크롤바 ═════════════════════════════════ */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: #F5F0EB; }
@@ -522,6 +580,66 @@ body {
 </head>
 <body>
 <div class="page">
+
+  <!-- 셋업 모달 -->
+  <div id="setup-overlay" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+    <div class="setup-card">
+      <div class="setup-header">
+        <span style="font-size:26px;">🔑</span>
+        <div id="setup-title" class="setup-title">API 키 설정</div>
+      </div>
+      <div class="setup-desc">
+        아래 키를 입력하면 <code style="background:#F5F0EB;padding:1px 5px;border-radius:4px;font-size:12px;">.env</code> 파일에 저장됩니다.<br>
+        선택 항목은 비워두면 해당 기능만 비활성화됩니다.
+      </div>
+
+      <!-- Claude -->
+      <div class="setup-group">
+        <div class="setup-group-label">Claude AI <span style="color:#DC2626;">필수</span></div>
+        <div class="setup-field">
+          <label for="inp-claude">CLAUDE_API_KEY</label>
+          <input id="inp-claude" class="setup-input" type="password" placeholder="sk-ant-api03-..." autocomplete="off">
+          <div class="setup-key-hint">
+            <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>에서 발급
+          </div>
+        </div>
+      </div>
+
+      <!-- Binance -->
+      <div class="setup-group">
+        <div class="setup-group-label">Binance <span style="color:#A8978A;">선택 — 파생상품·계좌 데이터</span></div>
+        <div class="setup-field">
+          <label for="inp-binance-key">BINANCE_API_KEY</label>
+          <input id="inp-binance-key" class="setup-input" type="password" placeholder="Binance API Key" autocomplete="off">
+        </div>
+        <div class="setup-field">
+          <label for="inp-binance-secret">BINANCE_SECRET_KEY</label>
+          <input id="inp-binance-secret" class="setup-input" type="password" placeholder="Binance Secret Key" autocomplete="off">
+          <div class="setup-key-hint">
+            <a href="https://www.binance.com/en/my/settings/api-management" target="_blank">binance.com</a> → API 관리에서 발급
+          </div>
+        </div>
+      </div>
+
+      <!-- FRED -->
+      <div class="setup-group">
+        <div class="setup-group-label">FRED <span style="color:#A8978A;">선택 — 금리·달러 거시지표</span></div>
+        <div class="setup-field">
+          <label for="inp-fred">FRED_API_KEY</label>
+          <input id="inp-fred" class="setup-input" type="password" placeholder="FRED API Key" autocomplete="off">
+          <div class="setup-key-hint">
+            <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank">fred.stlouisfed.org</a>에서 무료 발급
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-footer">
+        <button class="btn-setup-save" id="btn-setup-save" onclick="saveSetup()">저장하고 시작</button>
+        <button class="btn-setup-skip" onclick="skipSetup()">나중에</button>
+      </div>
+      <div class="setup-saved-msg" id="setup-saved-msg">✓ 저장됐습니다. 잠시 후 새로고침됩니다…</div>
+    </div>
+  </div>
 
   <!-- 에러 배너 -->
   <div id="error-banner" class="error-banner" role="alert" aria-live="assertive"></div>
@@ -2636,6 +2754,66 @@ function escapeHtml(str) {
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
             .replace(/"/g,"&quot;").replace(/\n/g,"<br>");
 }
+
+// ══════════════════════════════════════════════
+// 셋업 모달
+// ══════════════════════════════════════════════
+async function checkSetup() {
+  try {
+    const res  = await fetch("/api/setup/status");
+    const data = await res.json();
+    // Claude 키가 없으면 반드시 모달 표시
+    if (!data.claude) {
+      document.getElementById("setup-overlay").classList.add("visible");
+    }
+  } catch (e) { /* 서버 응답 실패 시 무시 */ }
+}
+
+async function saveSetup() {
+  const btn = document.getElementById("btn-setup-save");
+  btn.disabled = true;
+  btn.textContent = "저장 중…";
+
+  const body = {
+    claude_api_key:     document.getElementById("inp-claude").value.trim(),
+    binance_api_key:    document.getElementById("inp-binance-key").value.trim(),
+    binance_secret_key: document.getElementById("inp-binance-secret").value.trim(),
+    fred_api_key:       document.getElementById("inp-fred").value.trim(),
+  };
+
+  if (!body.claude_api_key) {
+    btn.disabled = false;
+    btn.textContent = "저장하고 시작";
+    showError("Claude API 키는 필수입니다.");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/setup/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById("setup-saved-msg").style.display = "block";
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      throw new Error("저장 실패");
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "저장하고 시작";
+    showError("키 저장 중 오류가 발생했습니다: " + e.message);
+  }
+}
+
+function skipSetup() {
+  document.getElementById("setup-overlay").classList.remove("visible");
+}
+
+// 페이지 로드 시 키 확인
+checkSetup();
 
 // ══════════════════════════════════════════════
 // 거시경제 지표
