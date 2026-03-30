@@ -63,11 +63,10 @@ cd bitcoin-trading-manager/crypto_analyzer
 | 키 | 필수 여부 | 발급 주소 |
 |----|----------|----------|
 | Claude API Key | ✅ 필수 | [console.anthropic.com](https://console.anthropic.com) |
-| FRED API Key | 권장 | [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) (무료) |
-| Binance API Key + Secret | 선택 | [binance.com/ko/my/settings/api-management](https://www.binance.com/ko/my/settings/api-management) |
+| Binance API Key + Secret | ✅ 필수 | [binance.com → API 관리](https://www.binance.com/ko/my/settings/api-management) |
+| FRED API Key | ✅ 필수 | [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) (무료) |
 
-> FRED 키 없이도 실행 가능하지만, 금리·달러 지표가 표시되지 않습니다.
-> Binance 키 없이도 시장 데이터·분석은 정상 작동합니다.
+> **Binance API 권한 설정:** 읽기 전용 + **선물 거래(Enable Futures)** 권한이 필요합니다. 출금(Withdrawal) 권한은 절대 부여하지 마세요.
 
 ### 3. 서버 실행
 
@@ -147,7 +146,7 @@ crypto_analyzer/
 
 - **투자 조언이 아닙니다.** 본 프로젝트는 데이터 분석 도구이며, 매매 결과에 대한 책임은 사용자에게 있습니다.
 - API 키는 절대 외부에 공유하지 마세요. `.env` 파일은 `.gitignore`에 포함되어 있습니다.
-- Binance API 키 생성 시 **출금 권한은 부여하지 마세요.** 읽기 + 선물 거래 권한만으로 충분합니다.
+- Binance API 키 생성 시 **읽기 전용 + 선물 거래(Enable Futures) 권한만** 부여하세요. 출금(Withdrawal) 권한은 절대 추가하지 마세요.
 
 ---
 
