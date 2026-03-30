@@ -1,0 +1,2727 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>₿ BTC Signal Analyzer</title>
+<!-- ECharts for multi-pane trading chart rendering -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ══ 전역 ═════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #FAF8F5;
+  color: #1C1917;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  min-height: 100vh;
+}
+.page { max-width: 1600px; margin: 0 auto; padding: 18px 22px 40px; }
+
+/* ══ 헤더 ═════════════════════════════════════ */
+.header {
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #E8DDD4;
+  margin-bottom: 18px;
+}
+.header-title { font-size: 26px; font-weight: 800; color: #1C1917; line-height: 1; }
+.header-pair  { font-size: 13px; color: #A8978A; font-weight: 500; margin-left: 2px; }
+.header-price { font-size: 28px; font-weight: 800; color: #EA580C; letter-spacing: -.5px; }
+.header-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-left: auto;
+}
+.status-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid #E8DDD4;
+  background: #FFFFFF; font-size: 11px; font-weight: 700; color: #57534E;
+}
+.status-chip.live { background: #F0FDF4; border-color: #86EFAC; color: #166534; }
+.status-chip.pending { background: #FFFBEB; border-color: #FDE68A; color: #92400E; }
+.status-chip.stale { background: #FFF7ED; border-color: #FDBA74; color: #9A3412; }
+.status-chip.idle { background: #F5F0EB; border-color: #E8DDD4; color: #78716C; }
+.status-chip.off  { background: #F5F0EB; border-color: #E8DDD4; color: #A8978A; }
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+  background: currentColor;
+}
+.btn-analyze {
+  background: #EA580C; color: #FFF; font-weight: 700; font-size: 14px;
+  border: none; border-radius: 10px; padding: 9px 22px;
+  cursor: pointer; transition: background .15s; white-space: nowrap;
+}
+.btn-analyze:hover:not(:disabled) { background: #C2410C; }
+.btn-analyze:disabled { background: #F0C4AD; cursor: not-allowed; }
+
+/* ══ 로딩 오버레이 ════════════════════════════ */
+@keyframes spin   { to { transform: rotate(360deg); } }
+@keyframes fadein { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+#loading-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(250,248,245,.88);
+  z-index: 999;
+  align-items: center; justify-content: center;
+}
+#loading-overlay.visible { display: flex; }
+.ld-card {
+  background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 16px;
+  padding: 28px 36px; width: 520px;
+  animation: fadein .2s ease;
+}
+.ld-header { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
+.ld-ring {
+  width: 20px; height: 20px; flex-shrink: 0;
+  border: 2.5px solid #FDE8D8; border-top-color: #EA580C;
+  border-radius: 50%; animation: spin .75s linear infinite;
+}
+.ld-title { font-size: 15px; font-weight: 700; color: #1C1917; }
+.ld-steps { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+.ld-step {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 14px 10px; border: 1px solid #F0EAE2; border-radius: 12px;
+  font-size: 12px; text-align: center; transition: all .2s;
+}
+.ld-step.done   { background: #F7FEF9; border-color: #BBF7D0; }
+.ld-step.active { background: #FFFBEB; border-color: #FDE68A; }
+.ld-step.wait   { background: #FAFAF9; border-color: #F0EAE2; }
+.ld-icon {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.ld-step.done   .ld-icon { background: #DCFCE7; color: #16A34A; }
+.ld-step.active .ld-icon {
+  background: #FEF3C7;
+  border: 2px solid #D97706; border-top-color: transparent;
+  animation: spin .7s linear infinite;
+}
+.ld-step.wait   .ld-icon { background: #F0EAE2; color: #C4B5A8; }
+.ld-step.done   .ld-text { color: #57534E; font-weight: 500; }
+.ld-step.active .ld-text { color: #92400E; font-weight: 700; }
+.ld-step.wait   .ld-text { color: #C4B5A8; }
+.ld-pct { font-size: 11px; font-weight: 700; }
+.ld-step.done   .ld-pct { color: #16A34A; }
+.ld-step.active .ld-pct { color: #D97706; }
+.ld-step.wait   .ld-pct { color: #D5C5B5; }
+
+/* ══ 시그널 + 지표 카드 행 ════════════════════ */
+.cards-row { display: flex; gap: 10px; margin-bottom: 18px; align-items: stretch; }
+.sig-badge {
+  flex: 0 0 200px; border-radius: 12px; padding: 14px 12px;
+  text-align: center; border: 1.5px solid #E8DDD4; background: #FFFFFF;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 4px; min-height: 94px;
+}
+.sig-badge.buy  { background: #F0FDF4; border-color: #86EFAC; }
+.sig-badge.sell { background: #FFF1F2; border-color: #FECACA; }
+.sig-badge.hold { background: #FFFBEB; border-color: #FDE68A; }
+.metric-card {
+  flex: 1; border-radius: 12px; padding: 13px 10px;
+  text-align: center; background: #FFFFFF; border: 1px solid #E8DDD4;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 3px; min-height: 94px;
+  transition: background .15s, border-color .15s;
+}
+.metric-card:hover { background: #FDFAF7; border-color: #D6C4B4; }
+.card-label { font-size: 10px; color: #A8978A; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.card-value { font-size: 22px; font-weight: 800; line-height: 1.15; }
+.card-sub   { font-size: 10.5px; font-weight: 500; }
+.conf-bar-bg { width: 80%; height: 3px; background: rgba(0,0,0,.08); border-radius: 999px; overflow: hidden; margin-top: 5px; }
+.conf-bar-fill { height: 100%; border-radius: 999px; }
+
+/* ══ 거시경제 레짐 카드 행 ═══════════════════ */
+.macro-section-label {
+  font-size: 10px; font-weight: 700; color: #A8978A;
+  text-transform: uppercase; letter-spacing: .1em;
+  margin-bottom: 8px;
+}
+.macro-row { display: flex; gap: 10px; margin-bottom: 18px; align-items: stretch; }
+.macro-card {
+  flex: 1; border-radius: 12px; padding: 12px 10px 10px;
+  text-align: center; background: #FFFFFF; border: 1px solid #E8DDD4;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 2px; min-height: 84px;
+  transition: background .15s, border-color .15s;
+}
+.macro-card:hover { background: #FDFAF7; border-color: #D6C4B4; }
+.macro-card .card-value { font-size: 18px; }
+.macro-card .card-note {
+  font-size: 9.5px; color: #A8978A; margin-top: 1px; line-height: 1.3;
+}
+
+/* ══ 메인 그리드 (차트 | 패널) ════════════════ */
+.main-grid { display: grid; grid-template-columns: 69fr 31fr; gap: 16px; align-items: start; }
+
+/* ══ 차트 영역 ════════════════════════════════ */
+.chart-area {
+  background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px;
+  overflow: hidden;
+}
+.tab-bar {
+  display: flex; gap: 2px; padding: 6px;
+  background: #F0EAE2; border-bottom: 1px solid #E8DDD4;
+}
+.tab-btn {
+  flex: 1; padding: 7px 0; font-size: 13.5px; font-weight: 600;
+  color: #78716C; background: transparent; border: none;
+  border-radius: 8px; cursor: pointer; transition: all .15s;
+}
+.tab-btn.active { background: #FFFFFF; color: #C2410C; }
+.chart-container {
+  padding: 8px 8px 6px;
+  background:
+    radial-gradient(circle at top right, rgba(251,146,60,.08), transparent 34%),
+    linear-gradient(180deg, #FFFCFA 0%, #FDFBF8 100%);
+}
+#chart-plot { width: 100%; height: 760px; }
+.chart-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  height: 400px; color: #C4B5AA; font-size: 14px;
+}
+
+/* ══ 오른쪽 패널 ══════════════════════════════ */
+.panel { display: flex; flex-direction: column; gap: 14px; }
+
+.panel-card {
+  background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px;
+  overflow: hidden;
+}
+.panel-card-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; background: #FAF8F5;
+  border-bottom: 1px solid #F0EAE2;
+}
+.panel-card-dot { width: 7px; height: 7px; border-radius: 50%; }
+.panel-card-label {
+  font-size: 10px; font-weight: 700; color: #A8978A;
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.panel-card-body { padding: 14px 16px; }
+
+/* 리포트 박스 */
+.report-box {
+  background: #FDFAF7; border: 1px solid #E8DDD4; border-radius: 10px;
+  padding: 14px 16px; font-size: 12.5px; line-height: 1.9; color: #44403C;
+  font-family: 'Inter', -apple-system, sans-serif;
+  max-height: 340px; overflow-y: auto;
+}
+.report-placeholder { color: #A8978A; text-align: center; padding: 24px 0; font-size: 13px; }
+.report-warning {
+  margin-bottom: 12px; padding: 9px 10px;
+  background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 8px;
+  color: #9A3412; font-size: 11.5px; line-height: 1.55;
+}
+.report-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.report-chip {
+  display: inline-flex; align-items: center; padding: 3px 8px;
+  border-radius: 999px; background: #FFFFFF; border: 1px solid #E8DDD4;
+  color: #78716C; font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
+}
+.report-section + .report-section {
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid #F0EAE2;
+}
+.report-section-title {
+  font-size: 10px; font-weight: 700; color: #A8978A;
+  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 7px;
+}
+.report-list { display: flex; flex-direction: column; gap: 7px; }
+.report-item { display: flex; gap: 8px; align-items: flex-start; line-height: 1.65; color: #44403C; }
+.report-bullet { color: #EA580C; font-weight: 800; flex-shrink: 0; }
+.report-line { color: #44403C; line-height: 1.65; }
+.report-summary {
+  margin-top: 12px; padding-top: 12px; border-top: 1px dashed #E8DDD4;
+  color: #1C1917; font-size: 13px; font-weight: 600; line-height: 1.7;
+}
+.report-raw {
+  white-space: pre-wrap;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  color: #44403C;
+}
+
+/* 매매 레벨 */
+.levels-grid { display: flex; gap: 7px; }
+.level-card {
+  flex: 1; background: #FFFFFF; border: 1px solid #E8DDD4;
+  border-radius: 10px; padding: 10px 6px; text-align: center;
+}
+.level-label { font-size: 9.5px; font-weight: 700; color: #A8978A; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 4px; }
+.level-value { font-size: 14px; font-weight: 800; }
+
+/* 계좌 / 포지션 */
+.account-placeholder {
+  color: #A8978A; text-align: center; padding: 18px 0 14px; font-size: 13px;
+}
+.account-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px; font-size: 11px; color: #A8978A;
+}
+.account-status-banner {
+  margin-bottom: 10px; padding: 9px 11px; border-radius: 9px; border: 1px solid #E8DDD4;
+  font-size: 11.5px; font-weight: 600; line-height: 1.5;
+}
+.account-status-banner.active { background: #F8FAFC; border-color: #CBD5E1; color: #475569; }
+.account-status-banner.target { background: #F0FDF4; border-color: #86EFAC; color: #166534; }
+.account-status-banner.loss { background: #FFF1F2; border-color: #FECACA; color: #B91C1C; }
+.account-error-note {
+  margin-bottom: 10px; padding: 8px 10px; border-radius: 9px;
+  background: #FFF7ED; border: 1px solid #FED7AA; color: #9A3412;
+  font-size: 11px; line-height: 1.55;
+}
+.account-assets {
+  display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.account-asset-pill {
+  display: inline-flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; background: #FDFAF7; border: 1px solid #E8DDD4; border-radius: 10px;
+  min-width: 112px;
+}
+.account-asset-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #A8978A;
+}
+.account-asset-value {
+  font-size: 13px; font-weight: 800; color: #1C1917;
+}
+.account-summary-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px;
+}
+.account-summary-card {
+  background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 10px; padding: 10px 11px;
+}
+.account-summary-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #A8978A;
+}
+.account-summary-value {
+  margin-top: 5px; font-size: 16px; font-weight: 800; color: #1C1917; line-height: 1.2;
+}
+.account-summary-sub {
+  margin-top: 3px; font-size: 11px; color: #78716C; line-height: 1.45;
+}
+.position-list {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.position-item {
+  border: 1px solid #E8DDD4; border-radius: 11px; background: #FFFFFF; padding: 10px 11px;
+  border-left-width: 4px;
+}
+.position-item.long  { border-left-color: #16A34A; }
+.position-item.short { border-left-color: #DC2626; }
+.position-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px;
+}
+.position-title {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+}
+.position-symbol {
+  font-size: 12.5px; font-weight: 800; color: #1C1917;
+}
+.position-side {
+  display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 800; letter-spacing: .05em;
+}
+.position-side.long  { background: #F0FDF4; color: #166534; border: 1px solid #86EFAC; }
+.position-side.short { background: #FFF1F2; color: #B91C1C; border: 1px solid #FECACA; }
+.position-badge {
+  display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; color: #78716C; background: #FAF8F5; border: 1px solid #E8DDD4;
+}
+.position-pnl {
+  font-size: 12px; font-weight: 800;
+}
+.position-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 10px;
+}
+.position-line {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.position-line-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: #A8978A;
+}
+.position-line-value {
+  font-size: 12px; font-weight: 700; color: #44403C;
+}
+.position-empty {
+  padding: 12px 0 6px; text-align: center; color: #A8978A; font-size: 12.5px;
+}
+
+/* 피보나치 테이블 */
+.fib-table { width: 100%; border-collapse: collapse; }
+.fib-table th {
+  font-size: 10px; font-weight: 600; color: #A8978A;
+  padding: 4px 8px; text-align: left; border-bottom: 1px solid #E8DDD4;
+}
+.fib-table th:last-child { text-align: right; }
+.fib-table td { padding: 5px 8px; font-size: 12px; font-family: 'Menlo', monospace; }
+.fib-table tr:hover td { background: #FDF5EE; }
+
+/* 자동 갱신 */
+.auto-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.toggle-wrap {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
+  background: none; border: none; padding: 0; font: inherit; color: inherit;
+}
+.toggle-wrap:focus-visible {
+  outline: 2px solid #EA580C; outline-offset: 4px; border-radius: 10px;
+}
+.toggle-track {
+  width: 38px; height: 20px; border-radius: 999px;
+  background: #D5C5B5; border: 1px solid #C4B0A0;
+  position: relative; transition: background .2s;
+  flex-shrink: 0;
+}
+.toggle-track.on { background: #EA580C; border-color: #C2410C; }
+.toggle-thumb {
+  width: 14px; height: 14px; border-radius: 50%; background: #FFF;
+  position: absolute; top: 2px; left: 2px; transition: left .2s;
+}
+.toggle-track.on .toggle-thumb { left: 20px; }
+.toggle-label { font-size: 13px; font-weight: 600; color: #44403C; }
+.auto-select {
+  background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 8px;
+  padding: 5px 10px; font-size: 13px; color: #1C1917;
+  font-family: inherit; cursor: pointer; outline: none;
+}
+.auto-select:focus { border-color: #EA580C; }
+.auto-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  padding: 3px 9px; border-radius: 20px;
+}
+.auto-badge.on  { background: #F0FDF4; color: #16A34A; border: 1px solid #86EFAC; }
+.auto-badge.off { background: #F5F0EB; color: #A8978A; border: 1px solid #E8DDD4; }
+.auto-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.auto-dot.on  { background: #22C55E; }
+.auto-dot.off { background: #D5C5B5; }
+.auto-hint { font-size: 11.5px; color: #A8978A; margin-top: 8px; }
+
+/* ══ 채팅 섹션 ════════════════════════════════ */
+.chat-section { margin-top: 16px; }
+.chat-card { background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px; overflow: hidden; }
+.chat-history {
+  padding: 14px 14px 6px; min-height: 80px; max-height: 440px; overflow-y: auto;
+}
+.chat-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 8px; padding: 32px 0 28px;
+  color: #C4B5AA; font-size: 13px; text-align: center;
+}
+.chat-empty-icon { font-size: 26px; }
+.msg { display: flex; gap: 8px; margin-bottom: 12px; }
+.msg.user { justify-content: flex-end; }
+.msg.assistant { justify-content: flex-start; }
+.msg-avatar {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; margin-top: 2px;
+}
+.msg.user     .msg-avatar { background: #FEF0E8; border: 1px solid #FDBA74; color: #C2410C; order: 2; }
+.msg.assistant .msg-avatar { background: #EA580C; color: #FFF; font-size: 11px; }
+.msg-bubble {
+  max-width: 80%; padding: 10px 14px;
+  font-size: 13.5px; line-height: 1.75;
+  white-space: pre-wrap; font-family: 'Inter', sans-serif;
+}
+.msg.user     .msg-bubble {
+  background: #FEF0E8; color: #7C2D12;
+  border: 1px solid #FDBA74;
+  border-radius: 14px 3px 14px 14px; order: 1;
+}
+.msg.assistant .msg-bubble {
+  background: #FFFFFF; color: #44403C;
+  border: 1px solid #E8DDD4;
+  border-radius: 3px 14px 14px 14px;
+}
+.chat-typing { display: flex; gap: 4px; padding: 12px 14px; align-items: center; }
+.chat-typing span {
+  width: 6px; height: 6px; border-radius: 50%; background: #D5C5B5;
+  animation: typingBounce .9s infinite;
+}
+.chat-typing span:nth-child(2) { animation-delay: .15s; }
+.chat-typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes typingBounce {
+  0%,60%,100% { transform: translateY(0); }
+  30% { transform: translateY(-5px); background: #EA580C; }
+}
+.chat-input-area {
+  padding: 10px 14px 12px; border-top: 1px solid #F0EAE2; background: #FAF8F5;
+}
+.chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
+.chat-textarea {
+  flex: 1; background: #FFFFFF; border: 1px solid #E8DDD4;
+  border-radius: 10px; padding: 9px 14px;
+  font-size: 13.5px; color: #1C1917; font-family: 'Inter', sans-serif;
+  resize: none; line-height: 1.6; outline: none;
+  transition: border-color .15s; min-height: 44px; max-height: 120px;
+}
+.chat-textarea:focus { border-color: #EA580C; }
+.chat-textarea::placeholder { color: #C4B5AA; }
+.chat-btn-group { display: flex; flex-direction: column; gap: 5px; }
+.btn-send {
+  background: #EA580C; color: #FFF; font-weight: 700;
+  border: none; border-radius: 9px; padding: 9px 16px;
+  font-size: 13px; cursor: pointer; transition: background .15s; white-space: nowrap;
+}
+.btn-send:hover:not(:disabled) { background: #C2410C; }
+.btn-send:disabled { background: #F0C4AD; cursor: not-allowed; }
+.btn-clear {
+  background: #FFFFFF; color: #78716C; font-weight: 600;
+  border: 1px solid #E8DDD4; border-radius: 9px; padding: 7px 16px;
+  font-size: 12px; cursor: pointer; transition: all .15s;
+}
+.btn-clear:hover { background: #F5F0EB; border-color: #D6C4B4; }
+
+/* ══ 스크롤바 ═════════════════════════════════ */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #F5F0EB; }
+::-webkit-scrollbar-thumb { background: #D5C5B5; border-radius: 4px; }
+
+/* ══ 에러 ════════════════════════════════════ */
+.error-banner {
+  background: #FFF1F2; border: 1px solid #FECACA; color: #DC2626;
+  border-radius: 10px; padding: 12px 16px; font-size: 13px;
+  margin-bottom: 14px; display: none;
+}
+.error-banner.visible { display: block; }
+
+@media (max-width: 1200px) {
+  .cards-row { flex-wrap: wrap; }
+  .sig-badge { flex: 1 1 100%; }
+  .metric-card { flex: 1 1 calc(33.333% - 7px); min-width: 170px; }
+  .main-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .page { padding: 16px 14px 28px; }
+  .header { gap: 12px; }
+  .header-price { width: 100%; font-size: 24px; }
+  .header-meta { width: 100%; margin-left: 0; }
+  .metric-card { flex: 1 1 calc(50% - 5px); min-width: calc(50% - 5px); }
+  #chart-plot { height: 620px; }
+  .chat-input-row { flex-direction: column; align-items: stretch; }
+  .chat-btn-group { flex-direction: row; }
+  .btn-send, .btn-clear { flex: 1; }
+}
+
+@media (max-width: 640px) {
+  .header-title { font-size: 22px; }
+  .header-price { font-size: 22px; }
+  .card-value { font-size: 18px; }
+  .main-grid { gap: 12px; }
+  .tab-bar { overflow-x: auto; scrollbar-width: none; }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab-btn { flex: 0 0 auto; min-width: 64px; padding: 8px 12px; }
+  #chart-plot { height: 520px; }
+  .ld-card { width: calc(100vw - 24px); padding: 22px 18px; }
+  .ld-steps { grid-template-columns: repeat(2,1fr); }
+  .msg-bubble { max-width: 90%; }
+  .account-summary-grid, .position-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- 에러 배너 -->
+  <div id="error-banner" class="error-banner" role="alert" aria-live="assertive"></div>
+
+  <!-- 헤더 -->
+  <div class="header">
+    <div>
+      <span id="header-base" class="header-title">₿ BTC</span>
+      <span id="header-quote" class="header-pair">/ USDC</span>
+    </div>
+    <div id="header-price" class="header-price"></div>
+    <div class="header-meta">
+      <div id="market-status" class="status-chip pending" role="status" aria-live="polite">
+        <span id="market-status-dot" class="status-dot"></span>
+        <span id="market-status-text">시장 연결 대기</span>
+      </div>
+      <div id="analysis-status" class="status-chip idle" role="status" aria-live="polite">
+        <span id="analysis-status-dot" class="status-dot"></span>
+        <span id="analysis-status-text">분석 대기</span>
+      </div>
+    </div>
+    <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
+  </div>
+
+  <!-- 시그널 + 지표 카드 행 -->
+  <div class="cards-row">
+    <div id="sig-badge" class="sig-badge">
+      <div class="card-label">AI 관점</div>
+      <div style="color:#C4B5AA;font-size:13px;padding:14px 0;">분석 대기 중...</div>
+    </div>
+    <div class="metric-card" id="card-rsi">
+      <div class="card-label">RSI (14)</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">—</div>
+    </div>
+    <div class="metric-card" id="card-macd">
+      <div class="card-label">MACD Hist</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">—</div>
+    </div>
+    <div class="metric-card" id="card-bb">
+      <div class="card-label">BB %B</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">—</div>
+    </div>
+    <div class="metric-card" id="card-vol">
+      <div class="card-label">거래량 비율</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">—</div>
+    </div>
+    <div class="metric-card" id="card-atr">
+      <div class="card-label">ATR (14)</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">—</div>
+    </div>
+  </div>
+
+  <!-- 거시경제 레짐 카드 행 -->
+  <div class="macro-section-label">🌐 &nbsp;거시경제 레짐</div>
+  <div class="macro-row" id="macro-row">
+    <div class="macro-card" id="macro-DFII10">
+      <div class="card-label">10Y 실질금리</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+    </div>
+    <div class="macro-card" id="macro-DGS2">
+      <div class="card-label">2Y 국채금리</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+    </div>
+    <div class="macro-card" id="macro-DTWEXBGS">
+      <div class="card-label">달러 인덱스</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+    </div>
+    <div class="macro-card" id="macro-STABLE_MCAP">
+      <div class="card-label">스테이블코인 시총</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+    </div>
+    <div class="macro-card" id="macro-USDT_DOM">
+      <div class="card-label">USDT 도미넌스</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">BTC 도미넌스와 함께 해석</div>
+    </div>
+    <div class="macro-card" id="macro-BTC_DOM">
+      <div class="card-label">BTC 도미넌스</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">↑BTC 집중 ↓알트 분산</div>
+    </div>
+  </div>
+
+  <!-- 메인 그리드 -->
+  <div class="main-grid">
+
+    <!-- 왼쪽: 차트 -->
+    <div class="chart-area">
+      <div class="tab-bar" id="tab-bar">
+        <button class="tab-btn active" data-tf="5m"  onclick="switchTab('5m')">5m</button>
+        <button class="tab-btn"        data-tf="15m" onclick="switchTab('15m')">15m</button>
+        <button class="tab-btn"        data-tf="1h"  onclick="switchTab('1h')">1h</button>
+        <button class="tab-btn"        data-tf="4h"  onclick="switchTab('4h')">4h</button>
+        <button class="tab-btn"        data-tf="1d"  onclick="switchTab('1d')">1d</button>
+      </div>
+      <div class="chart-container">
+        <div id="chart-plot">
+          <div class="chart-placeholder">분석 시작 후 차트가 표시됩니다.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 오른쪽: 패널 -->
+    <div class="panel">
+
+      <!-- Claude 리포트 -->
+      <div class="panel-card">
+        <div class="panel-card-header">
+          <div class="panel-card-dot" style="background:#EA580C;"></div>
+          <span class="panel-card-label">Claude 애널리스트 리포트</span>
+        </div>
+        <div class="panel-card-body">
+          <div id="report-box" class="report-box">
+            <div class="report-placeholder">분석 시작 버튼을 눌러주세요.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 내 계좌 / 포지션 -->
+      <div class="panel-card">
+        <div class="panel-card-header">
+          <div class="panel-card-dot" style="background:#16A34A;"></div>
+          <span class="panel-card-label">내 계좌 / 포지션</span>
+        </div>
+        <div class="panel-card-body" id="account-panel-body">
+          <div class="account-placeholder">계좌 데이터를 불러오는 중입니다.</div>
+        </div>
+      </div>
+
+      <!-- 관심 레벨 -->
+      <div class="panel-card" id="levels-card" style="display:none;">
+        <div class="panel-card-header">
+          <div class="panel-card-dot" style="background:#0284C7;"></div>
+          <span class="panel-card-label">관심 레벨</span>
+        </div>
+        <div class="panel-card-body">
+          <div class="levels-grid" id="levels-grid"></div>
+        </div>
+      </div>
+
+      <!-- 피보나치 -->
+      <div class="panel-card">
+        <div class="panel-card-header">
+          <div class="panel-card-dot" style="background:#7C3AED;"></div>
+          <span class="panel-card-label">피보나치 되돌림 <span id="fib-meta" style="font-weight:400;text-transform:none;letter-spacing:0;">(현재 TF swing 기준)</span></span>
+        </div>
+        <div class="panel-card-body" style="padding:0 16px 10px;">
+          <div id="fib-content" style="color:#C4B5AA;font-size:13px;text-align:center;padding:16px 0;">—</div>
+        </div>
+      </div>
+
+      <!-- 실시간 스트림 -->
+      <div class="panel-card">
+        <div class="panel-card-header">
+          <div class="panel-card-dot" style="background:#16A34A;"></div>
+          <span class="panel-card-label">실시간 스트림</span>
+        </div>
+        <div class="panel-card-body">
+          <div class="auto-row">
+            <button
+              id="stream-toggle"
+              type="button"
+              class="toggle-wrap"
+              onclick="toggleAuto()"
+              aria-pressed="false"
+            >
+              <span id="toggle-track" class="toggle-track">
+                <span class="toggle-thumb"></span>
+              </span>
+              <span class="toggle-label">바이낸스 실시간 차트</span>
+            </button>
+            <span id="auto-badge" class="auto-badge off">
+              <span id="auto-dot" class="auto-dot off"></span>
+              <span id="auto-text">OFF</span>
+            </span>
+          </div>
+          <div id="auto-hint" class="auto-hint">
+            활성화하면 바이낸스 실시간 스트림으로 차트와 현재가를 반영합니다.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /panel -->
+  </div><!-- /main-grid -->
+
+  <!-- 채팅 섹션 -->
+  <div id="chat-section" class="chat-section" style="display:none;">
+    <div class="chat-card">
+      <div class="panel-card-header">
+        <div class="panel-card-dot" style="background:#EA580C;"></div>
+        <span class="panel-card-label">Claude에게 추가 질문</span>
+      </div>
+      <div id="chat-history" class="chat-history">
+        <div class="chat-empty">
+          <div class="chat-empty-icon">💬</div>
+          <div>분석 결과에 대해 궁금한 점을 물어보세요.</div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <div class="chat-input-row">
+          <textarea
+            id="chat-input"
+            class="chat-textarea"
+            placeholder="분석 결과에 대해 궁금한 점을 입력하세요..."
+            rows="2"
+            onkeydown="chatKeydown(event)"
+            oninput="autoResize(this)"
+          ></textarea>
+          <div class="chat-btn-group">
+            <button class="btn-send" id="btn-send" onclick="sendChat()">전송</button>
+            <button class="btn-clear" onclick="clearChat()">초기화</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<!-- 로딩 오버레이 -->
+<div id="loading-overlay">
+  <div class="ld-card">
+    <div class="ld-header">
+      <div class="ld-ring"></div>
+      <div class="ld-title">분석 진행 중…</div>
+    </div>
+    <div class="ld-steps" id="ld-steps"></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+// 상수 & 팔레트
+// ══════════════════════════════════════════════
+const C = {
+  bull:"#16A34A", bear:"#DC2626", orange:"#EA580C",
+  amber:"#D97706", sky:"#0284C7", txt:"#1C1917",
+  muted:"#A8978A", dim:"#78716C",
+};
+const FIB_COLORS = {
+  "0.000":"#DC2626","0.236":"#EA580C","0.382":"#D97706",
+  "0.500":"#78716C","0.618":"#16A34A","0.786":"#0284C7","1.000":"#16A34A",
+};
+const SIG_CLASS = { "매수":"buy","매도":"sell","홀드":"hold" };
+const SIG_COLOR = { "매수":C.bull,"매도":C.bear,"홀드":C.amber };
+const SIG_EMOJI = { "매수":"▲","매도":"▼","홀드":"●" };
+const SIG_VIEW  = { "매수":"상방 우위","매도":"하방 우위","홀드":"중립" };
+const ACCOUNT_STREAM_RETRY_MS = 2000;
+const LD_STEPS  = [
+  ["바이낸스 데이터 수신","25%"],
+  ["보조지표 계산","50%"],
+  ["Claude AI 분석","85%"],
+  ["분석 완료","100%"],
+];
+
+// ══════════════════════════════════════════════
+// 앱 상태
+// ══════════════════════════════════════════════
+const state = {
+  charts:       {},   // { tf: chartPayload }
+  currentTf:    "5m",
+  renderedTf:   null,
+  chartInstance:null,
+  chartViewport:{},
+  chatHistory:  [],
+  chatContext:  "",
+  chatWasReset: false,
+  autoOn:       true,
+  marketSource: null,
+  marketRetryTimer: null,
+  marketConnected: false,
+  accountSource: null,
+  accountRetryTimer: null,
+  analyzing:    false,
+  fibs:         {},
+  price:        null,
+  account:      null,
+  symbol:       null,
+  pairLabel:    null,
+  signal:       null,
+  confidence:   null,
+  reportSections: {},
+  reportMissingSections: [],
+  analysisTime: null,
+  analysisStale:false,
+  lastMarketUpdate:null,
+};
+
+// ══════════════════════════════════════════════
+// 초기화
+// ══════════════════════════════════════════════
+window.addEventListener("DOMContentLoaded", () => {
+  updateAutoUI();
+  updateMarketStatus();
+  updateAnalysisStatus();
+  fetchAccount();
+  startAccountStream();
+  window.addEventListener("resize", () => {
+    if (state.chartInstance) state.chartInstance.resize();
+  });
+  if (state.autoOn) startMarketStream();
+  runAnalysis();
+});
+
+// ══════════════════════════════════════════════
+// 분석 실행 (SSE)
+// ══════════════════════════════════════════════
+function runAnalysis() {
+  if (state.analyzing) return;
+  state.analyzing = true;
+  setAnalyzeBtn(false);
+  updateAnalysisStatus();
+  showError(null);
+  showLoadingOverlay(0);
+
+  const es = new EventSource("/api/analyze");
+
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "progress") {
+      showLoadingOverlay(msg.step);
+    } else if (msg.type === "result") {
+      es.close();
+      hideLoadingOverlay();
+      state.analyzing = false;
+      setAnalyzeBtn(true);
+      applyResult(msg.data);
+    } else if (msg.type === "error") {
+      es.close();
+      hideLoadingOverlay();
+      state.analyzing = false;
+      setAnalyzeBtn(true);
+      updateAnalysisStatus();
+      showError("분석 오류: " + msg.message);
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    hideLoadingOverlay();
+    state.analyzing = false;
+    setAnalyzeBtn(true);
+    updateAnalysisStatus();
+    showError("서버 연결 오류. 서버가 실행 중인지 확인하세요.");
+  };
+}
+
+function setAnalyzeBtn(enabled) {
+  const btn = document.getElementById("btn-analyze");
+  btn.disabled = !enabled;
+  btn.setAttribute("aria-busy", String(!enabled));
+  btn.textContent = enabled ? "분석 시작 →" : "분석 중...";
+}
+
+function setStatusChip(id, variant, text) {
+  const chip = document.getElementById(id);
+  const textEl = document.getElementById(`${id}-text`);
+  if (!chip || !textEl) return;
+  chip.className = `status-chip ${variant}`;
+  chip.setAttribute("aria-label", text);
+  textEl.textContent = text;
+}
+
+function updateMarketStatus() {
+  if (!state.autoOn) {
+    const text = state.lastMarketUpdate
+      ? `시장 스트림 OFF · 기준 ${state.lastMarketUpdate}`
+      : "시장 스트림 OFF";
+    setStatusChip("market-status", "off", text);
+    return;
+  }
+
+  if (state.marketConnected) {
+    const text = state.lastMarketUpdate
+      ? `시장 LIVE · ${state.lastMarketUpdate}`
+      : "시장 LIVE";
+    setStatusChip("market-status", "live", text);
+    return;
+  }
+
+  const pendingText = state.lastMarketUpdate
+    ? `시장 재연결 중 · 기준 ${state.lastMarketUpdate}`
+    : "시장 연결 중";
+  setStatusChip("market-status", "pending", pendingText);
+}
+
+function updateAnalysisStatus() {
+  if (state.analyzing) {
+    setStatusChip("analysis-status", "pending", "AI 분석 진행 중");
+    return;
+  }
+
+  if (!state.analysisTime) {
+    setStatusChip("analysis-status", "idle", "분석 대기");
+    return;
+  }
+
+  const text = state.analysisStale
+    ? `AI 분석 ${state.analysisTime} · 시세 대비 지연`
+    : `AI 분석 ${state.analysisTime} · 최신`;
+  setStatusChip("analysis-status", state.analysisStale ? "stale" : "live", text);
+}
+
+function getAnalysisFreshnessCopy() {
+  if (!state.analysisTime) return "분석 대기 중";
+  return state.analysisStale
+    ? `기준 ${state.analysisTime} · 실시간 시세 대비 지연 가능`
+    : `기준 ${state.analysisTime} · 최신 분석`;
+}
+
+// ══════════════════════════════════════════════
+// 결과 적용
+// ══════════════════════════════════════════════
+function applyResult(data) {
+  state.signal = data.signal || null;
+  state.confidence = data.confidence ?? null;
+  state.reportSections = data.report_sections || {};
+  state.reportMissingSections = data.report_missing_sections || [];
+  state.analysisTime = data.analysis_time || data.last_update || null;
+  state.analysisStale = false;
+
+  applyMarketData(data, "analysis");
+  renderSignalBadge(data.signal, data.confidence);
+  renderReport(data.raw_text, data.report_sections, data.report_missing_sections);
+  renderLevels(data.signal, data.trade_levels);
+  if (data.account) {
+    applyAccountData(data.account);
+  }
+
+  state.chatContext  = data.chat_context || "";
+  state.chatWasReset = state.chatHistory.length > 0;
+  state.chatHistory  = [];
+  renderChatHistory();
+  document.getElementById("chat-section").style.display = "block";
+}
+
+function applyMarketData(data, source = "market") {
+  if (!data) return;
+  let refreshSignal = false;
+
+  if (data.symbol || data.pair_label) {
+    state.symbol = data.symbol || state.symbol;
+    state.pairLabel = data.pair_label || state.pairLabel;
+    renderHeaderSymbol();
+  }
+
+  if (data.price !== undefined && data.price !== null) {
+    document.getElementById("header-price").textContent = "$" + data.price.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    state.price = data.price;
+    applyLiveBtcPositionMarks(data.price);
+  }
+
+  if (data.last_update) {
+    state.lastMarketUpdate = data.last_update;
+    if (
+      source !== "analysis" &&
+      state.analysisTime &&
+      data.last_update !== state.analysisTime &&
+      !state.analysisStale
+    ) {
+      state.analysisStale = true;
+      refreshSignal = true;
+    }
+  }
+
+  if (data.indicators) {
+    renderMetricCards(data.indicators);
+  }
+
+  if (data.fibs) {
+    state.fibs = Object.assign({}, state.fibs, data.fibs);
+  }
+
+  const incomingCharts = data.charts || {};
+  const hasChartPatch = Object.keys(incomingCharts).length > 0;
+  if (hasChartPatch) {
+    const nextCharts = Object.assign({}, state.charts);
+    Object.entries(incomingCharts).forEach(([tf, chartPayload]) => {
+      nextCharts[tf] = chartPayload;
+      if (Object.prototype.hasOwnProperty.call(chartPayload, "fib")) {
+        state.fibs[tf] = chartPayload.fib;
+      }
+    });
+    state.charts = nextCharts;
+    if (incomingCharts[state.currentTf] || !state.charts[state.currentTf]) {
+      renderCurrentChart();
+    }
+  }
+
+  if ((data.price !== undefined && data.price !== null) || data.fibs || hasChartPatch) {
+    renderFib(getActiveFib(), state.price, state.currentTf);
+  }
+
+  updateMarketStatus();
+  updateAnalysisStatus();
+
+  if (refreshSignal && state.signal) {
+    renderSignalBadge(state.signal, state.confidence);
+  }
+}
+
+function clearMarketRetryTimer() {
+  if (state.marketRetryTimer) {
+    clearTimeout(state.marketRetryTimer);
+    state.marketRetryTimer = null;
+  }
+}
+
+function clearAccountRetryTimer() {
+  if (state.accountRetryTimer) {
+    clearTimeout(state.accountRetryTimer);
+    state.accountRetryTimer = null;
+  }
+}
+
+function startMarketStream() {
+  clearMarketRetryTimer();
+  stopMarketStream(false);
+
+  const es = new EventSource("/api/market-stream");
+  state.marketSource = es;
+  state.marketConnected = false;
+  updateAutoUI();
+
+  es.onopen = () => {
+    if (state.marketSource !== es) return;
+    state.marketConnected = true;
+    updateAutoUI();
+  };
+
+  es.onmessage = (e) => {
+    if (state.marketSource !== es) return;
+    const msg = JSON.parse(e.data);
+    if (msg.type === "snapshot" || msg.type === "market" || msg.type === "price") {
+      applyMarketData(msg.data);
+    }
+  };
+
+  es.onerror = () => {
+    if (state.marketSource !== es) return;
+    es.close();
+    state.marketSource = null;
+    state.marketConnected = false;
+    updateAutoUI();
+
+    if (state.autoOn) {
+      clearMarketRetryTimer();
+      state.marketRetryTimer = setTimeout(() => {
+        if (state.autoOn && !state.marketSource) startMarketStream();
+      }, 2000);
+    }
+  };
+}
+
+function stopMarketStream(updateUi = true) {
+  clearMarketRetryTimer();
+  if (state.marketSource) {
+    state.marketSource.close();
+    state.marketSource = null;
+  }
+  state.marketConnected = false;
+  if (updateUi) updateAutoUI();
+}
+
+function startAccountStream() {
+  clearAccountRetryTimer();
+  stopAccountStream(false);
+
+  const es = new EventSource("/api/account-stream");
+  state.accountSource = es;
+
+  es.onmessage = (e) => {
+    if (state.accountSource !== es) return;
+    const msg = JSON.parse(e.data);
+    if (msg.type === "snapshot" || msg.type === "account") {
+      applyAccountData(msg.data);
+    }
+  };
+
+  es.onerror = () => {
+    if (state.accountSource !== es) return;
+    es.close();
+    state.accountSource = null;
+    fetchAccount();
+
+    clearAccountRetryTimer();
+    state.accountRetryTimer = setTimeout(() => {
+      if (!state.accountSource) startAccountStream();
+    }, ACCOUNT_STREAM_RETRY_MS);
+  };
+}
+
+function stopAccountStream(clearRetry = true) {
+  if (clearRetry) clearAccountRetryTimer();
+  if (state.accountSource) {
+    state.accountSource.close();
+    state.accountSource = null;
+  }
+}
+
+// ══════════════════════════════════════════════
+// 시그널 배지
+// ══════════════════════════════════════════════
+function renderSignalBadge(signal, confidence) {
+  const cls   = SIG_CLASS[signal] || "";
+  const color = SIG_COLOR[signal] || C.dim;
+  const emoji = SIG_EMOJI[signal] || "●";
+  const view  = SIG_VIEW[signal] || signal || "중립";
+  const confValue = Number.isFinite(Number(confidence)) ? Number(confidence) : 0;
+  const badge = document.getElementById("sig-badge");
+  badge.className = "sig-badge " + cls;
+  badge.innerHTML = `
+    <div class="card-label">AI 관점</div>
+    <div class="card-value" style="color:${color};font-size:26px;letter-spacing:-.3px;">${emoji} ${view}</div>
+    <div class="card-sub" style="color:${color};">
+      확신도 ${confValue}%
+      <div class="conf-bar-bg">
+        <div class="conf-bar-fill" style="width:${confValue}%;background:${color};"></div>
+      </div>
+    </div>
+    <div class="card-sub" style="color:${state.analysisStale ? C.orange : C.dim};margin-top:4px;">
+      ${getAnalysisFreshnessCopy()}
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════
+// 지표 카드
+// ══════════════════════════════════════════════
+function setCard(id, value, sub, color) {
+  const el = document.getElementById(id);
+  el.querySelector(".card-value").textContent = value;
+  el.querySelector(".card-value").style.color = color;
+  el.querySelector(".card-sub").textContent   = sub;
+  el.querySelector(".card-sub").style.color   = color;
+}
+
+function renderHeaderSymbol() {
+  const baseEl = document.getElementById("header-base");
+  const quoteEl = document.getElementById("header-quote");
+  if (!baseEl || !quoteEl) return;
+
+  const pair = state.pairLabel || state.symbol || "BTC/USDC";
+  const parts = String(pair).split("/");
+  const base = parts[0] || "BTC";
+  const quote = parts[1] || "";
+  baseEl.textContent = `₿ ${base}`;
+  quoteEl.textContent = quote ? `/ ${quote}` : "";
+}
+
+function renderMetricCards(ind) {
+  if (!ind) return;
+  const rsi = ind.rsi ?? 50;
+  setCard("card-rsi",
+    rsi.toFixed(1),
+    rsi > 70 ? "과매수 ↑" : rsi < 30 ? "과매도 ↓" : "중립",
+    rsi > 70 ? C.bear : rsi < 30 ? C.bull : C.txt
+  );
+  const mh = ind.macd_hist ?? 0;
+  setCard("card-macd",
+    (mh >= 0 ? "+" : "") + Math.round(mh),
+    mh > 0 ? "상승 모멘텀" : "하락 모멘텀",
+    mh > 0 ? C.bull : C.bear
+  );
+  const bb = ind.bb_pct ?? 0.5;
+  setCard("card-bb",
+    bb.toFixed(2),
+    bb > 0.85 ? "상단 돌파" : bb < 0.15 ? "하단 근접" : "밴드 내",
+    bb > 0.85 ? C.bear : bb < 0.15 ? C.bull : C.txt
+  );
+  const vr = ind.vol_ratio ?? 100;
+  setCard("card-vol",
+    Math.round(vr) + "%",
+    vr > 150 ? "급증" : "보통",
+    vr > 150 ? C.orange : C.txt
+  );
+  const atr    = ind.atr ?? 0;
+  const atrPct = ind.atr_pct ?? 0;
+  setCard("card-atr",
+    "$" + Math.round(atr).toLocaleString(),
+    atrPct > 2.5 ? "고변동성" : atrPct > 1.5 ? "중변동성" : "저변동성",
+    atrPct > 2.5 ? C.bear : atrPct > 1.5 ? C.orange : C.txt
+  );
+}
+
+// ══════════════════════════════════════════════
+// 계좌 / 포지션
+// ══════════════════════════════════════════════
+function applyAccountData(data) {
+  if (!data) return;
+  state.account = data;
+  renderAccountPanel(data);
+  if (state.chartInstance || state.charts[state.currentTf]) {
+    renderCurrentChart();
+  }
+}
+
+async function fetchAccount() {
+  try {
+    const res = await fetch("/api/account");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    applyAccountData(data);
+  } catch (e) {
+    if (!state.account) {
+      renderAccountPanel({ error: "계좌 데이터를 불러오지 못했습니다." });
+    }
+  }
+}
+
+function getAccountStatusMeta(account) {
+  const risk = account?.risk_status;
+  if (risk === "target_hit") {
+    return {
+      cls: "target",
+      text: "일일 목표를 달성했습니다. 신규 진입보다는 수익 보호에 초점을 두세요.",
+    };
+  }
+  if (risk === "loss_limit_hit") {
+    return {
+      cls: "loss",
+      text: "일일 손실 한도에 닿았습니다. 추가 진입 전 리스크를 먼저 줄이는 편이 안전합니다.",
+    };
+  }
+  return {
+    cls: "active",
+    text: "현재 계좌 상태를 기준으로 포지션과 손익 현황을 함께 반영합니다.",
+  };
+}
+
+function renderAccountPanel(account) {
+  const el = document.getElementById("account-panel-body");
+  if (!el) return;
+
+  if (!account) {
+    el.innerHTML = '<div class="account-placeholder">계좌 데이터를 불러오는 중입니다.</div>';
+    return;
+  }
+
+  if (account.error) {
+    el.innerHTML = `<div class="account-placeholder">${escapeHtml(account.error)}</div>`;
+    return;
+  }
+
+  const balances = Array.isArray(account.balance_assets) ? account.balance_assets : [];
+  const positions = Array.isArray(account.open_positions) ? account.open_positions : [];
+  const status = getAccountStatusMeta(account);
+  const leverageDisplay = account.leverage_display || (
+    Number.isFinite(Number(account.effective_leverage))
+      ? `${formatValue(account.effective_leverage, 1)}x`
+      : "—"
+  );
+  const totalWallet = formatUsd(account.wallet_balance, 2);
+  const available = formatUsd(account.available_balance, 2);
+  const totalPnl = formatSignedUsd(account.today_total_pnl, 2);
+  const totalPnlColor = Number.isFinite(Number(account.today_total_pnl))
+    ? (Number(account.today_total_pnl) >= 0 ? C.bull : C.bear)
+    : C.muted;
+  const totalUpnl = formatSignedUsd(account.open_position_upnl, 2);
+  const totalUpnlColor = Number.isFinite(Number(account.open_position_upnl))
+    ? (Number(account.open_position_upnl) >= 0 ? C.bull : C.bear)
+    : C.muted;
+  const totalNotional = formatUsd(account.open_position_notional, 2);
+  const todayPct = Number.isFinite(Number(account.today_pnl_pct))
+    ? formatPercent(account.today_pnl_pct, 2)
+    : "—";
+  const remainingToTarget = Number.isFinite(Number(account.remaining_to_target_pct))
+    ? formatPercent(account.remaining_to_target_pct, 2)
+    : "—";
+  const errorMessages = [
+    account.balance_error ? `잔고 조회: ${account.balance_error}` : "",
+    account.position_error ? `포지션 조회: ${account.position_error}` : "",
+    account.pnl_error ? `손익 조회: ${account.pnl_error}` : "",
+  ].filter(Boolean);
+  const errorHtml = errorMessages.length
+    ? `<div class="account-error-note">${errorMessages.map(msg => escapeHtml(msg)).join("<br>")}</div>`
+    : "";
+  const balanceHtml = balances.length
+    ? `<div class="account-assets">${
+        balances.map(asset => `
+          <div class="account-asset-pill">
+            <div class="account-asset-label">${escapeHtml(asset.asset || "ASSET")}</div>
+            <div class="account-asset-value">${formatUsd(asset.wallet_balance, 2)}</div>
+          </div>
+        `).join("")
+      }</div>`
+    : "";
+
+  const positionsHtml = positions.length
+    ? `<div class="position-list">${
+        positions.slice(0, 6).map(pos => {
+          const sideCls = pos.side === "숏" ? "short" : "long";
+          const pnlColor = Number(pos.unrealized_pnl) >= 0 ? C.bull : C.bear;
+          const notionalText = Number.isFinite(Number(pos.notional))
+            ? formatUsd(pos.notional, 2)
+            : "—";
+          return `
+            <div class="position-item ${sideCls}">
+              <div class="position-head">
+                <div class="position-title">
+                  <span class="position-symbol">${escapeHtml(pos.symbol || "N/A")}</span>
+                  <span class="position-side ${sideCls}">${escapeHtml(pos.side || "포지션")}</span>
+                  <span class="position-badge">${escapeHtml(pos.margin_asset || "담보 N/A")}</span>
+                </div>
+                <div class="position-pnl" style="color:${pnlColor};">${formatSignedUsd(pos.unrealized_pnl, 2)}</div>
+              </div>
+              <div class="position-grid">
+                <div class="position-line">
+                  <span class="position-line-label">진입가</span>
+                  <span class="position-line-value">${formatUsd(pos.entry_price, 2)}</span>
+                </div>
+                <div class="position-line">
+                  <span class="position-line-label">현재가</span>
+                  <span class="position-line-value">${formatUsd(pos.mark_price, 2)}</span>
+                </div>
+                <div class="position-line">
+                  <span class="position-line-label">명목</span>
+                  <span class="position-line-value">${notionalText}</span>
+                </div>
+                <div class="position-line">
+                  <span class="position-line-label">수익률</span>
+                  <span class="position-line-value" style="color:${pnlColor};">${formatPercent(pos.unrealized_pnl_pct, 2)}</span>
+                </div>
+                <div class="position-line">
+                  <span class="position-line-label">레버리지</span>
+                  <span class="position-line-value">${formatValue(pos.leverage, 0)}x</span>
+                </div>
+                <div class="position-line">
+                  <span class="position-line-label">청산가</span>
+                  <span class="position-line-value">${formatUsd(pos.liquidation_price, 2)}</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("")
+      }</div>`
+    : `<div class="position-empty">현재 오픈 포지션이 없습니다.</div>`;
+
+  const extraCount = Math.max(0, positions.length - 6);
+  const extraNote = extraCount > 0
+    ? `<div class="account-meta" style="margin-top:10px;margin-bottom:0;"><span>나머지 포지션</span><span>+${extraCount}개</span></div>`
+    : "";
+
+  el.innerHTML = `
+    <div class="account-meta">
+      <span>업데이트 ${escapeHtml(account.updated_at || "—")}</span>
+      <span>레버리지 상태 ${escapeHtml(leverageDisplay)}</span>
+    </div>
+    <div class="account-status-banner ${status.cls}">${escapeHtml(status.text)}</div>
+    ${errorHtml}
+    ${balanceHtml}
+    <div class="account-summary-grid">
+      <div class="account-summary-card">
+        <div class="account-summary-label">총 담보 잔고</div>
+        <div class="account-summary-value">${totalWallet}</div>
+        <div class="account-summary-sub">사용 가능 ${available}</div>
+      </div>
+      <div class="account-summary-card">
+        <div class="account-summary-label">오늘 손익</div>
+        <div class="account-summary-value" style="color:${totalPnlColor};">${totalPnl}</div>
+        <div class="account-summary-sub">${todayPct} / 목표까지 ${remainingToTarget}</div>
+      </div>
+      <div class="account-summary-card">
+        <div class="account-summary-label">오픈 포지션</div>
+        <div class="account-summary-value">${Number.isFinite(Number(account.open_position_count)) ? `${formatValue(account.open_position_count, 0)}개` : "—"}</div>
+        <div class="account-summary-sub">총 명목 ${totalNotional}</div>
+      </div>
+      <div class="account-summary-card">
+        <div class="account-summary-label">총 미실현</div>
+        <div class="account-summary-value" style="color:${totalUpnlColor};">${totalUpnl}</div>
+        <div class="account-summary-sub">거래 기록 ${Number.isFinite(Number(account.today_trade_count)) ? `${formatValue(account.today_trade_count, 0)}건` : "—"}</div>
+      </div>
+    </div>
+    ${positionsHtml}
+    ${extraNote}
+  `;
+}
+
+function isBtcPositionSymbol(symbol) {
+  return String(symbol || "").toUpperCase().startsWith("BTC");
+}
+
+function getRelevantChartPositions() {
+  const positions = state.account?.open_positions;
+  if (!Array.isArray(positions)) return [];
+  return [...positions]
+    .filter(pos => isBtcPositionSymbol(pos.symbol) && Number.isFinite(Number(pos.entry_price)))
+    .sort((a, b) => Number(b.notional || 0) - Number(a.notional || 0));
+}
+
+function applyLiveBtcPositionMarks(price) {
+  if (!Number.isFinite(Number(price))) return;
+  if (!state.account || !Array.isArray(state.account.open_positions)) return;
+
+  let changed = false;
+  const nextPositions = state.account.open_positions.map(pos => {
+    if (!isBtcPositionSymbol(pos.symbol)) return pos;
+
+    const entry = Number(pos.entry_price);
+    const size = Number(pos.size);
+    const lev = Number(pos.leverage);
+    const notional = Number(pos.notional);
+    if (!Number.isFinite(entry) || !Number.isFinite(size) || !Number.isFinite(lev) || !Number.isFinite(notional)) {
+      return pos;
+    }
+
+    const livePrice = Number(price);
+    const upnl = pos.side === "숏"
+      ? (entry - livePrice) * size
+      : (livePrice - entry) * size;
+    const margin = lev > 0 ? notional / lev : 0;
+    const pnlPct = margin > 0 ? (upnl / margin) * 100 : 0;
+
+    if (
+      Number(pos.mark_price) === livePrice &&
+      Math.abs(Number(pos.unrealized_pnl) - upnl) < 1e-6 &&
+      Math.abs(Number(pos.unrealized_pnl_pct) - pnlPct) < 1e-6
+    ) {
+      return pos;
+    }
+
+    changed = true;
+    return {
+      ...pos,
+      mark_price: livePrice,
+      unrealized_pnl: upnl,
+      unrealized_pnl_pct: pnlPct,
+    };
+  });
+
+  if (!changed) return;
+
+  const totalUpnl = nextPositions.reduce(
+    (sum, pos) => sum + (Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl) : 0),
+    0,
+  );
+  state.account = {
+    ...state.account,
+    open_positions: nextPositions,
+    open_position_upnl: totalUpnl,
+  };
+  renderAccountPanel(state.account);
+}
+
+// ══════════════════════════════════════════════
+// 차트
+// ══════════════════════════════════════════════
+function compactNumber(value, digits = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: digits,
+  }).format(num);
+}
+
+function formatUsd(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return "$" + num.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatValue(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return num.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatSignedUsd(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const sign = num >= 0 ? "+" : "-";
+  return `${sign}$${Math.abs(num).toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`;
+}
+
+function formatPercent(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return `${num >= 0 ? "+" : ""}${num.toFixed(digits)}%`;
+}
+
+function formatTimeLabel(label) {
+  if (!label) return "";
+  if (label.endsWith("00:00")) return label.slice(5, 10);
+  return `${label.slice(5, 10)}\n${label.slice(11, 16)}`;
+}
+
+function buildConstantLineData(length, value) {
+  return Array.from({ length }, () => value);
+}
+
+function makeLineSeries(name, data, xAxisIndex, yAxisIndex, lineStyle, extra = {}) {
+  return Object.assign({
+    name,
+    type: "line",
+    data,
+    xAxisIndex,
+    yAxisIndex,
+    showSymbol: false,
+    symbol: "none",
+    smooth: false,
+    connectNulls: false,
+    animation: false,
+    lineStyle,
+  }, extra);
+}
+
+function getZoomStart(totalBars, visibleBars = 72) {
+  if (!Number.isFinite(totalBars) || totalBars <= visibleBars) return 0;
+  return Math.max(0, Math.round(((totalBars - visibleBars) / totalBars) * 100));
+}
+
+function clampPercent(value, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(100, Math.max(0, value));
+}
+
+function saveChartViewport(chart, tf) {
+  if (!chart || !tf) return;
+  const zoom = chart.getOption?.()?.dataZoom?.[0];
+  if (!zoom) return;
+
+  state.chartViewport[tf] = {
+    start: clampPercent(Number(zoom.start), 0),
+    end: clampPercent(Number(zoom.end), 100),
+  };
+}
+
+function getChartViewport(tf, totalBars) {
+  const saved = state.chartViewport[tf];
+  if (saved && Number.isFinite(saved.start) && Number.isFinite(saved.end)) {
+    const start = clampPercent(saved.start, 0);
+    const end = clampPercent(saved.end, 100);
+    return start <= end ? { start, end } : { start: end, end: start };
+  }
+
+  return {
+    start: getZoomStart(totalBars, 72),
+    end: 100,
+  };
+}
+
+function getLastCandle(chart) {
+  return chart?.candles?.length ? chart.candles[chart.candles.length - 1] : [];
+}
+
+function getPrevClose(chart, idx) {
+  if (!chart?.candles || idx <= 0) return null;
+  return chart.candles[idx - 1]?.[1] ?? null;
+}
+
+function selectKeyFibLevels(fibLines, referencePrice, maxCount = 3) {
+  if (!Array.isArray(fibLines) || !Number.isFinite(referencePrice)) return [];
+  return [...fibLines]
+    .sort((a, b) => Math.abs(a.price - referencePrice) - Math.abs(b.price - referencePrice))
+    .slice(0, maxCount)
+    .sort((a, b) => b.price - a.price);
+}
+
+function getVisibleIndexBounds(totalBars, viewport) {
+  if (!Number.isFinite(totalBars) || totalBars <= 0) return { startIdx: 0, endIdx: 0 };
+  const fallbackEnd = Math.max(0, totalBars - 1);
+  if (!viewport) return { startIdx: 0, endIdx: fallbackEnd };
+
+  const start = clampPercent(Number(viewport.start), 0);
+  const end = clampPercent(Number(viewport.end), 100);
+  const minPct = Math.min(start, end);
+  const maxPct = Math.max(start, end);
+  const startIdx = Math.min(fallbackEnd, Math.max(0, Math.floor((minPct / 100) * totalBars)));
+  const endIdx = Math.min(fallbackEnd, Math.max(0, Math.ceil((maxPct / 100) * totalBars) - 1));
+  return {
+    startIdx,
+    endIdx: Math.max(startIdx, endIdx),
+  };
+}
+
+function getVisiblePriceRange(chart, viewport) {
+  const candles = chart?.candles || [];
+  if (!candles.length) return { low: null, high: null, range: null };
+
+  const { startIdx, endIdx } = getVisibleIndexBounds(candles.length, viewport);
+  let low = Number.POSITIVE_INFINITY;
+  let high = Number.NEGATIVE_INFINITY;
+
+  for (let idx = startIdx; idx <= endIdx; idx += 1) {
+    const candle = candles[idx] || [];
+    const candleLow = Number(candle?.[2]);
+    const candleHigh = Number(candle?.[3]);
+    if (Number.isFinite(candleLow)) low = Math.min(low, candleLow);
+    if (Number.isFinite(candleHigh)) high = Math.max(high, candleHigh);
+  }
+
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) {
+    return { low: null, high: null, range: null };
+  }
+
+  return { low, high, range: high - low };
+}
+
+function filterCrowdedFibLevels(levels, referencePrice, minGap, maxCount = 3) {
+  if (!Array.isArray(levels) || !levels.length) return [];
+  if (!Number.isFinite(referencePrice)) return [];
+  if (!Number.isFinite(minGap) || minGap <= 0) {
+    return selectKeyFibLevels(levels, referencePrice, maxCount);
+  }
+
+  const selected = [];
+  const occupied = [referencePrice];
+
+  [...levels]
+    .sort((a, b) => Math.abs(a.price - referencePrice) - Math.abs(b.price - referencePrice))
+    .forEach(level => {
+      if (selected.length >= maxCount) return;
+      if (!Number.isFinite(level?.price)) return;
+
+      const tooClose = occupied.some(price => Math.abs(level.price - price) < minGap);
+      if (!tooClose) {
+        selected.push(level);
+        occupied.push(level.price);
+      }
+    });
+
+  if (!selected.length) {
+    const fallback = [...levels]
+      .sort((a, b) => Math.abs(a.price - referencePrice) - Math.abs(b.price - referencePrice))
+      .slice(0, 1);
+    return fallback.sort((a, b) => b.price - a.price);
+  }
+
+  return selected.sort((a, b) => b.price - a.price);
+}
+
+function buildPositionGuides(referencePrice, minGap, occupied = []) {
+  if (!Number.isFinite(referencePrice)) return [];
+  const positions = getRelevantChartPositions();
+  if (!positions.length) return [];
+
+  const selected = [];
+  positions.forEach(pos => {
+    if (selected.length >= 3) return;
+
+    const entry = Number(pos.entry_price);
+    if (!Number.isFinite(entry)) return;
+
+    const tooClose = occupied.some(price => Math.abs(entry - price) < minGap);
+    if (tooClose) return;
+
+    const isShort = pos.side === "숏";
+    const color = isShort ? C.bear : C.bull;
+    selected.push({
+      name: `${isShort ? "SHORT" : "LONG"} ${pos.symbol} ${formatUsd(entry, 0)}`,
+      yAxis: entry,
+      lineStyle: { color, width: 1.2, type: "dotted", opacity: 0.9 },
+      label: {
+        show: true,
+        color: "#FFFFFF",
+        backgroundColor: color,
+        borderRadius: 4,
+        padding: [3, 6],
+      },
+    });
+    occupied.push(entry);
+  });
+
+  if (!selected.length) {
+    const fallback = positions[0];
+    const entry = Number(fallback?.entry_price);
+    if (Number.isFinite(entry)) {
+      const isShort = fallback.side === "숏";
+      const color = isShort ? C.bear : C.bull;
+      return [{
+        name: `${isShort ? "SHORT" : "LONG"} ${fallback.symbol} ${formatUsd(entry, 0)}`,
+        yAxis: entry,
+        lineStyle: { color, width: 1.2, type: "dotted", opacity: 0.9 },
+        label: {
+          show: true,
+          color: "#FFFFFF",
+          backgroundColor: color,
+          borderRadius: 4,
+          padding: [3, 6],
+        },
+      }];
+    }
+  }
+
+  return selected;
+}
+
+function buildPriceGuides(chart, viewport) {
+  const candles = chart?.candles || [];
+  const lastCandle = getLastCandle(chart);
+  const lastClose = Number(lastCandle?.[1]);
+  if (!Number.isFinite(lastClose)) return [];
+
+  const prevClose = Number(candles.length > 1 ? candles[candles.length - 2]?.[1] : NaN);
+  const changePct = Number.isFinite(prevClose) && prevClose !== 0
+    ? ((lastClose - prevClose) / prevClose) * 100
+    : null;
+  const priceColor = changePct !== null && changePct < 0 ? C.bear : C.bull;
+  const visibleRange = getVisiblePriceRange(chart, viewport);
+  const minGuideGap = Number.isFinite(visibleRange.range)
+    ? Math.max(visibleRange.range * 0.075, Math.abs(lastClose) * 0.00035, 1)
+    : Math.max(Math.abs(lastClose) * 0.00035, 1);
+
+  const guides = [
+    {
+      name: `NOW ${formatUsd(lastClose, 0)} ${changePct === null ? "" : formatPercent(changePct, 2)}`,
+      yAxis: lastClose,
+      lineStyle: { color: priceColor, width: 1.2, type: "solid", opacity: 0.9 },
+      label: {
+        show: true,
+        color: "#FFFFFF",
+        backgroundColor: priceColor,
+        borderRadius: 4,
+        padding: [3, 6],
+      },
+    },
+  ];
+  const occupied = [lastClose];
+
+  filterCrowdedFibLevels(chart.fib_lines, lastClose, minGuideGap, 3).forEach(level => {
+    guides.push({
+      name: `Fib ${level.ratio} ${formatUsd(level.price, 0)}`,
+      yAxis: level.price,
+      lineStyle: { color: level.color, width: 1, type: "dashed", opacity: 0.7 },
+      label: {
+        show: true,
+        color: level.color,
+        backgroundColor: "rgba(255,255,255,0.92)",
+        borderColor: `${level.color}66`,
+        borderWidth: 1,
+        borderRadius: 4,
+        padding: [2, 5],
+      },
+    });
+    occupied.push(level.price);
+  });
+
+  guides.push(...buildPositionGuides(lastClose, minGuideGap, occupied));
+  return guides;
+}
+
+function buildChartStats(chart) {
+  const candles = chart?.candles || [];
+  const lastCandle = getLastCandle(chart);
+  const lastClose = Number(lastCandle?.[1]);
+  const prevClose = Number(candles.length > 1 ? candles[candles.length - 2]?.[1] : NaN);
+  const dayHigh = Number(lastCandle?.[3]);
+  const dayLow = Number(lastCandle?.[2]);
+  const volumes = chart?.volume || [];
+  const volume = Number(volumes.length ? volumes[volumes.length - 1] : NaN);
+  const change = Number.isFinite(lastClose) && Number.isFinite(prevClose) ? lastClose - prevClose : null;
+  const changePct = change !== null && prevClose !== 0 ? (change / prevClose) * 100 : null;
+
+  return {
+    lastClose,
+    change,
+    changePct,
+    high: dayHigh,
+    low: dayLow,
+    volume,
+    priceColor: change !== null && change < 0 ? C.bear : C.bull,
+  };
+}
+
+function buildTooltipHtml(chart, params) {
+  if (!params || !params.length) return "";
+  const idx = params[0].dataIndex ?? 0;
+  const candle = chart.candles?.[idx] || [];
+  const [openV, closeV, lowV, highV] = candle;
+  const prevClose = getPrevClose(chart, idx);
+  const isBull = Number.isFinite(openV) && Number.isFinite(closeV) && closeV >= openV;
+  const candleColor = isBull ? C.bull : C.bear;
+  const change = Number.isFinite(closeV) && Number.isFinite(prevClose) ? closeV - prevClose : null;
+  const changePct = change !== null && prevClose !== 0 ? (change / prevClose) * 100 : null;
+  const rangePct = Number.isFinite(highV) && Number.isFinite(lowV) && lowV !== 0
+    ? ((highV - lowV) / lowV) * 100
+    : null;
+
+  return [
+    `<div style="font-weight:700;margin-bottom:8px;color:${C.txt};">${chart.labels?.[idx] || ""}</div>`,
+    `<div style="color:${candleColor};font-weight:600;margin-bottom:6px;">O ${formatUsd(openV)}  H ${formatUsd(highV)}  L ${formatUsd(lowV)}  C ${formatUsd(closeV)}</div>`,
+    `<div style="color:${change !== null && change < 0 ? C.bear : C.bull};margin-bottom:4px;">Change ${change === null ? "—" : formatSignedUsd(change)} ${changePct === null ? "" : `(${formatPercent(changePct, 2)})`}</div>`,
+    `<div style="color:${C.dim};">Range ${rangePct === null ? "—" : formatPercent(rangePct, 2)}</div>`,
+    `<div style="color:${C.dim};">RSI ${formatValue(chart.rsi?.[idx], 1)}</div>`,
+    `<div style="color:${C.dim};">MACD ${formatValue(chart.macd?.[idx], 2)} / Signal ${formatValue(chart.macd_signal?.[idx], 2)} / Hist ${formatValue(chart.macd_hist?.[idx], 2)}</div>`,
+    `<div style="color:${C.dim};">Volume ${compactNumber(chart.volume?.[idx], 2)} / MA ${compactNumber(chart.volume_ma?.[idx], 2)}</div>`,
+  ].join("");
+}
+
+function buildChartOption(chart, tf, viewport) {
+  const len = chart.labels.length;
+  const zoom = getChartViewport(tf, len);
+  const zoomStart = viewport?.start ?? zoom.start;
+  const zoomEnd = viewport?.end ?? zoom.end;
+  const stats = buildChartStats(chart);
+  const paneLabelTop = {
+    rsi: "60.5%",
+    macd: "74.5%",
+    volume: "88.5%",
+  };
+
+  return {
+    animation: false,
+    backgroundColor: "#FDFBF8",
+    textStyle: {
+      fontFamily: "Inter, -apple-system, sans-serif",
+    },
+    grid: [
+      { left: 54, right: 92, top: 64, height: "43%" },
+      { left: 54, right: 92, top: "60%", height: "10%" },
+      { left: 54, right: 92, top: "74%", height: "10%" },
+      { left: 54, right: 92, top: "88%", height: "5%" },
+    ],
+    axisPointer: {
+      link: [{ xAxisIndex: "all" }],
+      label: { show: false, backgroundColor: C.orange },
+      lineStyle: { color: "#C2410C", width: 1, opacity: 0.45 },
+    },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: {
+        type: "line",
+        snap: true,
+        label: { show: false },
+      },
+      backgroundColor: "#FFFFFF",
+      borderColor: "#E8DDD4",
+      borderWidth: 1,
+      textStyle: { color: C.txt, fontSize: 12 },
+      padding: 12,
+      extraCssText: "box-shadow:0 12px 32px rgba(28,25,23,.12);border-radius:12px;",
+      transitionDuration: 0,
+      formatter: params => buildTooltipHtml(chart, params),
+    },
+    dataZoom: [
+      {
+        type: "inside",
+        xAxisIndex: [0, 1, 2, 3],
+        filterMode: "filter",
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+        moveOnMouseWheel: true,
+        start: zoomStart,
+        end: zoomEnd,
+      },
+      {
+        type: "slider",
+        xAxisIndex: [0, 1, 2, 3],
+        height: 18,
+        bottom: 10,
+        start: zoomStart,
+        end: zoomEnd,
+        borderColor: "#E8DDD4",
+        backgroundColor: "#F5F0EB",
+        fillerColor: "rgba(234,88,12,.12)",
+        handleStyle: { color: C.orange, borderColor: "#C2410C" },
+        moveHandleStyle: { color: "#F5F0EB" },
+        textStyle: { color: C.muted },
+        brushSelect: false,
+      },
+    ],
+    xAxis: [
+      {
+        type: "category",
+        gridIndex: 0,
+        data: chart.labels,
+        boundaryGap: true,
+        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false },
+        min: "dataMin",
+        max: "dataMax",
+      },
+      {
+        type: "category",
+        gridIndex: 1,
+        data: chart.labels,
+        boundaryGap: true,
+        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false },
+        min: "dataMin",
+        max: "dataMax",
+      },
+      {
+        type: "category",
+        gridIndex: 2,
+        data: chart.labels,
+        boundaryGap: true,
+        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false },
+        min: "dataMin",
+        max: "dataMax",
+      },
+      {
+        type: "category",
+        gridIndex: 3,
+        data: chart.labels,
+        boundaryGap: true,
+        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisTick: { show: false },
+        axisLabel: {
+          color: C.muted,
+          fontSize: 11,
+          hideOverlap: true,
+          interval: Math.max(0, Math.floor(len / 8)),
+          formatter: value => formatTimeLabel(value),
+        },
+        splitLine: { show: false },
+        min: "dataMin",
+        max: "dataMax",
+      },
+    ],
+    yAxis: [
+      {
+        scale: true,
+        gridIndex: 0,
+        position: "right",
+        splitNumber: 4,
+        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLabel: {
+          color: "#57534E",
+          formatter: value => "$" + compactNumber(value, 1),
+        },
+        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+      },
+      {
+        min: 0,
+        max: 100,
+        gridIndex: 1,
+        position: "right",
+        splitNumber: 3,
+        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLabel: {
+          color: "#57534E",
+          formatter: value => (value === 30 || value === 50 || value === 70 ? value : ""),
+        },
+        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+      },
+      {
+        scale: true,
+        gridIndex: 2,
+        position: "right",
+        splitNumber: 3,
+        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLabel: {
+          color: "#57534E",
+          formatter: value => compactNumber(value, 2),
+        },
+        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+      },
+      {
+        scale: true,
+        gridIndex: 3,
+        position: "right",
+        splitNumber: 2,
+        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLabel: {
+          color: "#57534E",
+          formatter: value => compactNumber(value, 1),
+        },
+        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+      },
+    ],
+    graphic: [
+      {
+        type: "group",
+        left: 16,
+        top: 14,
+        children: [
+          {
+            type: "text",
+            left: 0,
+            top: 0,
+            style: {
+              text: `${tf.toUpperCase()} MARKET VIEW`,
+              fill: C.muted,
+              font: "700 11px Inter, sans-serif",
+            },
+          },
+          {
+            type: "text",
+            left: 0,
+            top: 16,
+            style: {
+              text: formatUsd(stats.lastClose),
+              fill: stats.priceColor,
+              font: "800 18px Inter, sans-serif",
+            },
+          },
+          {
+            type: "text",
+            left: 112,
+            top: 19,
+            style: {
+              text: stats.changePct === null ? "—" : formatPercent(stats.changePct, 2),
+              fill: stats.priceColor,
+              font: "700 12px Inter, sans-serif",
+            },
+          },
+        ],
+      },
+      {
+        type: "text",
+        right: 18,
+        top: 16,
+        style: {
+          text: `High ${formatUsd(stats.high, 0)}   Low ${formatUsd(stats.low, 0)}   Vol ${compactNumber(stats.volume, 2)}`,
+          fill: C.dim,
+          font: "600 11px Inter, sans-serif",
+          textAlign: "right",
+        },
+      },
+      {
+        type: "text",
+        right: 18,
+        top: 34,
+        style: {
+          text: "Scroll to zoom, drag to pan",
+          fill: C.muted,
+          font: "500 10px Inter, sans-serif",
+          textAlign: "right",
+        },
+      },
+      {
+        type: "text",
+        left: 16,
+        top: paneLabelTop.rsi,
+        style: {
+          text: "RSI",
+          fill: C.muted,
+          font: "700 11px Inter, sans-serif",
+        },
+      },
+      {
+        type: "text",
+        left: 16,
+        top: paneLabelTop.macd,
+        style: {
+          text: "MACD",
+          fill: C.muted,
+          font: "700 11px Inter, sans-serif",
+        },
+      },
+      {
+        type: "text",
+        left: 16,
+        top: paneLabelTop.volume,
+        style: {
+          text: "Volume",
+          fill: C.muted,
+          font: "700 11px Inter, sans-serif",
+        },
+      },
+    ],
+    series: [
+      {
+        name: "Price",
+        type: "candlestick",
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: chart.candles,
+        itemStyle: {
+          color: C.bull,
+          color0: C.bear,
+          borderColor: C.bull,
+          borderColor0: C.bear,
+        },
+        markLine: {
+          symbol: ["none", "none"],
+          silent: true,
+          animation: false,
+          precision: 2,
+          lineStyle: { width: 1 },
+          label: {
+            show: true,
+            position: "insideEndTop",
+            distance: 10,
+            formatter: params => params?.data?.name || "",
+          },
+          data: buildPriceGuides(chart, viewport),
+        },
+        z: 3,
+      },
+      makeLineSeries("BB Upper", chart.bb_upper, 0, 0, {
+        color: C.amber,
+        width: 1,
+        type: "dashed",
+        opacity: 0.35,
+      }),
+      makeLineSeries("BB Lower", chart.bb_lower, 0, 0, {
+        color: C.amber,
+        width: 1,
+        type: "dashed",
+        opacity: 0.35,
+      }),
+      makeLineSeries("SMA50", chart.sma_50, 0, 0, {
+        color: "#7C3AED",
+        width: 1.5,
+        opacity: 0.78,
+      }),
+      makeLineSeries("SMA200", chart.sma_200, 0, 0, {
+        color: C.sky,
+        width: 1.8,
+        opacity: 0.8,
+      }),
+      makeLineSeries("EMA9", chart.ema_9, 0, 0, {
+        color: C.amber,
+        width: 1.15,
+        opacity: 0.85,
+      }),
+      makeLineSeries("RSI 70", buildConstantLineData(len, 70), 1, 1, {
+        color: C.bear,
+        width: 1,
+        type: "dashed",
+        opacity: 0.5,
+      }, {
+        silent: true,
+        tooltip: { show: false },
+      }),
+      makeLineSeries("RSI 50", buildConstantLineData(len, 50), 1, 1, {
+        color: C.dim,
+        width: 1,
+        type: "dotted",
+        opacity: 0.45,
+      }, {
+        silent: true,
+        tooltip: { show: false },
+      }),
+      makeLineSeries("RSI 30", buildConstantLineData(len, 30), 1, 1, {
+        color: C.bull,
+        width: 1,
+        type: "dashed",
+        opacity: 0.5,
+      }, {
+        silent: true,
+        tooltip: { show: false },
+      }),
+      makeLineSeries("RSI", chart.rsi, 1, 1, {
+        color: "#7C3AED",
+        width: 1.8,
+      }, {
+        areaStyle: { color: "rgba(124,58,237,0.05)" },
+        markArea: {
+          silent: true,
+          label: { show: false },
+          data: [
+            [{ yAxis: 70, itemStyle: { color: "rgba(220,38,38,.06)" } }, { yAxis: 100 }],
+            [{ yAxis: 0, itemStyle: { color: "rgba(22,163,74,.06)" } }, { yAxis: 30 }],
+          ],
+        },
+      }),
+      {
+        name: "Histogram",
+        type: "bar",
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        animation: false,
+        barMaxWidth: 12,
+        data: (chart.macd_hist || []).map((value, idx) => ({
+          value,
+          itemStyle: { color: chart.macd_hist_colors?.[idx] || C.dim },
+        })),
+      },
+      makeLineSeries("MACD", chart.macd, 2, 2, {
+        color: "#0D9488",
+        width: 1.5,
+      }),
+      makeLineSeries("Signal", chart.macd_signal, 2, 2, {
+        color: C.orange,
+        width: 1.5,
+      }),
+      makeLineSeries("Zero", buildConstantLineData(len, 0), 2, 2, {
+        color: C.dim,
+        width: 1,
+        opacity: 0.4,
+      }, {
+        silent: true,
+        tooltip: { show: false },
+      }),
+      {
+        name: "Volume",
+        type: "bar",
+        xAxisIndex: 3,
+        yAxisIndex: 3,
+        animation: false,
+        barMaxWidth: 12,
+        data: (chart.volume || []).map((value, idx) => ({
+          value,
+          itemStyle: { color: chart.volume_colors?.[idx] || C.dim },
+        })),
+      },
+      makeLineSeries("Vol MA", chart.volume_ma, 3, 3, {
+        color: C.amber,
+        width: 1.4,
+      }),
+    ],
+  };
+}
+
+function switchTab(tf) {
+  if (state.chartInstance && state.renderedTf) {
+    saveChartViewport(state.chartInstance, state.renderedTf);
+  }
+  state.currentTf = tf;
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.tf === tf);
+  });
+  renderCurrentChart();
+  renderFib(getActiveFib(), state.price, state.currentTf);
+}
+
+function renderCurrentChart() {
+  const tf  = state.currentTf;
+  const chartData = state.charts[tf];
+  const el  = document.getElementById("chart-plot");
+
+  if (!chartData || !chartData.labels || chartData.labels.length === 0) {
+    const stale = echarts.getInstanceByDom(el);
+    if (stale) stale.dispose();
+    state.chartInstance = null;
+    state.renderedTf = null;
+    el.innerHTML = '<div class="chart-placeholder">해당 타임프레임 데이터가 없습니다.</div>';
+    return;
+  }
+
+  let chart = echarts.getInstanceByDom(el);
+  if (chart && state.renderedTf) {
+    saveChartViewport(chart, state.renderedTf);
+  }
+  if (!chart) {
+    el.innerHTML = "";
+    chart = echarts.init(el, null, { renderer: "canvas", useDirtyRect: true });
+  }
+  if (!chart.__viewportSyncBound) {
+    chart.on("datazoom", () => {
+      saveChartViewport(chart, state.renderedTf || state.currentTf);
+    });
+    chart.__viewportSyncBound = true;
+  }
+
+  state.chartInstance = chart;
+  state.renderedTf = tf;
+  chart.setOption(buildChartOption(chartData, tf, state.chartViewport[tf]), {
+    notMerge: true,
+    lazyUpdate: true,
+  });
+  chart.resize();
+}
+
+// ══════════════════════════════════════════════
+// 리포트
+// ══════════════════════════════════════════════
+function renderReport(text, sections = {}, missingSections = []) {
+  const box = document.getElementById("report-box");
+  if (!text) { box.innerHTML = '<div class="report-placeholder">분석 시작 버튼을 눌러주세요.</div>'; return; }
+
+  const hasStructured =
+    sections &&
+    (
+      sections.regime ||
+      (Array.isArray(sections.facts) && sections.facts.length) ||
+      (Array.isArray(sections.interpretation) && sections.interpretation.length) ||
+      (Array.isArray(sections.counter_scenario) && sections.counter_scenario.length) ||
+      (Array.isArray(sections.response) && sections.response.length) ||
+      sections.invalidation ||
+      sections.summary
+    );
+
+  if (!hasStructured) {
+    box.innerHTML = `<div class="report-raw">${escapeHtml(text)}</div>`;
+    return;
+  }
+
+  const warningHtml = Array.isArray(missingSections) && missingSections.length
+    ? `<div class="report-warning">형식이 일부 비어 있습니다: ${escapeHtml(missingSections.join(", "))}</div>`
+    : "";
+
+  const chips = [
+    sections.view ? `<span class="report-chip">${escapeHtml(sections.view)}</span>` : "",
+    sections.regime ? `<span class="report-chip">${escapeHtml(sections.regime)}</span>` : "",
+  ].filter(Boolean).join("");
+
+  const renderItems = (items) => {
+    if (!Array.isArray(items) || !items.length) return "";
+    return `<div class="report-list">${
+      items.map(item => (
+        `<div class="report-item"><span class="report-bullet">•</span><span>${escapeHtml(item)}</span></div>`
+      )).join("")
+    }</div>`;
+  };
+
+  const sectionHtml = [
+    ["먼저 보이는 사실", renderItems(sections.facts)],
+    ["해석", renderItems(sections.interpretation)],
+    ["반대 시나리오", renderItems(sections.counter_scenario)],
+    ["대응", renderItems(sections.response)],
+    ["관점이 약해지는 조건", sections.invalidation ? `<div class="report-line">${escapeHtml(sections.invalidation)}</div>` : ""],
+  ].filter(([, content]) => content).map(([title, content]) => `
+    <div class="report-section">
+      <div class="report-section-title">${escapeHtml(title)}</div>
+      ${content}
+    </div>
+  `).join("");
+
+  const summaryHtml = sections.summary
+    ? `<div class="report-summary">${escapeHtml(sections.summary)}</div>`
+    : "";
+
+  box.innerHTML = `
+    ${warningHtml}
+    ${chips ? `<div class="report-meta">${chips}</div>` : ""}
+    ${sectionHtml}
+    ${summaryHtml}
+  `;
+}
+
+// ══════════════════════════════════════════════
+// 관심 레벨
+// ══════════════════════════════════════════════
+function renderLevels(signal, lvl) {
+  const card = document.getElementById("levels-card");
+  const keys = ["resistance", "support", "bull_trigger", "bear_trigger"];
+  if (!lvl || !keys.some(key => lvl[key] !== null && lvl[key] !== undefined)) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "block";
+  const sigColor = SIG_COLOR[signal] || C.dim;
+  const fmt = (v, f, c) => {
+    if (v === null || v === undefined) return `<div class="level-value" style="color:${C.muted};">N/A</div>`;
+    return `<div class="level-value" style="color:${c};">${f(v)}</div>`;
+  };
+  document.getElementById("levels-grid").innerHTML = `
+    <div class="level-card">
+      <div class="level-label">1차 저항</div>
+      ${fmt(lvl.resistance, v => "$" + Math.round(v).toLocaleString(), C.orange)}
+    </div>
+    <div class="level-card">
+      <div class="level-label">1차 지지</div>
+      ${fmt(lvl.support, v => "$" + Math.round(v).toLocaleString(), C.bull)}
+    </div>
+    <div class="level-card">
+      <div class="level-label">상방 돌파</div>
+      ${fmt(lvl.bull_trigger, v => "$" + Math.round(v).toLocaleString(), sigColor)}
+    </div>
+    <div class="level-card">
+      <div class="level-label">하방 이탈</div>
+      ${fmt(lvl.bear_trigger, v => "$" + Math.round(v).toLocaleString(), C.bear)}
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════
+// 피보나치
+// ══════════════════════════════════════════════
+function getActiveFib() {
+  return state.fibs[state.currentTf] ?? null;
+}
+
+function renderFib(fib, price, tf = state.currentTf) {
+  const el = document.getElementById("fib-content");
+  const meta = document.getElementById("fib-meta");
+  if (meta) {
+    meta.textContent = `(${tf} swing 기준)`;
+  }
+
+  if (!fib) {
+    el.innerHTML = `<div style="color:#A8978A;padding:16px 0;">${tf} 기준 유효한 스윙 포인트를 찾지 못했습니다.</div>`;
+    return;
+  }
+
+  const dirColor = fib.direction === "up" ? C.bull : C.bear;
+  const swingSummary = fib.direction === "up"
+    ? `저점 ${formatUsd(fib.swing_low, 0)} (${fib.swing_low_ago}봉 전) → 고점 ${formatUsd(fib.swing_high, 0)} (${fib.swing_high_ago}봉 전)`
+    : `고점 ${formatUsd(fib.swing_high, 0)} (${fib.swing_high_ago}봉 전) → 저점 ${formatUsd(fib.swing_low, 0)} (${fib.swing_low_ago}봉 전)`;
+  const anchorEntries = Object.entries(fib.anchors || {});
+  const anchorHtml = anchorEntries.length
+    ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        ${anchorEntries.map(([ratio, anchorPrice]) => `
+          <div style="flex:1 1 150px;background:#FAF8F5;border:1px solid #E8DDD4;border-radius:10px;padding:8px 10px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${C.muted};">Anchor ${ratio}</div>
+            <div style="margin-top:4px;color:${C.txt};font-weight:700;">${formatUsd(anchorPrice, 2)}</div>
+          </div>
+        `).join("")}
+      </div>`
+    : "";
+
+  if (!fib.is_active) {
+    const reason = fib.invalid_reason === "above_swing_high"
+      ? `현재가 ${formatUsd(price, 0)}가 스윙 고점 위로 이탈해 되돌림 레벨을 숨겼습니다.`
+      : fib.invalid_reason === "below_swing_low"
+        ? `현재가 ${formatUsd(price, 0)}가 스윙 저점 아래로 이탈해 되돌림 레벨을 숨겼습니다.`
+        : "현재 기준으로 표시할 피보나치 레벨이 없습니다.";
+    el.innerHTML = `
+      <div style="padding:16px 0 8px;text-align:left;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${dirColor};">${tf.toUpperCase()} ${fib.direction_label}</div>
+        <div style="margin-top:6px;color:${C.txt};font-weight:600;">${swingSummary}</div>
+        ${anchorHtml}
+        <div style="margin-top:8px;color:${C.muted};line-height:1.6;">${reason}</div>
+      </div>`;
+    return;
+  }
+
+  const cur = price;
+  const levelEntries = Object.entries(fib.display_levels || fib.levels || {}).sort((a, b) => b[1] - a[1]);
+  if (levelEntries.length === 0) {
+    el.innerHTML = `<div style="color:#A8978A;padding:16px 0;">표시할 피보나치 레벨이 없습니다.</div>`;
+    return;
+  }
+  let rows = "";
+  for (const [ratio, fp] of levelEntries) {
+    const c    = FIB_COLORS[ratio] || C.dim;
+    const dist = cur ? (cur - fp) / cur * 100 : null;
+    const arrow = dist !== null ? (dist < 0 ? "▲" : "▼") : "";
+    const near  = dist !== null && Math.abs(dist) < 0.6;
+    const nearBadge = near
+      ? `<span style="font-size:9px;background:${c}20;color:${c};border:1px solid ${c}60;border-radius:4px;padding:1px 5px;margin-left:4px;font-weight:700;">근접</span>`
+      : "";
+    const rowBg = near ? "background:#FAF8F5;" : "";
+    rows += `<tr style="${rowBg}">
+      <td style="color:${c};font-weight:700;">${ratio}</td>
+      <td style="color:${C.txt};font-weight:600;">$${fp.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="color:${C.dim};text-align:right;">${dist !== null ? arrow + Math.abs(dist).toFixed(1) + "%" : ""}${nearBadge}</td>
+    </tr>`;
+  }
+  el.innerHTML = `
+    <div style="padding:14px 0 10px;text-align:left;border-bottom:1px solid #F0EAE2;margin-bottom:8px;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${dirColor};">${tf.toUpperCase()} ${fib.direction_label}</div>
+      <div style="margin-top:6px;color:${C.txt};font-weight:600;">${swingSummary}</div>
+      ${anchorHtml}
+      <div style="margin-top:8px;color:${C.muted};font-size:11px;">차트 라벨은 핵심 3개만 표시하고, 아래 표는 보조 레벨까지 확장해 보여줍니다.</div>
+    </div>
+    <table class="fib-table">
+      <thead><tr>
+        <th>레벨</th><th>가격</th><th style="text-align:right;">현재가 대비</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ══════════════════════════════════════════════
+// 로딩 오버레이
+// ══════════════════════════════════════════════
+function showLoadingOverlay(activeStep) {
+  const overlay = document.getElementById("loading-overlay");
+  overlay.classList.add("visible");
+  const stepsEl = document.getElementById("ld-steps");
+  let html = "";
+  LD_STEPS.forEach(([label, pct], i) => {
+    const cls  = i < activeStep ? "done" : i === activeStep ? "active" : "wait";
+    const icon = i < activeStep ? "✓" : "";
+    html += `
+      <div class="ld-step ${cls}">
+        <div class="ld-icon">${icon}</div>
+        <div class="ld-text">${label}</div>
+        <div class="ld-pct">${i <= activeStep ? pct : "—"}</div>
+      </div>`;
+  });
+  stepsEl.innerHTML = html;
+}
+
+function hideLoadingOverlay() {
+  document.getElementById("loading-overlay").classList.remove("visible");
+}
+
+// ══════════════════════════════════════════════
+// 자동 갱신
+// ══════════════════════════════════════════════
+function toggleAuto() {
+  state.autoOn = !state.autoOn;
+  if (state.autoOn) {
+    startMarketStream();
+  } else {
+    stopMarketStream(false);
+  }
+  updateAutoUI();
+}
+
+function updateAutoUI() {
+  const toggle = document.getElementById("stream-toggle");
+  const track  = document.getElementById("toggle-track");
+  const badge  = document.getElementById("auto-badge");
+  const dot    = document.getElementById("auto-dot");
+  const text   = document.getElementById("auto-text");
+  const hint   = document.getElementById("auto-hint");
+
+  if (!track || !badge || !dot || !text || !hint || !toggle) return;
+
+  toggle.setAttribute("aria-pressed", String(state.autoOn));
+  track.classList.toggle("on", state.autoOn);
+  badge.className = "auto-badge " + (state.autoOn ? "on" : "off");
+  dot.className   = "auto-dot " + (state.autoOn ? "on" : "off");
+  text.textContent = !state.autoOn ? "OFF" : state.marketConnected ? "LIVE" : "WAIT";
+  hint.textContent = !state.autoOn
+    ? "실시간 스트림을 끄면 차트는 마지막 상태로 유지되고, 분석은 버튼으로만 갱신됩니다."
+    : state.marketConnected
+      ? "바이낸스 실시간 스트림으로 차트와 현재가를 반영합니다. AI 분석은 버튼으로 다시 실행하세요."
+      : "바이낸스 실시간 스트림에 연결 중입니다.";
+  updateMarketStatus();
+}
+
+// ══════════════════════════════════════════════
+// 채팅
+// ══════════════════════════════════════════════
+function chatKeydown(e) {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+}
+
+function autoResize(el) {
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 120) + "px";
+}
+
+async function sendChat() {
+  const input = document.getElementById("chat-input");
+  const text  = input.value.trim();
+  if (!text || !state.chatContext) return;
+
+  input.value = "";
+  input.style.height = "auto";
+  document.getElementById("btn-send").disabled = true;
+
+  state.chatWasReset = false;
+  state.chatHistory.push({ role: "user", content: text });
+  renderChatHistory(true);
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: state.chatHistory, context: state.chatContext }),
+    });
+    const data = await res.json();
+    state.chatHistory.push({ role: "assistant", content: data.reply });
+  } catch (e) {
+    state.chatHistory.push({ role: "assistant", content: "오류가 발생했습니다: " + e.message });
+  }
+
+  document.getElementById("btn-send").disabled = false;
+  renderChatHistory();
+}
+
+function clearChat() {
+  state.chatWasReset = false;
+  state.chatHistory = [];
+  renderChatHistory();
+}
+
+function renderChatHistory(typing = false) {
+  const el = document.getElementById("chat-history");
+  if (state.chatHistory.length === 0) {
+    el.innerHTML = state.chatWasReset
+      ? `<div class="chat-empty"><div class="chat-empty-icon">💬</div><div>새 분석 결과로 대화 기준이 갱신되었습니다. 이전 대화는 초기화되었어요.</div></div>`
+      : `<div class="chat-empty"><div class="chat-empty-icon">💬</div><div>분석 결과에 대해 궁금한 점을 물어보세요.</div></div>`;
+    return;
+  }
+  let html = "";
+  state.chatHistory.forEach(m => {
+    const safe = escapeHtml(m.content);
+    if (m.role === "user") {
+      html += `<div class="msg user">
+        <div class="msg-bubble">${safe}</div>
+        <div class="msg-avatar">나</div>
+      </div>`;
+    } else {
+      html += `<div class="msg assistant">
+        <div class="msg-avatar">C</div>
+        <div class="msg-bubble">${safe}</div>
+      </div>`;
+    }
+  });
+  if (typing) {
+    html += `<div class="msg assistant" id="typing-indicator">
+      <div class="msg-avatar">C</div>
+      <div class="chat-typing"><span></span><span></span><span></span></div>
+    </div>`;
+  }
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+            .replace(/"/g,"&quot;").replace(/\n/g,"<br>");
+}
+
+// ══════════════════════════════════════════════
+// 거시경제 지표
+// ══════════════════════════════════════════════
+const MACRO_CFG = {
+  DFII10:     { negativeGood: true  },   // 금리↑ = BTC 부정
+  DGS2:       { negativeGood: true  },
+  DTWEXBGS:   { negativeGood: true  },   // 달러↑ = BTC 부정
+  STABLE_MCAP:{ negativeGood: false },
+  USDT_DOM:   { negativeGood: false },
+  BTC_DOM:    { negativeGood: false },
+};
+
+function _macroColor(key, regime) {
+  const cfg = MACRO_CFG[key] || {};
+  if (!regime) return C.txt;
+  if (regime === "상승") return cfg.negativeGood ? C.bear : C.bull;
+  if (regime === "하락") return cfg.negativeGood ? C.bull : C.bear;
+  return C.txt;
+}
+
+function renderMacroCard(key, d) {
+  const el = document.getElementById("macro-" + key);
+  if (!el) return;
+
+  const v = d.value;
+  if (v === null || v === undefined) {
+    el.querySelector(".card-value").textContent = "—";
+    el.querySelector(".card-value").style.color = C.muted;
+    el.querySelector(".card-sub").textContent = "데이터 없음";
+    el.querySelector(".card-sub").style.color = C.muted;
+    return;
+  }
+
+  const fmt    = d.fmt || ".2f";
+  const unit   = d.unit || "";
+  const regime = d.regime || null;
+  const color  = _macroColor(key, regime);
+
+  // 값 포맷
+  let valStr;
+  if (key === "STABLE_MCAP") {
+    valStr = "$" + v.toFixed(1) + "B";
+  } else if (unit === "%") {
+    const prefix = fmt.includes("+") ? (v >= 0 ? "+" : "") : "";
+    valStr = prefix + v.toFixed(2) + "%";
+  } else {
+    valStr = v.toFixed(2);
+  }
+
+  // 서브텍스트: 5일 변화 우선, 없으면 레짐
+  let subStr = regime || "—";
+  if (d.change5d !== null && d.change5d !== undefined) {
+    const sign = d.change5d >= 0 ? "+" : "";
+    subStr = sign + d.change5d.toFixed(3) + " (5d)";
+  }
+
+  el.querySelector(".card-value").textContent = valStr;
+  el.querySelector(".card-value").style.color = color;
+  el.querySelector(".card-sub").textContent   = subStr;
+  el.querySelector(".card-sub").style.color   = color;
+}
+
+async function fetchMacro() {
+  try {
+    const res  = await fetch("/api/macro");
+    const data = await res.json();
+    Object.entries(data).forEach(([key, d]) => renderMacroCard(key, d));
+  } catch (e) {
+    // 실패 시 카드 유지 (로딩 중 상태)
+  }
+}
+
+// 페이지 로드 시 + 1시간 간격 갱신
+fetchMacro();
+setInterval(fetchMacro, 60 * 60 * 1000);
+
+// ══════════════════════════════════════════════
+// 에러
+// ══════════════════════════════════════════════
+function showError(msg) {
+  const el = document.getElementById("error-banner");
+  if (!msg) { el.classList.remove("visible"); return; }
+  el.textContent = msg;
+  el.classList.add("visible");
+}
+</script>
+</body>
+</html>
