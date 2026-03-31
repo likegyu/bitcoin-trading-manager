@@ -138,18 +138,33 @@ body {
   text-transform: uppercase; letter-spacing: .1em;
   margin-bottom: 8px;
 }
-.macro-row { display: flex; gap: 10px; margin-bottom: 18px; align-items: stretch; }
+.macro-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+  align-items: stretch;
+}
 .macro-card {
-  flex: 1; border-radius: 12px; padding: 12px 10px 10px;
+  border-radius: 12px; padding: 12px 10px 10px;
   text-align: center; background: #FFFFFF; border: 1px solid #E8DDD4;
   display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 2px; min-height: 84px;
+  justify-content: center; gap: 2px; min-height: 84px; min-width: 0;
   transition: background .15s, border-color .15s;
 }
 .macro-card:hover { background: #FDFAF7; border-color: #D6C4B4; }
+.macro-card .card-label {
+  line-height: 1.35;
+  white-space: normal;
+}
 .macro-card .card-value { font-size: 18px; }
+.macro-card .card-sub {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .macro-card .card-note {
   font-size: 9.5px; color: #A8978A; margin-top: 1px; line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 /* ══ 메인 그리드 (차트 | 패널) ════════════════ */
@@ -623,6 +638,7 @@ body {
   .cards-row { flex-wrap: wrap; }
   .sig-badge { flex: 1 1 100%; }
   .metric-card { flex: 1 1 calc(33.333% - 7px); min-width: 170px; }
+  .macro-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .main-grid { grid-template-columns: 1fr; }
 }
 
@@ -642,6 +658,9 @@ body {
   .header-title { font-size: 22px; }
   .header-price { font-size: 22px; }
   .card-value { font-size: 18px; }
+  .macro-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .macro-card { min-height: 92px; }
+  .macro-card .card-value { font-size: 17px; }
   .main-grid { gap: 12px; }
   .tab-bar { overflow-x: auto; scrollbar-width: none; }
   .tab-bar::-webkit-scrollbar { display: none; }
@@ -651,6 +670,10 @@ body {
   .ld-steps { grid-template-columns: repeat(2,1fr); }
   .msg-bubble { max-width: 90%; }
   .account-summary-grid, .position-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 420px) {
+  .macro-row { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -1023,6 +1046,7 @@ const SIG_COLOR = { "매수":C.bull,"매도":C.bear,"홀드":C.amber };
 const SIG_EMOJI = { "매수":"▲","매도":"▼","홀드":"●" };
 const SIG_VIEW  = { "매수":"상방 우위","매도":"하방 우위","홀드":"중립" };
 const ACCOUNT_STREAM_RETRY_MS = 2000;
+const ANALYSIS_CACHE_KEY = "crypto_analyzer:last_analysis:v1";
 const LD_STEPS  = [
   ["바이낸스 데이터 수신","25%"],
   ["보조지표 계산","50%"],
@@ -1059,9 +1083,47 @@ const state = {
   reportSections: {},
   reportMissingSections: [],
   analysisTime: null,
+  analysisFromCache:false,
   analysisStale:false,
   lastMarketUpdate:null,
 };
+
+function persistAnalysisCache(data) {
+  if (!data) return;
+  try {
+    localStorage.setItem(ANALYSIS_CACHE_KEY, JSON.stringify({
+      saved_at: new Date().toISOString(),
+      data,
+    }));
+  } catch (e) {
+    // 브라우저 저장소 오류는 무시
+  }
+}
+
+function readAnalysisCache() {
+  try {
+    const raw = localStorage.getItem(ANALYSIS_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.data || typeof parsed.data !== "object") {
+      localStorage.removeItem(ANALYSIS_CACHE_KEY);
+      return null;
+    }
+
+    return parsed.data;
+  } catch (e) {
+    try { localStorage.removeItem(ANALYSIS_CACHE_KEY); } catch (_) {}
+    return null;
+  }
+}
+
+function restoreCachedAnalysis() {
+  const cached = readAnalysisCache();
+  if (!cached) return false;
+  applyResult(cached, { fromCache: true, persist: false });
+  return true;
+}
 
 // ══════════════════════════════════════════════
 // 초기화
@@ -1070,13 +1132,13 @@ window.addEventListener("DOMContentLoaded", () => {
   updateAutoUI();
   updateMarketStatus();
   updateAnalysisStatus();
+  restoreCachedAnalysis();
   fetchAccount();
   startAccountStream();
   window.addEventListener("resize", () => {
     if (state.chartInstance) state.chartInstance.resize();
   });
   if (state.autoOn) startMarketStream();
-  runAnalysis();
 });
 
 // ══════════════════════════════════════════════
@@ -1172,6 +1234,11 @@ function updateAnalysisStatus() {
     return;
   }
 
+  if (state.analysisFromCache) {
+    setStatusChip("analysis-status", "stale", `이전 AI 분석 ${state.analysisTime}`);
+    return;
+  }
+
   const text = state.analysisStale
     ? `AI 분석 ${state.analysisTime} · 시세 대비 지연`
     : `AI 분석 ${state.analysisTime} · 최신`;
@@ -1180,6 +1247,7 @@ function updateAnalysisStatus() {
 
 function getAnalysisFreshnessCopy() {
   if (!state.analysisTime) return "분석 대기 중";
+  if (state.analysisFromCache) return `기준 ${state.analysisTime} · 이전 분석`;
   return state.analysisStale
     ? `기준 ${state.analysisTime} · 실시간 시세 대비 지연 가능`
     : `기준 ${state.analysisTime} · 최신 분석`;
@@ -1188,13 +1256,15 @@ function getAnalysisFreshnessCopy() {
 // ══════════════════════════════════════════════
 // 결과 적용
 // ══════════════════════════════════════════════
-function applyResult(data) {
+function applyResult(data, options = {}) {
+  const { fromCache = false, persist = true } = options;
   state.signal = data.signal || null;
   state.confidence = data.confidence ?? null;
   state.reportSections = data.report_sections || {};
   state.reportMissingSections = data.report_missing_sections || [];
   state.analysisTime = data.analysis_time || data.last_update || null;
-  state.analysisStale = false;
+  state.analysisFromCache = fromCache;
+  state.analysisStale = fromCache;
 
   applyMarketData(data, "analysis");
   renderSignalBadge(data.signal, data.confidence);
@@ -1209,6 +1279,10 @@ function applyResult(data) {
   state.chatHistory  = [];
   renderChatHistory();
   document.getElementById("chat-section").style.display = "block";
+
+  if (persist) {
+    persistAnalysisCache(data);
+  }
 }
 
 function applyMarketData(data, source = "market") {

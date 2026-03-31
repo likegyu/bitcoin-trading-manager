@@ -76,7 +76,7 @@ USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_utc} (UTC)
 
 📊 관점: [상방 우위 / 하방 우위 / 중립]
 💯 확신도: [숫자]%  ← trade idea의 승률이 아니라, 현재 해석이 얼마나 명확한지 평가. 혼조이거나 근거가 약하면 낮게.
-🧭 시장 레짐: [상승 추세 / 하락 추세 / 박스 / 변동성 확장 / 변동성 축소 / 이벤트 대기 중 1개]
+🧭 시장 레짐: [상승 추세 / 하락 추세 / 박스 / 변동성 확장 / 변동성 축소 / 이벤트 대기 중]  ← 위 6개 중 정확히 1개만
 
 📌 먼저 보이는 사실
 • [확정된 사실]
@@ -103,6 +103,11 @@ USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_utc} (UTC)
 ⚠️ 관점이 약해지는 조건: [1줄]
 
 💬 한줄 요약: [전체를 한 문장으로]
+
+중요:
+- [시장 레짐]은 반드시 위 6개 중 정확히 1개만 쓰고, 괄호 설명이나 복수 선택을 하지 마세요.
+- [관심 레벨]의 4개 항목은 각 줄마다 가격 숫자 또는 N/A만 적으세요. 이유, 조건, 괄호 설명을 붙이지 마세요.
+- 2차 저항/지지 같은 추가 항목을 만들지 마세요.
 """
 
 
@@ -372,26 +377,41 @@ def parse_signal(text: str) -> tuple[str, int]:
 
 def parse_trade_levels(text: str) -> dict:
     """관심 레벨 파싱. 구 포맷(진입/손절/목표/손익비)도 폴백 지원."""
-    def _price(pattern: str):
-        m = re.search(pattern, text)
+    def _price_from_line(label: str):
+        m = re.search(rf'^\s*[•\-]?\s*{label}\s*[:：]\s*(.+)$', text, re.MULTILINE)
         if not m:
             return None
-        val = m.group(1).replace(',', '').strip()
-        if val.upper() == 'N/A':
+
+        value_text = m.group(1).strip()
+        if re.match(r'^N/?A\b', value_text, re.IGNORECASE):
             return None
+
+        dollar_match = re.search(r'\$([\d,]+(?:\.\d+)?)', value_text)
+        if dollar_match:
+            val = dollar_match.group(1).replace(',', '').strip()
+            try:
+                return float(val)
+            except ValueError:
+                return None
+
+        numeric_only_match = re.fullmatch(r'([\d,]+(?:\.\d+)?)', value_text)
+        if not numeric_only_match:
+            return None
+
+        val = numeric_only_match.group(1).replace(',', '').strip()
         try:
             return float(val)
         except ValueError:
             return None
 
-    resistance   = _price(r'1차\s*저항\s*[:：]\s*\$?([\d,]+(?:\.\d+)?|N/A)')
-    support      = _price(r'1차\s*지지\s*[:：]\s*\$?([\d,]+(?:\.\d+)?|N/A)')
-    bull_trigger = _price(r'상방\s*돌파\s*트리거\s*[:：]\s*\$?([\d,]+(?:\.\d+)?|N/A)')
-    bear_trigger = _price(r'하방\s*이탈\s*트리거\s*[:：]\s*\$?([\d,]+(?:\.\d+)?|N/A)')
+    resistance   = _price_from_line(r'1차\s*저항')
+    support      = _price_from_line(r'1차\s*지지')
+    bull_trigger = _price_from_line(r'상방\s*돌파\s*트리거')
+    bear_trigger = _price_from_line(r'하방\s*이탈\s*트리거')
 
-    entry  = _price(r'진입가\s*[:：]\s*\$?([\d,]+(?:\.\d+)?|N/A)')
-    stop   = _price(r'손절가\s*[:：]\s*\$?([\d,]+(?:\.\d+)?|N/A)')
-    target = _price(r'목표가\s*[:：]\s*\$?([\d,]+(?:\.\d+)?|N/A)')
+    entry  = _price_from_line(r'진입가')
+    stop   = _price_from_line(r'손절가')
+    target = _price_from_line(r'목표가')
 
     rr = None
     rr_m = re.search(r'손익비\s*[:：]\s*([\d.]+)\s*[:：]\s*1', text)
@@ -416,22 +436,39 @@ def parse_trade_levels(text: str) -> dict:
 def analyze_with_claude(multi_tf_data: dict) -> dict:
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
     prompt = build_prompt(multi_tf_data)
+    request_kwargs = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": 16000,
+        "system": SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+    # Claude 4.6 계열은 adaptive thinking을, 그 외 thinking 지원 모델은 수동 예산 방식을 사용한다.
+    if (
+        CLAUDE_MODEL.startswith("claude-opus-4-6")
+        or CLAUDE_MODEL.startswith("claude-sonnet-4-6")
+    ):
+        request_kwargs["thinking"] = {"type": "adaptive"}
+    elif (
+        CLAUDE_MODEL.startswith("claude-haiku-4-5")
+        or CLAUDE_MODEL.startswith("claude-sonnet-4-5")
+        or CLAUDE_MODEL.startswith("claude-opus-4-5")
+        or CLAUDE_MODEL.startswith("claude-opus-4-1")
+        or CLAUDE_MODEL.startswith("claude-opus-4")
+        or CLAUDE_MODEL.startswith("claude-sonnet-4")
+        or CLAUDE_MODEL.startswith("claude-3-7-sonnet")
+    ):
+        request_kwargs["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": 4096,
+        }
 
     # 529 과부하 대비 지수 백오프 재시도 (최대 4회: 10s → 20s → 40s → 80s)
     max_retries = 4
     wait = 10
     for attempt in range(max_retries):
         try:
-            # Extended Thinking: claude-opus-4-6은 adaptive 방식만 지원
-            # type: "adaptive" → 모델이 요청 복잡도에 따라 사고 깊이를 자동 결정
-            # max_tokens: thinking 블록도 토큰을 소비하므로 충분한 여유 확보 (16000)
-            message = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=16000,
-                thinking={"type": "adaptive"},
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            message = client.messages.create(**request_kwargs)
             break
 
         except anthropic.APIStatusError as e:
