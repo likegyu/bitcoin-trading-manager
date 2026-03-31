@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from time_utils import format_kst
 
 WINDOW_CONFIGS = (
     {"key": "intraday", "hours": 12, "label": "12시간 실행 맥락", "mode": "intraday"},
@@ -193,7 +194,7 @@ def _snapshot_from_context(ctx: dict, observed_at: datetime | None = None) -> di
 
     snapshot = {
         "observed_at": observed.isoformat(),
-        "observed_label": observed.strftime("%m-%d %H:%M"),
+        "observed_label": format_kst(observed, "%m-%d %H:%M"),
         "observed_ts": observed.timestamp(),
         "wallet_balance": _as_float(ctx.get("wallet_balance")),
         "available_balance": _as_float(ctx.get("available_balance")),
@@ -382,7 +383,7 @@ def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
     highlights: list[str] = []
     meta = (
         f"실관찰 {_fmt_duration(observed_minutes)} · 표본 {len(window)}개 · "
-        f"{window[0]['observed_label']}~{window[-1]['observed_label']} UTC"
+        f"{window[0]['observed_label']}~{window[-1]['observed_label']} KST"
     )
 
     if config["mode"] == "intraday":

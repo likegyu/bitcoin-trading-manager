@@ -4,13 +4,13 @@
 import re
 import time
 import anthropic
-from datetime import datetime, timezone
 from typing import Optional
 from config import CLAUDE_API_KEY, CLAUDE_MODEL, DEFAULT_SYMBOL, symbol_to_pair
 from indicators import summarize_indicators, fibonacci_swing_levels, fib_window_for_tf
 from account_context import fetch_account_context, format_account_context
 from market_context import fetch_market_context, format_market_context
 from macro_fetcher import fetch_macro_context, format_macro_context
+from time_utils import now_kst
 
 PAIR_LABEL = symbol_to_pair(DEFAULT_SYMBOL)
 
@@ -48,7 +48,7 @@ SYSTEM_PROMPT = (
     "마크다운(**, ##, --- 등)과 HTML 태그는 절대 사용하지 마세요. 이모지와 일반 텍스트만 사용하세요."
 )
 
-USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_utc} (UTC)
+USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_kst} (KST)
 ⚠️ 각 타임프레임의 마지막 캔들은 현재 형성 중인 미완성봉입니다. 확정된 신호로 해석하지 마세요.
 
 다음은 {pair_label}의 현재 멀티 타임프레임 기술적 분석 데이터입니다.
@@ -223,10 +223,10 @@ def build_prompt(multi_tf_data: dict, macro_snapshot: Optional[dict] = None) -> 
     fib_1h = fib_format(multi_tf_data["1h"], _res_1h, _overlap_note) if "1h" in multi_tf_data else "N/A"
     fib_4h = fib_format(multi_tf_data["4h"], _res_4h, _overlap_note) if "4h" in multi_tf_data else "N/A"
 
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    now_kst_label = now_kst().strftime("%Y-%m-%d %H:%M")
 
     return USER_PROMPT_TEMPLATE.format(
-        now_utc=now_utc,
+        now_kst=now_kst_label,
         pair_label=PAIR_LABEL,
         tf_alignment=tf_alignment,
         macro_context=macro_context_str,

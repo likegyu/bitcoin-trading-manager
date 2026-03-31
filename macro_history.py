@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from time_utils import format_kst
 
 WINDOW_CONFIGS = (
     {"key": "day", "hours": 24, "label": "24시간 거시 추이"},
@@ -87,7 +88,7 @@ def _snapshot_from_macro(macro: dict, observed_at: datetime | None = None) -> di
     observed = observed_at or datetime.now(timezone.utc)
     snapshot = {
         "observed_at": observed.isoformat(),
-        "observed_label": observed.strftime("%m-%d %H:%M"),
+        "observed_label": format_kst(observed, "%m-%d %H:%M"),
         "observed_ts": observed.timestamp(),
     }
     for metric in METRIC_CONFIG:
@@ -199,7 +200,7 @@ def _build_section(window: list[dict], config: dict) -> dict:
     metrics = {metric: _metric_window(window, metric) for metric in METRIC_CONFIG}
     meta = (
         f"실관찰 {_fmt_duration(observed_minutes)} · 표본 {len(window)}개 · "
-        f"{window[0]['observed_label']}~{window[-1]['observed_label']} UTC"
+        f"{window[0]['observed_label']}~{window[-1]['observed_label']} KST"
     )
 
     lines: list[str] = [f"관찰 구간: {meta}"]

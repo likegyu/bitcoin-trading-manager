@@ -11,6 +11,7 @@ import time as _time
 import requests
 from datetime import datetime, timezone
 from config import BINANCE_FUTURES_URL, BINANCE_API_KEY, BINANCE_SECRET_KEY, DEFAULT_SYMBOL
+from time_utils import format_kst
 
 
 def _signed_get(url: str, params: dict) -> requests.Response:
@@ -308,7 +309,7 @@ def format_market_context(ctx: dict) -> str:
 
         if ctx.get("next_funding_ms"):
             dt = datetime.fromtimestamp(ctx["next_funding_ms"] / 1000, tz=timezone.utc)
-            lines.append(f"  다음 펀딩: {dt.strftime('%H:%M')} UTC")
+            lines.append(f"  다음 펀딩: {format_kst(dt, '%H:%M')} KST")
 
         if ctx.get("mark_price") and ctx.get("index_price"):
             basis = ctx["mark_price"] - ctx["index_price"]

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pandas as pd
 import numpy as np
+from time_utils import format_kst
 
 FIB_SWING_WINDOWS = {"1d": 5, "4h": 5, "1h": 5, "15m": 5, "5m": 3}
 
@@ -254,7 +255,7 @@ def summarize_indicators(tf: str, df: pd.DataFrame) -> str:
         lower = (min(o, c) - l) / rng * 100
         body  = abs(c - o) / rng * 100
         try:
-            lbl = idx.strftime("%m/%d %H:%M") if tf in _time_tfs else idx.strftime("%m/%d")
+            lbl = format_kst(idx, "%m/%d %H:%M") if tf in _time_tfs else format_kst(idx, "%m/%d")
         except Exception:
             lbl = str(idx)[:16]
         incomplete = "  ⚠️미완성봉" if i == n_recent - 1 else ""

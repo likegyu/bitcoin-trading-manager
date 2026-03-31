@@ -11,7 +11,6 @@ import contextlib
 import json
 import math
 import os
-from datetime import datetime
 
 import pandas as pd
 import websockets
@@ -31,6 +30,7 @@ from data_fetcher import fetch_ohlcv, fetch_current_price
 from indicators import add_all_indicators, fibonacci_swing_levels, fib_window_for_tf
 from analyzer import analyze_with_claude, chat_with_claude
 from macro_fetcher import fetch_macro_context
+from time_utils import format_kst, now_kst
 
 # ── 색상 팔레트 ────────────────────────────────
 C = {
@@ -77,10 +77,14 @@ def _series_labels(index) -> list[str]:
     labels = []
     for ts in index:
         try:
-            labels.append(ts.strftime("%Y-%m-%d %H:%M"))
+            labels.append(format_kst(ts, "%Y-%m-%d %H:%M"))
         except Exception:
             labels.append(str(ts)[:16])
     return labels
+
+
+def _now_label() -> str:
+    return now_kst().strftime("%H:%M:%S")
 
 
 def build_chart_payload(df, fib: dict | None) -> dict:
@@ -259,7 +263,7 @@ def _market_overview(tf_data: dict, price: float, last_update: str | None) -> di
         "symbol":      DEFAULT_SYMBOL,
         "pair_label":  symbol_to_pair(DEFAULT_SYMBOL),
         "price":       price,
-        "last_update": last_update or datetime.now().strftime("%H:%M:%S"),
+        "last_update": last_update or _now_label(),
         "indicators":  indicators,
     }
     return overview
@@ -268,7 +272,7 @@ def _market_overview(tf_data: dict, price: float, last_update: str | None) -> di
 def _build_account_payload() -> dict:
     ctx = fetch_account_context()
     return {
-        "updated_at": datetime.now().strftime("%H:%M:%S"),
+        "updated_at": _now_label(),
         **ctx,
     }
 
@@ -292,7 +296,7 @@ def build_market_payload(
             "symbol":      DEFAULT_SYMBOL,
             "pair_label":  symbol_to_pair(DEFAULT_SYMBOL),
             "price":       price,
-            "last_update": last_update or datetime.now().strftime("%H:%M:%S"),
+            "last_update": last_update or _now_label(),
         }
 
     charts = {}
@@ -307,7 +311,7 @@ def _build_payload(tf_data: dict, price: float, analysis: dict) -> dict:
     payload = build_market_payload(tf_data, price, include_overview=True)
     return {
         **payload,
-        "analysis_time": datetime.now().strftime("%H:%M:%S"),
+        "analysis_time": _now_label(),
         "signal":       analysis["signal"],
         "confidence":   analysis["confidence"],
         "raw_text":     analysis["raw_text"],
@@ -417,7 +421,7 @@ class MarketStreamManager:
         async with self._lock:
             self._tf_data = tf_data
             self._price = price
-            self._last_update = datetime.now().strftime("%H:%M:%S")
+            self._last_update = _now_label()
 
         self._ready.set()
 
@@ -452,7 +456,7 @@ class MarketStreamManager:
 
         async with self._lock:
             self._price = price
-            self._last_update = datetime.now().strftime("%H:%M:%S")
+            self._last_update = _now_label()
 
         self._schedule_price_flush()
 
@@ -476,7 +480,7 @@ class MarketStreamManager:
             updated = add_all_indicators(updated)
             self._tf_data[tf] = updated
             self._price = row["close"]
-            self._last_update = datetime.now().strftime("%H:%M:%S")
+            self._last_update = _now_label()
             self._dirty_tfs.add(tf)
             if tf == "1h":
                 self._needs_full_refresh = True
