@@ -9,6 +9,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional
 from config import FRED_API_KEY
+from macro_history import attach_macro_history_summary
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
@@ -277,6 +278,7 @@ def fetch_macro_context() -> dict:
         "regime":   None,
     }
 
+    attach_macro_history_summary(result)
     return result
 
 
@@ -290,6 +292,8 @@ def format_macro_context(macro: dict) -> str:
         "  ※ FRED 항목은 최신값뿐 아니라 5일/20일 변화, 최근 흐름, 최근 3개 관측치를 함께 제공합니다.",
     ]
     for key, d in macro.items():
+        if str(key).startswith("_"):
+            continue
         v = d.get("value")
         if v is None:
             if not FRED_API_KEY and key in ("DFII10", "DGS2", "DTWEXBGS"):
@@ -322,9 +326,33 @@ def format_macro_context(macro: dict) -> str:
         if recent_points:
             point_str = " → ".join(f"{p['date']}:{p['value']:{fmt}}{unit}" for p in recent_points)
             extras.append(f"최근 3개 {point_str}")
+        if key in ("STABLE_MCAP", "USDT_DOM", "BTC_DOM"):
+            if d.get("change24h") is not None:
+                suffix = "B" if key == "STABLE_MCAP" else "%p"
+                extras.append(f"24h 변화 {d['change24h']:+.2f}{suffix}")
+            if d.get("change72h") is not None:
+                suffix = "B" if key == "STABLE_MCAP" else "%p"
+                extras.append(f"72h 변화 {d['change72h']:+.2f}{suffix}")
+            if d.get("change7d") is not None:
+                suffix = "B" if key == "STABLE_MCAP" else "%p"
+                extras.append(f"7d 변화 {d['change7d']:+.2f}{suffix}")
+            if d.get("trend7d") is not None:
+                extras.append(f"7d 추세 {d['trend7d']}")
 
         extra_str = f"  ({', '.join(extras)})" if extras else ""
         lines.append(f"  {d['label']} ({key}): {val_str}{extra_str}")
+
+    history_summary = macro.get("_history_summary") or {}
+    sections = history_summary.get("sections") or []
+    if sections:
+        lines.append("  [서버 저장 기반 거시 추이]")
+        for section in sections:
+            label = section.get("label") or "거시 추이"
+            lines.append(f"    [{label}] {section.get('meta', '')}".rstrip())
+            for line in section.get("lines") or []:
+                if line.startswith("관찰 구간:"):
+                    continue
+                lines.append(f"      {line}")
 
     if not FRED_API_KEY:
         lines.append("  ※ FRED API 키 미설정 — 금리·달러 데이터 비활성")

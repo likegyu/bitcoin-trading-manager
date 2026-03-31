@@ -63,6 +63,7 @@ BASE_OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
 ACCOUNT_STREAM_WS_BASE = "wss://fstream.binance.com/ws"
 ACCOUNT_STREAM_KEEPALIVE_SECS = 50 * 60
 MARKET_STREAM_WS_BASE = "wss://fstream.binance.com/stream"
+MACRO_REFRESH_SECS = 60 * 60
 
 
 # ══════════════════════════════════════════════
@@ -686,6 +687,59 @@ class AccountStreamManager:
 _account_stream = AccountStreamManager()
 
 
+class MacroSnapshotManager:
+    def __init__(self):
+        self._payload: dict | None = None
+        self._ready = asyncio.Event()
+        self._lock = asyncio.Lock()
+        self._runner_task: asyncio.Task | None = None
+        self._stopped = False
+
+    async def start(self):
+        if self._runner_task and not self._runner_task.done():
+            return
+        self._stopped = False
+        self._runner_task = asyncio.create_task(self._run_forever(), name="macro-snapshot-refresh")
+
+    async def stop(self):
+        self._stopped = True
+        task = self._runner_task
+        if task and not task.done():
+            task.cancel()
+        if task:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def wait_until_ready(self):
+        await self._ready.wait()
+
+    def is_ready(self) -> bool:
+        return self._ready.is_set()
+
+    async def get_snapshot(self) -> dict:
+        await self.wait_until_ready()
+        async with self._lock:
+            return copy.deepcopy(self._payload or {})
+
+    async def _run_forever(self):
+        while not self._stopped:
+            sleep_for = MACRO_REFRESH_SECS
+            try:
+                payload = await asyncio.to_thread(fetch_macro_context)
+                async with self._lock:
+                    self._payload = payload
+                    self._ready.set()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[macro-refresh] fetch failed: {exc}")
+                sleep_for = 120
+            await asyncio.sleep(sleep_for)
+
+
+_macro_snapshot = MacroSnapshotManager()
+
+
 # ══════════════════════════════════════════════
 # Routes
 # ══════════════════════════════════════════════
@@ -693,12 +747,14 @@ _account_stream = AccountStreamManager()
 async def on_startup():
     await _market_stream.start()
     await _account_stream.start()
+    await _macro_snapshot.start()
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
     await _market_stream.stop()
     await _account_stream.stop()
+    await _macro_snapshot.stop()
 
 
 @app.get("/api/market-stream")
@@ -807,8 +863,11 @@ async def macro_endpoint():
     거시경제 지표 JSON 반환.
     FRED (1시간 캐시) + DefiLlama + CoinGecko.
     """
-    loop = asyncio.get_event_loop()
-    data = await loop.run_in_executor(_executor, fetch_macro_context)
+    if _macro_snapshot.is_ready():
+        data = await _macro_snapshot.get_snapshot()
+    else:
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(_executor, fetch_macro_context)
     # JSON 직렬화 가능하도록 None 포함 dict 그대로 반환
     return data
 

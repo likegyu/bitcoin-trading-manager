@@ -3036,7 +3036,7 @@ function renderMacroCard(key, d) {
 
   const fmt    = d.fmt || ".2f";
   const unit   = d.unit || "";
-  const regime = d.regime || null;
+  const regime = d.regime || d.trend7d || null;
   const color  = _macroColor(key, regime);
 
   // 값 포맷
@@ -3050,11 +3050,31 @@ function renderMacroCard(key, d) {
     valStr = v.toFixed(2);
   }
 
-  // 서브텍스트: 5일 변화 우선, 없으면 레짐
+  function formatMacroDelta(value, label) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    if (key === "STABLE_MCAP") {
+      const sign = num >= 0 ? "+" : "";
+      return `${sign}${num.toFixed(2)}B (${label})`;
+    }
+    if (unit === "%") {
+      const sign = num >= 0 ? "+" : "";
+      return `${sign}${num.toFixed(2)}%p (${label})`;
+    }
+    const sign = num >= 0 ? "+" : "";
+    return `${sign}${num.toFixed(2)} (${label})`;
+  }
+
+  // 서브텍스트: 5일 변화 우선, 없으면 24h/72h/7d 변화, 마지막에 레짐
   let subStr = regime || "—";
   if (d.change5d !== null && d.change5d !== undefined) {
-    const sign = d.change5d >= 0 ? "+" : "";
-    subStr = sign + d.change5d.toFixed(3) + " (5d)";
+    subStr = formatMacroDelta(d.change5d, "5d") || subStr;
+  } else if (d.change24h !== null && d.change24h !== undefined) {
+    subStr = formatMacroDelta(d.change24h, "24h") || subStr;
+  } else if (d.change72h !== null && d.change72h !== undefined) {
+    subStr = formatMacroDelta(d.change72h, "72h") || subStr;
+  } else if (d.change7d !== null && d.change7d !== undefined) {
+    subStr = formatMacroDelta(d.change7d, "7d") || subStr;
   }
 
   el.querySelector(".card-value").textContent = valStr;
@@ -3067,7 +3087,10 @@ async function fetchMacro() {
   try {
     const res  = await fetch("/api/macro");
     const data = await res.json();
-    Object.entries(data).forEach(([key, d]) => renderMacroCard(key, d));
+    Object.entries(data).forEach(([key, d]) => {
+      if (String(key).startsWith("_")) return;
+      renderMacroCard(key, d);
+    });
   } catch (e) {
     // 실패 시 카드 유지 (로딩 중 상태)
   }
