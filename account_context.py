@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlsplit
 import config as _cfg
+from account_history import attach_account_context_summary
 
 TRACKED_COLLATERAL_ASSETS = ("USDT", "USDC")
 
@@ -329,11 +330,12 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
         else:
             ctx["risk_status"] = "active"
 
+    attach_account_context_summary(ctx)
     return ctx
 
 
 def format_account_context(ctx: dict) -> str:
-    """수집된 계좌 정보를 원시값 그대로 출력 — 판단은 Claude에게 위임"""
+    """현재 스냅샷 + 최근 계좌 운영 맥락을 함께 출력 — 판단은 Claude에게 위임"""
     lines = ["[계좌 / 리스크 제약]"]
 
     # ── 잔고 ──────────────────────────────────
@@ -398,6 +400,13 @@ def format_account_context(ctx: dict) -> str:
         lines.append(f"  레버리지 상태:   {lev_display}")
     else:
         lines.append(f"  레버리지 상태:   N/A")
+
+    summary = ctx.get("context_summary") or {}
+    summary_lines = [line for line in (summary.get("lines") or []) if line]
+    if summary_lines:
+        lines.append("  최근 계좌 운영 맥락:")
+        for line in summary_lines:
+            lines.append(f"    {line}")
 
     # ── 오픈 포지션 ───────────────────────────
     positions = ctx.get("open_positions")

@@ -299,6 +299,35 @@ body {
 .account-summary-sub {
   margin-top: 3px; font-size: 11px; color: #78716C; line-height: 1.45;
 }
+.account-context-card {
+  margin-bottom: 12px; padding: 11px 12px; border-radius: 11px;
+  background: linear-gradient(180deg, #FFFCF7 0%, #FFF8F0 100%);
+  border: 1px solid #E8DDD4;
+}
+.account-context-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 8px;
+}
+.account-context-title {
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #A8978A;
+}
+.account-context-meta {
+  font-size: 10.5px; color: #A8978A;
+}
+.account-context-list {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.account-context-item {
+  font-size: 11.5px; line-height: 1.5; color: #44403C;
+}
+.account-context-events {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px;
+}
+.account-context-chip {
+  display: inline-flex; align-items: center;
+  padding: 5px 8px; border-radius: 999px; background: #FFFFFF;
+  border: 1px solid #E8DDD4; color: #57534E; font-size: 10.5px; line-height: 1.3;
+}
 .position-list {
   display: flex; flex-direction: column; gap: 8px;
 }
@@ -1513,6 +1542,30 @@ function renderAccountPanel(account) {
   const errorHtml = errorMessages.length
     ? `<div class="account-error-note">${errorMessages.map(msg => escapeHtml(msg)).join("<br>")}</div>`
     : "";
+  const contextSummary = account.context_summary || {};
+  const contextLines = Array.isArray(contextSummary.lines) ? contextSummary.lines : [];
+  const contextEvents = Array.isArray(contextSummary.recent_events) ? contextSummary.recent_events : [];
+  const contextMeta = Number.isFinite(Number(contextSummary.samples))
+    ? `${formatValue(contextSummary.samples, 0)}개 표본`
+    : "표본 축적 중";
+  const contextHtml = contextLines.length
+    ? `
+      <div class="account-context-card">
+        <div class="account-context-head">
+          <div class="account-context-title">최근 계좌 맥락</div>
+          <div class="account-context-meta">${escapeHtml(contextMeta)}</div>
+        </div>
+        <div class="account-context-list">
+          ${contextLines.map(line => `<div class="account-context-item">${escapeHtml(line)}</div>`).join("")}
+        </div>
+        ${contextEvents.length ? `
+          <div class="account-context-events">
+            ${contextEvents.map(item => `<span class="account-context-chip">${escapeHtml(item)}</span>`).join("")}
+          </div>
+        ` : ""}
+      </div>
+    `
+    : "";
   const balanceHtml = balances.length
     ? `<div class="account-assets">${
         balances.map(asset => `
@@ -1609,6 +1662,7 @@ function renderAccountPanel(account) {
         <div class="account-summary-sub">거래 기록 ${Number.isFinite(Number(account.today_trade_count)) ? `${formatValue(account.today_trade_count, 0)}건` : "—"}</div>
       </div>
     </div>
+    ${contextHtml}
     ${positionsHtml}
     ${extraNote}
   `;
