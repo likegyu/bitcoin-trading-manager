@@ -19,9 +19,9 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+import config as runtime_config
 from config import CANDLE_LIMIT, DEFAULT_SYMBOL, TIMEFRAMES, symbol_to_pair
 from account_context import (
-    BINANCE_API_KEY,
     close_user_data_stream,
     fetch_account_context,
     keepalive_user_data_stream,
@@ -599,7 +599,7 @@ class AccountStreamManager:
                     await asyncio.sleep(5)
                     continue
 
-            if not BINANCE_API_KEY:
+            if not runtime_config.BINANCE_API_KEY:
                 await asyncio.sleep(30)
                 continue
 
@@ -608,8 +608,15 @@ class AccountStreamManager:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[account-stream] websocket disconnected: {exc}")
-                await asyncio.sleep(3)
+                msg = str(exc)
+                if "인증 실패 (401)" in msg:
+                    print(f"[account-stream] auth failed, using REST snapshot fallback: {exc}")
+                    with contextlib.suppress(Exception):
+                        await self._refresh_payload(delay=0, broadcast=True)
+                    await asyncio.sleep(10)
+                else:
+                    print(f"[account-stream] websocket disconnected: {exc}")
+                    await asyncio.sleep(3)
 
     async def _consume_stream(self):
         listen_key = await asyncio.to_thread(open_user_data_stream)
@@ -879,6 +886,10 @@ async def setup_save(body: SetupSaveRequest):
         os.environ[k] = v
     import importlib
     importlib.reload(_cfg)
+
+    # 계좌 스트림은 API 키를 사용하므로 저장 직후 재시작해 새 값을 즉시 반영
+    await _account_stream.stop()
+    await _account_stream.start()
 
     return {"ok": True}
 

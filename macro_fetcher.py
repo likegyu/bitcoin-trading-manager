@@ -58,13 +58,24 @@ def _fetch_fred(series_id: str, days: int = 60) -> Optional[pd.Series]:
 
 def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> dict:
     """
-    pd.Series로부터 최신값 · 5일 변화 · 20일 z-score · 레짐 플래그 계산.
+    pd.Series로부터 최신값 · 변화율 · 최근 시계열 요약을 계산.
     """
-    empty = {"value": None, "change5d": None, "zscore20": None, "regime": None}
+    empty = {
+        "value": None,
+        "latest_date": None,
+        "change5d": None,
+        "change20d": None,
+        "zscore20": None,
+        "regime": None,
+        "trend20": None,
+        "recent_flow": None,
+        "recent_points": None,
+    }
     if s is None or len(s) < 2:
         return empty
 
     latest = float(s.iloc[-1])
+    latest_date = s.index[-1].strftime("%Y-%m-%d")
 
     # 5일 변화 (영업일 기준: -6번째 인덱스)
     if len(s) >= 6:
@@ -74,6 +85,14 @@ def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> di
     else:
         change5d = None
 
+    # 20일 변화
+    if len(s) >= 21:
+        change20d = latest - float(s.iloc[-21])
+    elif len(s) >= 2:
+        change20d = latest - float(s.iloc[0])
+    else:
+        change20d = None
+
     # 20일 z-score
     if len(s) >= 20:
         window = s.iloc[-20:].astype(float)
@@ -82,22 +101,73 @@ def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> di
     else:
         zscore20 = None
 
+    def _classify_change(change: Optional[float], threshold: float) -> Optional[str]:
+        if change is None:
+            return None
+        if change > threshold:
+            return "상승"
+        if change < -threshold:
+            return "하락"
+        return "중립"
+
     # 레짐 플래그 (5일 변화 기준)
-    if change5d is not None:
-        if change5d > change_threshold:
-            regime = "상승"
-        elif change5d < -change_threshold:
-            regime = "하락"
+    regime = _classify_change(change5d, change_threshold)
+
+    # 20일 추세는 최근 20개 구간의 앞/뒤 평균 차이로 판단
+    trend20 = None
+    if len(s) >= 8:
+        window20 = s.iloc[-20:].astype(float) if len(s) >= 20 else s.astype(float)
+        pivot = max(len(window20) // 2, 1)
+        first_half = window20.iloc[:pivot]
+        second_half = window20.iloc[pivot:]
+        span = float(window20.max() - window20.min())
+        trend_delta = float(second_half.mean() - first_half.mean()) if len(second_half) else 0.0
+        if span <= 1e-9:
+            trend20 = "중립"
+        elif abs(trend_delta) / span >= 0.2:
+            trend20 = "상승" if trend_delta > 0 else "하락"
         else:
-            regime = "중립"
-    else:
-        regime = None
+            trend20 = "중립"
+
+    # 최근 흐름은 마지막 4개 관측치의 기울기 변화를 압축
+    recent_flow = None
+    if len(s) >= 4:
+        last4 = s.iloc[-4:].astype(float)
+        diffs = np.diff(last4.values)
+        prev_move = float(diffs[-2])
+        last_move = float(diffs[-1])
+
+        if prev_move <= 0 < last_move:
+            recent_flow = "반등 시도"
+        elif prev_move >= 0 > last_move:
+            recent_flow = "하락 전환 시도"
+        elif last_move > 0 and prev_move > 0:
+            recent_flow = "상승 가속" if abs(last_move) > abs(prev_move) * 1.2 else "상승 지속"
+        elif last_move < 0 and prev_move < 0:
+            recent_flow = "하락 가속" if abs(last_move) > abs(prev_move) * 1.2 else "하락 지속"
+        else:
+            recent_flow = "중립"
+
+    recent_points = None
+    if len(s) >= 3:
+        recent_points = [
+            {
+                "date": idx.strftime("%m-%d"),
+                "value": float(value),
+            }
+            for idx, value in s.iloc[-3:].items()
+        ]
 
     return {
-        "value":    latest,
-        "change5d": change5d,
-        "zscore20": zscore20,
-        "regime":   regime,
+        "value":         latest,
+        "latest_date":   latest_date,
+        "change5d":      change5d,
+        "change20d":     change20d,
+        "zscore20":      zscore20,
+        "regime":        regime,
+        "trend20":       trend20,
+        "recent_flow":   recent_flow,
+        "recent_points": recent_points,
     }
 
 
@@ -213,9 +283,12 @@ def fetch_macro_context() -> dict:
 def format_macro_context(macro: dict) -> str:
     """
     Claude 프롬프트 삽입용 거시 지표 텍스트.
-    원시값 + 5일 변화 + z-score를 포함하며, 해석은 Claude에 위임.
+    원시값 + 변화율 + 최근 시계열 요약을 포함하며, 해석은 Claude에 위임.
     """
-    lines = ["[거시경제 지표]"]
+    lines = [
+        "[거시경제 지표]",
+        "  ※ FRED 항목은 최신값뿐 아니라 5일/20일 변화, 최근 흐름, 최근 3개 관측치를 함께 제공합니다.",
+    ]
     for key, d in macro.items():
         v = d.get("value")
         if v is None:
@@ -230,12 +303,25 @@ def format_macro_context(macro: dict) -> str:
         val_str = f"{v:{fmt}}{unit}"
 
         extras = []
+        latest_date = d.get("latest_date")
         c5  = d.get("change5d")
+        c20 = d.get("change20d")
         z20 = d.get("zscore20")
         reg = d.get("regime")
+        trend20 = d.get("trend20")
+        recent_flow = d.get("recent_flow")
+        recent_points = d.get("recent_points")
+        if latest_date is not None:
+            extras.append(f"기준일 {latest_date}")
         if c5  is not None: extras.append(f"5일 변화 {c5:+.3f}")
+        if c20 is not None: extras.append(f"20일 변화 {c20:+.3f}")
         if z20 is not None: extras.append(f"z-score {z20:+.2f}")
         if reg is not None: extras.append(f"레짐 {reg}")
+        if trend20 is not None: extras.append(f"20일 추세 {trend20}")
+        if recent_flow is not None: extras.append(f"최근 흐름 {recent_flow}")
+        if recent_points:
+            point_str = " → ".join(f"{p['date']}:{p['value']:{fmt}}{unit}" for p in recent_points)
+            extras.append(f"최근 3개 {point_str}")
 
         extra_str = f"  ({', '.join(extras)})" if extras else ""
         lines.append(f"  {d['label']} ({key}): {val_str}{extra_str}")

@@ -8,40 +8,74 @@ import time as _time
 import requests
 from datetime import datetime, timezone
 from typing import Optional
-from config import (
-    BINANCE_FUTURES_URL, BINANCE_API_KEY, BINANCE_SECRET_KEY,
-    DAILY_TARGET_PCT, DAILY_LOSS_LIMIT_PCT, DEFAULT_LEVERAGE,
-)
+from urllib.parse import urlsplit
+import config as _cfg
 
 TRACKED_COLLATERAL_ASSETS = ("USDT", "USDC")
 
 
 def _safe_error_message(exc: Exception) -> str:
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        status = exc.response.status_code
+        response_url = exc.response.url or ""
+        try:
+            body = exc.response.json()
+        except ValueError:
+            body = {}
+
+        api_code = body.get("code")
+        api_msg = body.get("msg")
+        path = urlsplit(response_url).path or response_url
+
+        if status == 401:
+            if api_code == -2015:
+                return (
+                    "Binance 인증 실패 (401 / -2015: API 키, IP 화이트리스트, "
+                    "또는 선물 권한 문제)"
+                )
+            return f"Binance 인증 실패 ({status}: {path})"
+
+        if api_code == -1021:
+            return "Binance 시간 오차 오류 (-1021: 서버 시간과 로컬 시간 차이)"
+        if api_code == -1022:
+            return "Binance 서명 오류 (-1022: API secret 또는 서명 문자열 불일치)"
+        if api_msg:
+            return f"Binance API 오류 ({status} / {api_code}: {api_msg})"
+        return f"Binance HTTP 오류 ({status}: {path})"
+
     msg = str(exc).strip()
     return msg if msg else exc.__class__.__name__
 
 
 def _api_key_headers() -> dict:
-    if not BINANCE_API_KEY:
+    if not _cfg.BINANCE_API_KEY:
         raise RuntimeError("BINANCE_API_KEY가 비어 있습니다.")
-    return {"X-MBX-APIKEY": BINANCE_API_KEY}
+    return {"X-MBX-APIKEY": _cfg.BINANCE_API_KEY}
 
 
 def open_user_data_stream() -> str:
     """USDⓈ-M Futures user data stream listenKey 생성/연장."""
-    r = requests.post(
-        f"{BINANCE_FUTURES_URL}/fapi/v1/listenKey",
-        headers=_api_key_headers(),
-        timeout=8,
-    )
-    r.raise_for_status()
-    return str(r.json()["listenKey"])
+    try:
+        r = requests.post(
+            f"{_cfg.BINANCE_FUTURES_URL}/fapi/v1/listenKey",
+            headers=_api_key_headers(),
+            timeout=8,
+        )
+        r.raise_for_status()
+        return str(r.json()["listenKey"])
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 401:
+            raise RuntimeError(
+                "Binance user data stream 인증 실패 (401). "
+                "선물 API 키 권한, IP 제한, 또는 저장된 키 갱신 여부를 확인하세요."
+            ) from exc
+        raise
 
 
 def keepalive_user_data_stream() -> str:
     """활성 user data stream listenKey TTL 연장."""
     r = requests.put(
-        f"{BINANCE_FUTURES_URL}/fapi/v1/listenKey",
+        f"{_cfg.BINANCE_FUTURES_URL}/fapi/v1/listenKey",
         headers=_api_key_headers(),
         timeout=8,
     )
@@ -52,7 +86,7 @@ def keepalive_user_data_stream() -> str:
 def close_user_data_stream() -> None:
     """활성 user data stream 종료."""
     r = requests.delete(
-        f"{BINANCE_FUTURES_URL}/fapi/v1/listenKey",
+        f"{_cfg.BINANCE_FUTURES_URL}/fapi/v1/listenKey",
         headers=_api_key_headers(),
         timeout=8,
     )
@@ -61,18 +95,18 @@ def close_user_data_stream() -> None:
 
 def _signed_get(endpoint: str, params: dict) -> dict:
     """Binance HMAC-SHA256 서명 GET — market_context.py와 동일한 패턴 사용"""
-    if not BINANCE_API_KEY or not BINANCE_SECRET_KEY:
+    if not _cfg.BINANCE_API_KEY or not _cfg.BINANCE_SECRET_KEY:
         raise RuntimeError("BINANCE_API_KEY 또는 BINANCE_SECRET_KEY가 비어 있습니다.")
 
     params["timestamp"] = int(_time.time() * 1000)
     query = "&".join(f"{k}={v}" for k, v in params.items())
     sig = hmac.new(
-        BINANCE_SECRET_KEY.encode(), query.encode(), hashlib.sha256
+        _cfg.BINANCE_SECRET_KEY.encode(), query.encode(), hashlib.sha256
     ).hexdigest()
     r = requests.get(
-        f"{BINANCE_FUTURES_URL}{endpoint}",
+        f"{_cfg.BINANCE_FUTURES_URL}{endpoint}",
         params={**params, "signature": sig},
-        headers={"X-MBX-APIKEY": BINANCE_API_KEY},
+        headers={"X-MBX-APIKEY": _cfg.BINANCE_API_KEY},
         timeout=8,
     )
     r.raise_for_status()
@@ -213,7 +247,7 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
             ctx["leverage_min"] = None
             ctx["leverage_max"] = None
             ctx["leverage_weighted"] = None
-            ctx["leverage_display"] = f"오픈 포지션 없음 (기본 {DEFAULT_LEVERAGE}x)"
+            ctx["leverage_display"] = f"오픈 포지션 없음 (기본 {_cfg.DEFAULT_LEVERAGE}x)"
             ctx["leverage_mode"] = "default"
         ctx["position_error"] = None
     except Exception as exc:
@@ -269,9 +303,9 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
         ctx["pnl_error"]          = _safe_error_message(exc)
 
     # ── 사용자 설정 ───────────────────────────
-    ctx["daily_target_pct"]     = DAILY_TARGET_PCT
-    ctx["daily_loss_limit_pct"] = DAILY_LOSS_LIMIT_PCT
-    ctx["configured_leverage"]  = DEFAULT_LEVERAGE
+    ctx["daily_target_pct"]     = _cfg.DAILY_TARGET_PCT
+    ctx["daily_loss_limit_pct"] = _cfg.DAILY_LOSS_LIMIT_PCT
+    ctx["configured_leverage"]  = _cfg.DEFAULT_LEVERAGE
 
     # ── UI / 보고용 요약 필드 ──────────────────
     wallet = ctx.get("wallet_balance")
