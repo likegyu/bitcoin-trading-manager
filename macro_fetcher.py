@@ -289,7 +289,7 @@ def format_macro_context(macro: dict) -> str:
     """
     lines = [
         "[거시경제 지표]",
-        "  ※ FRED 항목은 최신값뿐 아니라 5일/20일 변화, 최근 흐름, 최근 3개 관측치를 함께 제공합니다.",
+        "  ※ FRED 항목은 최신값뿐 아니라 24h/72h/7d/5일/20일 변화, 최근 흐름, 최근 3개 관측치를 함께 제공합니다.",
     ]
     for key, d in macro.items():
         if str(key).startswith("_"):
@@ -317,27 +317,33 @@ def format_macro_context(macro: dict) -> str:
         recent_points = d.get("recent_points")
         if latest_date is not None:
             extras.append(f"기준일 {latest_date}")
-        if c5  is not None: extras.append(f"5일 변화 {c5:+.3f}")
-        if c20 is not None: extras.append(f"20일 변화 {c20:+.3f}")
-        if z20 is not None: extras.append(f"z-score {z20:+.2f}")
-        if reg is not None: extras.append(f"레짐 {reg}")
-        if trend20 is not None: extras.append(f"20일 추세 {trend20}")
-        if recent_flow is not None: extras.append(f"최근 흐름 {recent_flow}")
+
+        if d.get("change24h") is not None:
+            suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
+            extras.append(f"24h 변화 {d['change24h']:+.2f}{suffix}")
+        if d.get("change72h") is not None:
+            suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
+            extras.append(f"72h 변화 {d['change72h']:+.2f}{suffix}")
+        if d.get("change7d") is not None:
+            suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
+            extras.append(f"7d 변화 {d['change7d']:+.2f}{suffix}")
+        if c5  is not None:
+            extras.append(f"5일 변화 {c5:+.3f}")
+        if c20 is not None:
+            extras.append(f"20일 변화 {c20:+.3f}")
+        if z20 is not None:
+            extras.append(f"z-score {z20:+.2f}")
+        if reg is not None:
+            extras.append(f"레짐 {reg}")
+        if trend20 is not None:
+            extras.append(f"20일 추세 {trend20}")
+        if d.get("trend7d") is not None:
+            extras.append(f"7d 추세 {d['trend7d']}")
+        if recent_flow is not None:
+            extras.append(f"최근 흐름 {recent_flow}")
         if recent_points:
             point_str = " → ".join(f"{p['date']}:{p['value']:{fmt}}{unit}" for p in recent_points)
             extras.append(f"최근 3개 {point_str}")
-        if key in ("STABLE_MCAP", "USDT_DOM", "BTC_DOM"):
-            if d.get("change24h") is not None:
-                suffix = "B" if key == "STABLE_MCAP" else "%p"
-                extras.append(f"24h 변화 {d['change24h']:+.2f}{suffix}")
-            if d.get("change72h") is not None:
-                suffix = "B" if key == "STABLE_MCAP" else "%p"
-                extras.append(f"72h 변화 {d['change72h']:+.2f}{suffix}")
-            if d.get("change7d") is not None:
-                suffix = "B" if key == "STABLE_MCAP" else "%p"
-                extras.append(f"7d 변화 {d['change7d']:+.2f}{suffix}")
-            if d.get("trend7d") is not None:
-                extras.append(f"7d 추세 {d['trend7d']}")
 
         extra_str = f"  ({', '.join(extras)})" if extras else ""
         lines.append(f"  {d['label']} ({key}): {val_str}{extra_str}")

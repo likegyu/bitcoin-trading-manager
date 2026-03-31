@@ -3086,6 +3086,14 @@ const MACRO_CFG = {
   USDT_DOM:   { negativeGood: false },
   BTC_DOM:    { negativeGood: false },
 };
+const MACRO_DELTA_THRESHOLD = {
+  DFII10: 0.03,
+  DGS2: 0.03,
+  DTWEXBGS: 0.15,
+  STABLE_MCAP: 0.20,
+  USDT_DOM: 0.10,
+  BTC_DOM: 0.10,
+};
 
 function _macroColor(key, regime) {
   const cfg = MACRO_CFG[key] || {};
@@ -3093,6 +3101,15 @@ function _macroColor(key, regime) {
   if (regime === "상승") return cfg.negativeGood ? C.bear : C.bull;
   if (regime === "하락") return cfg.negativeGood ? C.bull : C.bear;
   return C.txt;
+}
+
+function _macroDirectionFromDelta(key, delta) {
+  const num = Number(delta);
+  if (!Number.isFinite(num)) return null;
+  const threshold = MACRO_DELTA_THRESHOLD[key] ?? 0;
+  if (num > threshold) return "상승";
+  if (num < -threshold) return "하락";
+  return "중립";
 }
 
 function renderMacroCard(key, d) {
@@ -3111,7 +3128,11 @@ function renderMacroCard(key, d) {
   const fmt    = d.fmt || ".2f";
   const unit   = d.unit || "";
   const regime = d.regime || d.trend7d || null;
-  const color  = _macroColor(key, regime);
+  const recentDirection = _macroDirectionFromDelta(
+    key,
+    d.change24h ?? d.change72h ?? d.change7d ?? d.change5d
+  );
+  const color  = _macroColor(key, recentDirection || regime);
 
   // 값 포맷
   let valStr;
@@ -3139,16 +3160,16 @@ function renderMacroCard(key, d) {
     return `${sign}${num.toFixed(2)} (${label})`;
   }
 
-  // 서브텍스트: 5일 변화 우선, 없으면 24h/72h/7d 변화, 마지막에 레짐
+  // 서브텍스트: 최근 24h 변화 우선, 없으면 72h/7d/5d 변화, 마지막에 레짐
   let subStr = regime || "—";
-  if (d.change5d !== null && d.change5d !== undefined) {
-    subStr = formatMacroDelta(d.change5d, "5d") || subStr;
-  } else if (d.change24h !== null && d.change24h !== undefined) {
+  if (d.change24h !== null && d.change24h !== undefined) {
     subStr = formatMacroDelta(d.change24h, "24h") || subStr;
   } else if (d.change72h !== null && d.change72h !== undefined) {
     subStr = formatMacroDelta(d.change72h, "72h") || subStr;
   } else if (d.change7d !== null && d.change7d !== undefined) {
     subStr = formatMacroDelta(d.change7d, "7d") || subStr;
+  } else if (d.change5d !== null && d.change5d !== undefined) {
+    subStr = formatMacroDelta(d.change5d, "5d") || subStr;
   }
 
   el.querySelector(".card-value").textContent = valStr;

@@ -5,6 +5,7 @@ import re
 import time
 import anthropic
 from datetime import datetime, timezone
+from typing import Optional
 from config import CLAUDE_API_KEY, CLAUDE_MODEL, DEFAULT_SYMBOL, symbol_to_pair
 from indicators import summarize_indicators, fibonacci_swing_levels, fib_window_for_tf
 from account_context import fetch_account_context, format_account_context
@@ -133,16 +134,23 @@ def _tf_alignment_summary(multi_tf_data: dict) -> str:
     return "\n".join(lines)
 
 
-def build_prompt(multi_tf_data: dict) -> str:
+def build_prompt(multi_tf_data: dict, macro_snapshot: Optional[dict] = None) -> str:
     # 타임프레임 정렬 요약
     tf_alignment = _tf_alignment_summary(multi_tf_data)
 
     # 거시경제 지표 수집
     macro_context_str = "[거시경제 지표]\n  데이터 수집 실패"
-    try:
-        macro_context_str = format_macro_context(fetch_macro_context())
-    except Exception as exc:
-        macro_context_str = f"[거시경제 지표]\n  데이터 수집 실패 — {exc}"
+    macro_payload = macro_snapshot
+    if macro_payload is None:
+        try:
+            macro_payload = fetch_macro_context()
+        except Exception as exc:
+            macro_context_str = f"[거시경제 지표]\n  데이터 수집 실패 — {exc}"
+    if macro_payload is not None:
+        try:
+            macro_context_str = format_macro_context(macro_payload)
+        except Exception as exc:
+            macro_context_str = f"[거시경제 지표]\n  데이터 가공 실패 — {exc}"
 
     # 시장 데이터 수집
     market_context_str  = "[시장 심리 & 파생상품 데이터]\n  데이터 수집 실패 — 기술적 지표만으로 판단"
@@ -433,9 +441,9 @@ def parse_trade_levels(text: str) -> dict:
     }
 
 
-def analyze_with_claude(multi_tf_data: dict) -> dict:
+def analyze_with_claude(multi_tf_data: dict, macro_snapshot: Optional[dict] = None) -> dict:
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-    prompt = build_prompt(multi_tf_data)
+    prompt = build_prompt(multi_tf_data, macro_snapshot=macro_snapshot)
     request_kwargs = {
         "model": CLAUDE_MODEL,
         "max_tokens": 16000,

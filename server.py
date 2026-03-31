@@ -823,8 +823,15 @@ async def analyze_stream():
                 except Exception:
                     price = None
 
+            if _macro_snapshot.is_ready():
+                macro_snapshot = await _macro_snapshot.get_snapshot()
+            else:
+                macro_snapshot = await loop.run_in_executor(_executor, fetch_macro_context)
+
             yield f"data: {json.dumps({'type':'progress','step':2})}\n\n"
-            analysis = await loop.run_in_executor(_executor, analyze_with_claude, tf_data)
+            analysis = await loop.run_in_executor(
+                _executor, analyze_with_claude, tf_data, macro_snapshot
+            )
 
             yield f"data: {json.dumps({'type':'progress','step':3})}\n\n"
             payload = await loop.run_in_executor(
