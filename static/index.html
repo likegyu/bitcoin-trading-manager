@@ -314,6 +314,19 @@ body {
 .account-context-meta {
   font-size: 10.5px; color: #A8978A;
 }
+.account-context-section + .account-context-section {
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed #E7D8CB;
+}
+.account-context-section-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 6px;
+}
+.account-context-section-title {
+  font-size: 11px; font-weight: 800; color: #44403C;
+}
+.account-context-section-meta {
+  font-size: 10px; color: #A8978A;
+}
 .account-context-list {
   display: flex; flex-direction: column; gap: 6px;
 }
@@ -1543,26 +1556,45 @@ function renderAccountPanel(account) {
     ? `<div class="account-error-note">${errorMessages.map(msg => escapeHtml(msg)).join("<br>")}</div>`
     : "";
   const contextSummary = account.context_summary || {};
+  const contextSections = Array.isArray(contextSummary.sections)
+    ? contextSummary.sections.filter(section => section && Array.isArray(section.lines) && section.lines.length)
+    : [];
   const contextLines = Array.isArray(contextSummary.lines) ? contextSummary.lines : [];
-  const contextEvents = Array.isArray(contextSummary.recent_events) ? contextSummary.recent_events : [];
-  const contextMeta = Number.isFinite(Number(contextSummary.samples))
-    ? `${formatValue(contextSummary.samples, 0)}개 표본`
-    : "표본 축적 중";
-  const contextHtml = contextLines.length
+  const contextHtml = contextSections.length
+    ? `
+      <div class="account-context-card">
+        <div class="account-context-head">
+          <div class="account-context-title">멀티 윈도우 계좌 맥락</div>
+          <div class="account-context-meta">12h / 72h / 7d</div>
+        </div>
+        ${contextSections.map(section => `
+          <div class="account-context-section">
+            <div class="account-context-section-head">
+              <div class="account-context-section-title">${escapeHtml(section.label || "계좌 맥락")}</div>
+              <div class="account-context-section-meta">${escapeHtml(section.meta || "")}</div>
+            </div>
+            <div class="account-context-list">
+              ${(Array.isArray(section.lines) ? section.lines : []).map(line => `<div class="account-context-item">${escapeHtml(line)}</div>`).join("")}
+            </div>
+            ${Array.isArray(section.highlights) && section.highlights.length ? `
+              <div class="account-context-events">
+                ${section.highlights.map(item => `<span class="account-context-chip">${escapeHtml(item)}</span>`).join("")}
+              </div>
+            ` : ""}
+          </div>
+        `).join("")}
+      </div>
+    `
+    : contextLines.length
     ? `
       <div class="account-context-card">
         <div class="account-context-head">
           <div class="account-context-title">최근 계좌 맥락</div>
-          <div class="account-context-meta">${escapeHtml(contextMeta)}</div>
+          <div class="account-context-meta">표본 축적 중</div>
         </div>
         <div class="account-context-list">
           ${contextLines.map(line => `<div class="account-context-item">${escapeHtml(line)}</div>`).join("")}
         </div>
-        ${contextEvents.length ? `
-          <div class="account-context-events">
-            ${contextEvents.map(item => `<span class="account-context-chip">${escapeHtml(item)}</span>`).join("")}
-          </div>
-        ` : ""}
       </div>
     `
     : "";

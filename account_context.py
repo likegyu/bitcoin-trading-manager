@@ -402,8 +402,16 @@ def format_account_context(ctx: dict) -> str:
         lines.append(f"  레버리지 상태:   N/A")
 
     summary = ctx.get("context_summary") or {}
+    summary_sections = [section for section in (summary.get("sections") or []) if section]
     summary_lines = [line for line in (summary.get("lines") or []) if line]
-    if summary_lines:
+    if summary_sections:
+        lines.append("  최근 계좌 운영 맥락:")
+        for section in summary_sections:
+            label = section.get("label") or "계좌 맥락"
+            lines.append(f"    [{label}]")
+            for line in section.get("lines") or []:
+                lines.append(f"      {line}")
+    elif summary_lines:
         lines.append("  최근 계좌 운영 맥락:")
         for line in summary_lines:
             lines.append(f"    {line}")

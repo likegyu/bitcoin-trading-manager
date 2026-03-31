@@ -8,9 +8,13 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-LOOKBACK_HOURS = 12
-RETENTION_HOURS = 72
-MAX_ENTRIES = 1500
+WINDOW_CONFIGS = (
+    {"key": "intraday", "hours": 12, "label": "12시간 실행 맥락", "mode": "intraday"},
+    {"key": "swing", "hours": 72, "label": "72시간 운영 흐름", "mode": "swing"},
+    {"key": "weekly", "hours": 168, "label": "7일 계좌 성향", "mode": "weekly"},
+)
+RETENTION_HOURS = 192
+MAX_ENTRIES = 12000
 MIN_RECORD_INTERVAL_SECS = 60
 FORCE_RECORD_INTERVAL_SECS = 15 * 60
 COMPACT_EVERY_WRITES = 25
@@ -50,6 +54,21 @@ def _fmt_duration(minutes: int) -> str:
     if hours:
         return f"{hours}시간"
     return f"{mins}분"
+
+
+def _fmt_positions(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    rounded = round(value)
+    if abs(value - rounded) < 0.05:
+        return f"{int(rounded)}개"
+    return f"{value:.1f}개"
+
+
+def _fmt_leverage(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.1f}x"
 
 
 def _delta_text(start: float | None, end: float | None) -> str:
@@ -114,6 +133,14 @@ def _series_range(entries: list[dict], field: str) -> tuple[float | None, float 
     if not valid:
         return None, None
     return min(valid), max(valid)
+
+
+def _avg_value(entries: list[dict], field: str) -> float | None:
+    values = [_as_float(entry.get(field)) for entry in entries]
+    valid = [value for value in values if value is not None]
+    if not valid:
+        return None
+    return sum(valid) / len(valid)
 
 
 def _position_symbol_list(positions: list[dict]) -> list[str]:
@@ -272,6 +299,228 @@ def _recent_unique(events: list[str], limit: int = 3) -> list[str]:
     return list(reversed(result))
 
 
+def _distribution(entries: list[dict], field: str, keys: tuple[str, ...]) -> dict[str, int]:
+    counts = {key: 0 for key in keys}
+    for entry in entries:
+        value = str(entry.get(field) or "")
+        if value in counts:
+            counts[value] += 1
+    return counts
+
+
+def _share_text(counts: dict[str, int], key: str) -> str:
+    total = sum(counts.values())
+    if total <= 0:
+        return "0%"
+    return f"{counts.get(key, 0) / total * 100:.0f}%"
+
+
+def _dominant_key(counts: dict[str, int]) -> str | None:
+    if not counts:
+        return None
+    total = sum(counts.values())
+    if total <= 0:
+        return None
+    return max(counts, key=lambda key: counts[key])
+
+
+def _transition_count(entries: list[dict], field: str, target: str) -> int:
+    count = 0
+    prev_value = None
+    for entry in entries:
+        curr_value = entry.get(field)
+        if curr_value == target and prev_value != target:
+            count += 1
+        prev_value = curr_value
+    return count
+
+
+def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
+    observed_minutes = max(
+        0,
+        int(round((window[-1]["observed_ts"] - window[0]["observed_ts"]) / 60)),
+    )
+    wallet_start = _first_value(window, "wallet_balance")
+    wallet_end = _last_value(window, "wallet_balance")
+    wallet_min, wallet_max = _series_range(window, "wallet_balance")
+
+    pnl_start = _first_value(window, "today_total_pnl")
+    pnl_end = _last_value(window, "today_total_pnl")
+    pnl_min, pnl_max = _series_range(window, "today_total_pnl")
+
+    count_start = _first_value(window, "open_position_count")
+    count_end = _last_value(window, "open_position_count")
+    count_min, count_max = _series_range(window, "open_position_count")
+    count_avg = _avg_value(window, "open_position_count")
+
+    notional_start = _first_value(window, "open_position_notional")
+    notional_end = _last_value(window, "open_position_notional")
+    notional_max = _series_range(window, "open_position_notional")[1]
+    notional_avg = _avg_value(window, "open_position_notional")
+
+    lev_min, lev_max = _series_range(window, "effective_leverage")
+    lev_avg = _avg_value(window, "effective_leverage")
+
+    long_end = _as_float(latest.get("long_notional"))
+    short_end = _as_float(latest.get("short_notional"))
+    bias = latest.get("exposure_bias")
+    top_positions = list(latest.get("top_positions") or [])
+
+    recent_window = window[-8:]
+    transitions: list[str] = []
+    for prev, curr in zip(recent_window, recent_window[1:]):
+        transitions.extend(_describe_transition(prev, curr))
+    recent_events = _recent_unique(transitions, limit=3)
+
+    bias_counts = _distribution(window, "exposure_bias", ("long", "short", "balanced", "flat"))
+    risk_counts = _distribution(window, "risk_status", ("active", "target_hit", "loss_limit_hit"))
+    target_hits = _transition_count(window, "risk_status", "target_hit")
+    loss_hits = _transition_count(window, "risk_status", "loss_limit_hit")
+    dominant_bias = _dominant_key(bias_counts)
+
+    lines: list[str] = []
+    highlights: list[str] = []
+    meta = (
+        f"실관찰 {_fmt_duration(observed_minutes)} · 표본 {len(window)}개 · "
+        f"{window[0]['observed_label']}~{window[-1]['observed_label']} UTC"
+    )
+
+    if config["mode"] == "intraday":
+        lines.append(f"관찰 구간: {meta}")
+        if wallet_start is not None or pnl_end is not None:
+            parts: list[str] = []
+            if wallet_start is not None and wallet_end is not None:
+                parts.append(
+                    f"담보 {_fmt_money(wallet_start)} → {_fmt_money(wallet_end)} ({_delta_text(wallet_start, wallet_end)})"
+                )
+            if pnl_end is not None:
+                parts.append(
+                    f"오늘 손익 현재 {_fmt_money(pnl_end)} / 구간 {_fmt_money(pnl_min)}~{_fmt_money(pnl_max)} / 수익률 {_fmt_pct(_as_float(latest.get('today_pnl_pct')))}"
+                )
+            if parts:
+                lines.append("담보·손익: " + " / ".join(parts))
+
+        position_parts: list[str] = []
+        if count_start is not None and count_end is not None:
+            position_parts.append(f"오픈 {_fmt_positions(count_start)} → {_fmt_positions(count_end)}")
+            if count_min is not None and count_max is not None and count_min != count_max:
+                position_parts.append(f"범위 {_fmt_positions(count_min)}~{_fmt_positions(count_max)}")
+        if notional_start is not None and notional_end is not None:
+            position_parts.append(f"총 명목 {_fmt_money(notional_start)} → {_fmt_money(notional_end)}")
+        if lev_min is not None and lev_max is not None:
+            position_parts.append(f"레버리지 {_fmt_leverage(lev_min)}~{_fmt_leverage(lev_max)}")
+        if position_parts:
+            lines.append("포지션 집행: " + " / ".join(position_parts))
+
+        exposure_line = (
+            f"현재 노출: 롱 {_fmt_money(long_end)} / 숏 {_fmt_money(short_end)} / {_bias_label(bias)}"
+        )
+        if top_positions:
+            exposure_line += f" / 상위 {', '.join(top_positions[:2])}"
+        lines.append(exposure_line)
+        if recent_events:
+            lines.append("최근 변화: " + " · ".join(recent_events))
+        highlights = recent_events
+
+    elif config["mode"] == "swing":
+        lines.append(f"관찰 구간: {meta}")
+        if wallet_start is not None and wallet_end is not None:
+            lines.append(
+                "자산 흐름: "
+                f"{_fmt_money(wallet_start)} → {_fmt_money(wallet_end)} ({_delta_text(wallet_start, wallet_end)}) / "
+                f"구간 {_fmt_money(wallet_min)}~{_fmt_money(wallet_max)}"
+            )
+
+        operating_parts: list[str] = []
+        if count_avg is not None:
+            operating_parts.append(f"평균 오픈 {_fmt_positions(count_avg)}")
+        if notional_avg is not None:
+            operating_parts.append(f"명목 평균 {_fmt_money(notional_avg)}")
+        if notional_max is not None:
+            operating_parts.append(f"최대 {_fmt_money(notional_max)}")
+        if lev_avg is not None:
+            operating_parts.append(f"레버리지 평균 {_fmt_leverage(lev_avg)}")
+        if lev_max is not None:
+            operating_parts.append(f"최대 {_fmt_leverage(lev_max)}")
+        if operating_parts:
+            lines.append("운영 패턴: " + " / ".join(operating_parts))
+
+        lines.append(
+            "노출 성향: "
+            f"롱 우세 {_share_text(bias_counts, 'long')} / "
+            f"숏 우세 {_share_text(bias_counts, 'short')} / "
+            f"양방향 {_share_text(bias_counts, 'balanced')} / "
+            f"무포지션 {_share_text(bias_counts, 'flat')}"
+        )
+        lines.append(
+            "리스크 이력: "
+            f"목표 도달 {target_hits}회 / 손실 한도 {loss_hits}회 / "
+            f"대부분 {_bias_label(dominant_bias)}"
+        )
+        if recent_events:
+            highlights = recent_events[:2]
+        highlights.extend([
+            f"목표 도달 {target_hits}회",
+            f"손실 한도 {loss_hits}회",
+        ])
+
+    else:
+        lines.append(f"관찰 구간: {meta}")
+        if wallet_start is not None and wallet_end is not None:
+            lines.append(
+                "7일 자산 흐름: "
+                f"{_fmt_money(wallet_start)} → {_fmt_money(wallet_end)} ({_delta_text(wallet_start, wallet_end)}) / "
+                f"구간 {_fmt_money(wallet_min)}~{_fmt_money(wallet_max)}"
+            )
+
+        disposition_parts: list[str] = []
+        if count_avg is not None:
+            disposition_parts.append(f"평균 오픈 {_fmt_positions(count_avg)}")
+        if lev_avg is not None:
+            disposition_parts.append(f"평균 레버리지 {_fmt_leverage(lev_avg)}")
+        if lev_max is not None:
+            disposition_parts.append(f"최대 {_fmt_leverage(lev_max)}")
+        if notional_max is not None:
+            disposition_parts.append(f"최대 명목 {_fmt_money(notional_max)}")
+        if disposition_parts:
+            lines.append("계좌 성향: " + " / ".join(disposition_parts))
+
+        lines.append(
+            "편향 분포: "
+            f"롱 우세 {_share_text(bias_counts, 'long')} / "
+            f"숏 우세 {_share_text(bias_counts, 'short')} / "
+            f"양방향 {_share_text(bias_counts, 'balanced')} / "
+            f"무포지션 {_share_text(bias_counts, 'flat')}"
+        )
+        lines.append(
+            "운용 메모: "
+            f"가장 자주 보인 상태는 {_bias_label(dominant_bias)} / "
+            f"목표 도달 표본 {risk_counts.get('target_hit', 0)}개 / "
+            f"손실 한도 표본 {risk_counts.get('loss_limit_hit', 0)}개"
+        )
+        highlights = [
+            f"우세 성향 {_bias_label(dominant_bias)}",
+            f"평균 레버리지 {_fmt_leverage(lev_avg)}",
+            f"최대 명목 {_fmt_money(notional_max)}",
+        ]
+
+    highlights = [item for item in highlights if item and "N/A" not in item]
+    return {
+        "key": config["key"],
+        "label": config["label"],
+        "window_hours": config["hours"],
+        "available": True,
+        "samples": len(window),
+        "observed_minutes": observed_minutes,
+        "observed_from": window[0]["observed_label"],
+        "observed_to": window[-1]["observed_label"],
+        "meta": meta,
+        "recent_events": recent_events,
+        "highlights": highlights[:4],
+        "lines": lines,
+    }
+
+
 class AccountContextTimeline:
     def __init__(self, history_file: Path):
         self._history_file = history_file
@@ -403,145 +652,43 @@ class AccountContextTimeline:
         if not timeline:
             return {
                 "available": False,
-                "window_hours": LOOKBACK_HOURS,
-                "samples": 0,
+                "sections": [],
+                "windows": {},
                 "recent_events": [],
                 "top_positions": [],
                 "lines": [],
             }
 
         latest = timeline[-1]
-        cutoff = datetime.fromtimestamp(latest["observed_ts"], tz=timezone.utc) - timedelta(
-            hours=LOOKBACK_HOURS
-        )
-        window = [
-            entry
-            for entry in timeline
-            if datetime.fromtimestamp(entry["observed_ts"], tz=timezone.utc) >= cutoff
-        ]
-        if not window:
-            window = [latest]
+        latest_dt = datetime.fromtimestamp(latest["observed_ts"], tz=timezone.utc)
+        sections: list[dict] = []
+        windows: dict[str, dict] = {}
+        flat_lines: list[str] = []
 
-        observed_minutes = max(
-            0,
-            int(round((window[-1]["observed_ts"] - window[0]["observed_ts"]) / 60)),
-        )
+        for config in WINDOW_CONFIGS:
+            cutoff = latest_dt - timedelta(hours=config["hours"])
+            window = [
+                entry
+                for entry in timeline
+                if datetime.fromtimestamp(entry["observed_ts"], tz=timezone.utc) >= cutoff
+            ]
+            if not window:
+                window = [latest]
 
-        wallet_start = _first_value(window, "wallet_balance")
-        wallet_end = _last_value(window, "wallet_balance")
-        wallet_min, wallet_max = _series_range(window, "wallet_balance")
+            section = _build_section(window, config, latest)
+            sections.append(section)
+            windows[config["key"]] = section
 
-        pnl_start = _first_value(window, "today_total_pnl")
-        pnl_end = _last_value(window, "today_total_pnl")
-        pnl_min, pnl_max = _series_range(window, "today_total_pnl")
-
-        count_start = _first_value(window, "open_position_count")
-        count_end = _last_value(window, "open_position_count")
-        count_min, count_max = _series_range(window, "open_position_count")
-
-        notional_start = _first_value(window, "open_position_notional")
-        notional_end = _last_value(window, "open_position_notional")
-        notional_min, notional_max = _series_range(window, "open_position_notional")
-
-        lev_start = _first_value(window, "effective_leverage")
-        lev_end = _last_value(window, "effective_leverage")
-        lev_min, lev_max = _series_range(window, "effective_leverage")
-
-        long_end = _as_float(latest.get("long_notional"))
-        short_end = _as_float(latest.get("short_notional"))
-        bias = latest.get("exposure_bias")
-        top_positions = list(latest.get("top_positions") or [])
-
-        transitions: list[str] = []
-        recent_window = window[-8:]
-        for prev, curr in zip(recent_window, recent_window[1:]):
-            transitions.extend(_describe_transition(prev, curr))
-        recent_events = _recent_unique(transitions, limit=3)
-
-        lines: list[str] = []
-        lines.append(
-            "관찰 구간: "
-            f"최근 {LOOKBACK_HOURS}시간 중 실관찰 {_fmt_duration(observed_minutes)} / "
-            f"표본 {len(window)}개 / "
-            f"{window[0]['observed_label']}~{window[-1]['observed_label']} UTC"
-        )
-
-        if wallet_start is not None and wallet_end is not None:
-            lines.append(
-                "담보 추이: "
-                f"{_fmt_money(wallet_start)} → {_fmt_money(wallet_end)} "
-                f"({_delta_text(wallet_start, wallet_end)}) / "
-                f"구간 {_fmt_money(wallet_min)}~{_fmt_money(wallet_max)}"
-            )
-
-        if pnl_start is not None and pnl_end is not None:
-            lines.append(
-                "오늘 손익 추이: "
-                f"{_fmt_money(pnl_start)} → {_fmt_money(pnl_end)} / "
-                f"구간 {_fmt_money(pnl_min)}~{_fmt_money(pnl_max)} / "
-                f"현재 {_fmt_pct(_as_float(latest.get('today_pnl_pct')))}"
-            )
-
-        if count_start is not None or notional_start is not None or lev_start is not None:
-            parts: list[str] = []
-            if count_start is not None and count_end is not None:
-                parts.append(f"오픈 {int(count_start)}개 → {int(count_end)}개")
-                if count_min is not None and count_max is not None and count_min != count_max:
-                    parts.append(f"범위 {int(count_min)}~{int(count_max)}개")
-            if notional_start is not None and notional_end is not None:
-                parts.append(f"총 명목 {_fmt_money(notional_start)} → {_fmt_money(notional_end)}")
-                if notional_max is not None:
-                    parts.append(f"최대 {_fmt_money(notional_max)}")
-            if lev_end is not None:
-                if lev_min is not None and lev_max is not None and abs(lev_max - lev_min) >= 0.15:
-                    parts.append(f"실효 레버리지 {lev_min:.1f}x~{lev_max:.1f}x")
-                else:
-                    parts.append(f"실효 레버리지 {lev_end:.1f}x")
-            if parts:
-                lines.append("포지션 추이: " + " / ".join(parts))
-
-        exposure_line = (
-            "현재 노출: "
-            f"롱 {_fmt_money(long_end)} / 숏 {_fmt_money(short_end)} / {_bias_label(bias)}"
-        )
-        if top_positions:
-            exposure_line += f" / 상위 {', '.join(top_positions[:2])}"
-        lines.append(exposure_line)
-
-        if recent_events:
-            lines.append("최근 변화: " + " · ".join(recent_events))
+            flat_lines.append(f"[{section['label']}]")
+            flat_lines.extend(section["lines"])
 
         return {
             "available": True,
-            "window_hours": LOOKBACK_HOURS,
-            "samples": len(window),
-            "observed_minutes": observed_minutes,
-            "observed_from": window[0]["observed_label"],
-            "observed_to": window[-1]["observed_label"],
-            "wallet_start": wallet_start,
-            "wallet_end": wallet_end,
-            "wallet_min": wallet_min,
-            "wallet_max": wallet_max,
-            "today_total_pnl_start": pnl_start,
-            "today_total_pnl_end": pnl_end,
-            "today_total_pnl_min": pnl_min,
-            "today_total_pnl_max": pnl_max,
-            "open_position_count_start": int(count_start) if count_start is not None else None,
-            "open_position_count_end": int(count_end) if count_end is not None else None,
-            "open_position_notional_start": notional_start,
-            "open_position_notional_end": notional_end,
-            "open_position_notional_max": notional_max,
-            "effective_leverage_start": lev_start,
-            "effective_leverage_end": lev_end,
-            "effective_leverage_min": lev_min,
-            "effective_leverage_max": lev_max,
-            "long_notional": long_end,
-            "short_notional": short_end,
-            "exposure_bias": bias,
-            "risk_status": latest.get("risk_status"),
-            "recent_events": recent_events,
-            "top_positions": top_positions,
-            "lines": lines,
+            "sections": sections,
+            "windows": windows,
+            "recent_events": sections[0].get("recent_events", []),
+            "top_positions": list(latest.get("top_positions") or []),
+            "lines": flat_lines,
         }
 
 
