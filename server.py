@@ -11,6 +11,7 @@ import contextlib
 import json
 import math
 import os
+import uuid
 
 import pandas as pd
 import websockets
@@ -66,6 +67,8 @@ ACCOUNT_REFRESH_DEBOUNCE_SECS = 0.35
 ACCOUNT_REFRESH_MIN_INTERVAL_SECS = 1.5
 MARKET_STREAM_WS_BASE = "wss://fstream.binance.com/stream"
 MACRO_REFRESH_SECS = 60 * 60
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LATEST_ANALYSIS_PATH = os.path.join(BASE_DIR, "data", "latest_analysis.json")
 
 
 # ══════════════════════════════════════════════
@@ -87,6 +90,33 @@ def _series_labels(index) -> list[str]:
 
 def _now_label() -> str:
     return now_kst().strftime("%H:%M:%S")
+
+
+def _now_iso() -> str:
+    return now_kst().isoformat(timespec="seconds")
+
+
+def _load_latest_analysis() -> dict | None:
+    try:
+        with open(LATEST_ANALYSIS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        print(f"[analysis-cache] load failed: {exc}")
+        return None
+
+
+def _persist_latest_analysis(payload: dict):
+    try:
+        os.makedirs(os.path.dirname(LATEST_ANALYSIS_PATH), exist_ok=True)
+        tmp_path = f"{LATEST_ANALYSIS_PATH}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp_path, LATEST_ANALYSIS_PATH)
+    except Exception as exc:
+        print(f"[analysis-cache] persist failed: {exc}")
 
 
 def build_chart_payload(df, fib: dict | None) -> dict:
@@ -771,6 +801,141 @@ class MacroSnapshotManager:
 _macro_snapshot = MacroSnapshotManager()
 
 
+class AnalysisManager:
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._job: dict | None = None
+        self._task: asyncio.Task | None = None
+        self._latest_result: dict | None = _load_latest_analysis()
+
+    async def stop(self):
+        task = None
+        async with self._lock:
+            task = self._task
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def start_job(self) -> tuple[dict, bool]:
+        async with self._lock:
+            if self._job and self._job["status"] in {"pending", "running"}:
+                return self._serialize_job(self._job), False
+
+            started_at = _now_iso()
+            job = {
+                "id": uuid.uuid4().hex,
+                "status": "running",
+                "step": 0,
+                "error": None,
+                "result": None,
+                "started_at": started_at,
+                "updated_at": started_at,
+                "completed_at": None,
+            }
+            self._job = job
+            self._task = asyncio.create_task(
+                self._run_job(job["id"]),
+                name=f"analysis-job-{job['id'][:8]}",
+            )
+            return self._serialize_job(job), True
+
+    async def get_status(self, include_latest: bool = False) -> dict:
+        async with self._lock:
+            response = {"job": self._serialize_job(self._job)}
+            if (
+                self._job
+                and self._job["status"] == "completed"
+                and self._job.get("result") is not None
+            ):
+                response["result"] = copy.deepcopy(self._job["result"])
+            elif include_latest and self._latest_result is not None:
+                response["latest_result"] = copy.deepcopy(self._latest_result)
+            return response
+
+    def _serialize_job(self, job: dict | None) -> dict | None:
+        if not job:
+            return None
+        return {
+            "id": job["id"],
+            "status": job["status"],
+            "step": job["step"],
+            "error": job["error"],
+            "started_at": job["started_at"],
+            "updated_at": job["updated_at"],
+            "completed_at": job["completed_at"],
+        }
+
+    async def _set_step(self, job_id: str, step: int):
+        async with self._lock:
+            if not self._job or self._job["id"] != job_id:
+                return
+            self._job["status"] = "running"
+            self._job["step"] = step
+            self._job["updated_at"] = _now_iso()
+
+    async def _complete(self, job_id: str, payload: dict):
+        completed_at = _now_iso()
+        async with self._lock:
+            if not self._job or self._job["id"] != job_id:
+                return
+            self._job["status"] = "completed"
+            self._job["step"] = 3
+            self._job["error"] = None
+            self._job["result"] = copy.deepcopy(payload)
+            self._job["updated_at"] = completed_at
+            self._job["completed_at"] = completed_at
+            self._latest_result = copy.deepcopy(payload)
+
+    async def _fail(self, job_id: str, message: str, status: str = "error"):
+        failed_at = _now_iso()
+        async with self._lock:
+            if not self._job or self._job["id"] != job_id:
+                return
+            self._job["status"] = status
+            self._job["error"] = message
+            self._job["updated_at"] = failed_at
+            self._job["completed_at"] = failed_at
+
+    async def _run_job(self, job_id: str):
+        loop = asyncio.get_event_loop()
+        try:
+            await self._set_step(job_id, 1)
+            if _market_stream.is_ready():
+                tf_data, price = await _market_stream.get_analysis_inputs()
+            else:
+                tf_data = await loop.run_in_executor(_executor, _fetch_all, DEFAULT_SYMBOL)
+                try:
+                    price = await loop.run_in_executor(_executor, fetch_current_price, DEFAULT_SYMBOL)
+                except Exception:
+                    price = None
+
+            if _macro_snapshot.is_ready():
+                macro_snapshot = await _macro_snapshot.get_snapshot()
+            else:
+                macro_snapshot = await loop.run_in_executor(_executor, fetch_macro_context)
+
+            await self._set_step(job_id, 2)
+            analysis = await loop.run_in_executor(
+                _executor, analyze_with_claude, tf_data, macro_snapshot
+            )
+
+            await self._set_step(job_id, 3)
+            payload = await loop.run_in_executor(
+                _executor, _build_payload, tf_data, price, analysis
+            )
+            await self._complete(job_id, payload)
+            await asyncio.to_thread(_persist_latest_analysis, payload)
+        except asyncio.CancelledError:
+            await self._fail(job_id, "분석 작업이 취소되었습니다.", status="cancelled")
+            raise
+        except Exception as exc:
+            await self._fail(job_id, str(exc))
+
+
+_analysis_manager = AnalysisManager()
+
+
 # ══════════════════════════════════════════════
 # Routes
 # ══════════════════════════════════════════════
@@ -786,6 +951,7 @@ async def on_shutdown():
     await _market_stream.stop()
     await _account_stream.stop()
     await _macro_snapshot.stop()
+    await _analysis_manager.stop()
 
 
 @app.get("/api/market-stream")
@@ -838,46 +1004,15 @@ async def account_stream():
     )
 
 
+@app.post("/api/analyze")
+async def analyze_start():
+    job, started = await _analysis_manager.start_job()
+    return {"job": job, "started": started}
+
+
 @app.get("/api/analyze")
-async def analyze_stream():
-    async def generate():
-        loop = asyncio.get_event_loop()
-        try:
-            yield f"data: {json.dumps({'type':'progress','step':0})}\n\n"
-            yield f"data: {json.dumps({'type':'progress','step':1})}\n\n"
-            if _market_stream.is_ready():
-                tf_data, price = await _market_stream.get_analysis_inputs()
-            else:
-                tf_data = await loop.run_in_executor(_executor, _fetch_all, DEFAULT_SYMBOL)
-                try:
-                    price = await loop.run_in_executor(_executor, fetch_current_price, DEFAULT_SYMBOL)
-                except Exception:
-                    price = None
-
-            if _macro_snapshot.is_ready():
-                macro_snapshot = await _macro_snapshot.get_snapshot()
-            else:
-                macro_snapshot = await loop.run_in_executor(_executor, fetch_macro_context)
-
-            yield f"data: {json.dumps({'type':'progress','step':2})}\n\n"
-            analysis = await loop.run_in_executor(
-                _executor, analyze_with_claude, tf_data, macro_snapshot
-            )
-
-            yield f"data: {json.dumps({'type':'progress','step':3})}\n\n"
-            payload = await loop.run_in_executor(
-                _executor, _build_payload, tf_data, price, analysis
-            )
-
-            yield f"data: {json.dumps({'type':'result','data':payload})}\n\n"
-        except Exception as exc:
-            yield f"data: {json.dumps({'type':'error','message':str(exc)})}\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+async def analyze_status(include_latest: bool = False):
+    return await _analysis_manager.get_status(include_latest=include_latest)
 
 
 class ChatRequest(BaseModel):

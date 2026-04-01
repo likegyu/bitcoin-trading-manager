@@ -1052,6 +1052,7 @@ const SIG_EMOJI = { "매수":"▲","매도":"▼","홀드":"●" };
 const SIG_VIEW  = { "매수":"상방 우위","매도":"하방 우위","홀드":"중립" };
 const ACCOUNT_STREAM_RETRY_MS = 2000;
 const ANALYSIS_CACHE_KEY = "crypto_analyzer:last_analysis:v1";
+const ANALYSIS_POLL_MS = 1500;
 const LD_STEPS  = [
   ["바이낸스 데이터 수신","25%"],
   ["보조지표 계산","50%"],
@@ -1078,6 +1079,9 @@ const state = {
   accountSource: null,
   accountRetryTimer: null,
   analyzing:    false,
+  analysisJobId:null,
+  analysisPollTimer:null,
+  analysisStep: 0,
   fibs:         {},
   price:        null,
   account:      null,
@@ -1138,55 +1142,146 @@ window.addEventListener("DOMContentLoaded", () => {
   updateMarketStatus();
   updateAnalysisStatus();
   restoreCachedAnalysis();
+  syncAnalysisStatus({ includeLatest: true });
   fetchAccount();
   startAccountStream();
   window.addEventListener("resize", () => {
     if (state.chartInstance) state.chartInstance.resize();
   });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) syncAnalysisStatus({ includeLatest: true });
+  });
   if (state.autoOn) startMarketStream();
 });
 
 // ══════════════════════════════════════════════
-// 분석 실행 (SSE)
+// 분석 실행
 // ══════════════════════════════════════════════
-function runAnalysis() {
-  if (state.analyzing) return;
+function normalizeAnalysisStep(value) {
+  const step = Number(value);
+  if (!Number.isFinite(step)) return 0;
+  return Math.max(0, Math.min(LD_STEPS.length - 1, Math.trunc(step)));
+}
+
+function clearAnalysisPollTimer() {
+  if (state.analysisPollTimer) {
+    clearTimeout(state.analysisPollTimer);
+    state.analysisPollTimer = null;
+  }
+}
+
+function setAnalysisRunning(job) {
   state.analyzing = true;
+  state.analysisJobId = job && job.id ? job.id : null;
+  state.analysisStep = normalizeAnalysisStep(job && job.step);
+  showError(null);
   setAnalyzeBtn(false);
   updateAnalysisStatus();
-  showError(null);
-  showLoadingOverlay(0);
+  showLoadingOverlay(state.analysisStep);
+}
 
-  const es = new EventSource("/api/analyze");
+function finishAnalysisRun() {
+  clearAnalysisPollTimer();
+  hideLoadingOverlay();
+  state.analyzing = false;
+  state.analysisJobId = null;
+  state.analysisStep = 0;
+  setAnalyzeBtn(true);
+  updateAnalysisStatus();
+}
 
-  es.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === "progress") {
-      showLoadingOverlay(msg.step);
-    } else if (msg.type === "result") {
-      es.close();
-      hideLoadingOverlay();
-      state.analyzing = false;
-      setAnalyzeBtn(true);
-      applyResult(msg.data);
-    } else if (msg.type === "error") {
-      es.close();
-      hideLoadingOverlay();
-      state.analyzing = false;
-      setAnalyzeBtn(true);
-      updateAnalysisStatus();
-      showError("분석 오류: " + msg.message);
+function shouldApplyAnalysisPayload(data) {
+  if (!data) return false;
+  if (!state.analysisTime) return true;
+  if (data.analysis_time && data.analysis_time !== state.analysisTime) return true;
+  const rawText = String(data.raw_text || "").trim();
+  if (!rawText) return false;
+  return !(state.chatContext || "").includes(rawText);
+}
+
+async function fetchAnalysisStatus(includeLatest = false) {
+  const suffix = includeLatest ? "?include_latest=1" : "";
+  const res = await fetch(`/api/analyze${suffix}`);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+function queueAnalysisPoll(delay = ANALYSIS_POLL_MS) {
+  clearAnalysisPollTimer();
+  state.analysisPollTimer = setTimeout(() => {
+    syncAnalysisStatus();
+  }, delay);
+}
+
+function handleAnalysisStatusResponse(statusPayload = {}) {
+  const job = statusPayload.job || null;
+  const latestResult = statusPayload.latest_result || null;
+  const result = statusPayload.result || null;
+
+  if (latestResult && shouldApplyAnalysisPayload(latestResult)) {
+    applyResult(latestResult);
+  }
+
+  if (job && (job.status === "pending" || job.status === "running")) {
+    setAnalysisRunning(job);
+    queueAnalysisPoll();
+    return;
+  }
+
+  clearAnalysisPollTimer();
+
+  if (job && job.status === "completed" && result) {
+    finishAnalysisRun();
+    if (shouldApplyAnalysisPayload(result)) {
+      applyResult(result);
     }
-  };
+    return;
+  }
 
-  es.onerror = () => {
-    es.close();
-    hideLoadingOverlay();
-    state.analyzing = false;
-    setAnalyzeBtn(true);
-    updateAnalysisStatus();
-    showError("서버 연결 오류. 서버가 실행 중인지 확인하세요.");
-  };
+  if (job && (job.status === "error" || job.status === "cancelled")) {
+    finishAnalysisRun();
+    showError("분석 오류: " + (job.error || "알 수 없는 오류"));
+    return;
+  }
+
+  if (state.analyzing) {
+    finishAnalysisRun();
+  }
+}
+
+async function syncAnalysisStatus(options = {}) {
+  const { includeLatest = false } = options;
+  try {
+    const statusPayload = await fetchAnalysisStatus(includeLatest);
+    handleAnalysisStatusResponse(statusPayload);
+  } catch (e) {
+    if (state.analyzing) {
+      queueAnalysisPoll(Math.max(ANALYSIS_POLL_MS, 2500));
+    }
+  }
+}
+
+async function runAnalysis() {
+  if (state.analyzing) return;
+  setAnalysisRunning({ step: 0 });
+
+  try {
+    const res = await fetch("/api/analyze", { method: "POST", keepalive: true });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data || !data.job) {
+      throw new Error("분석 작업을 시작하지 못했습니다.");
+    }
+    setAnalysisRunning(data.job);
+    queueAnalysisPoll(250);
+  } catch (e) {
+    finishAnalysisRun();
+    showError("분석 시작 오류: " + e.message);
+  }
 }
 
 function setAnalyzeBtn(enabled) {
