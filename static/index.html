@@ -655,6 +655,7 @@ body {
 }
 
 @media (max-width: 640px) {
+  .page { padding: 12px 10px 24px; }
   .header-title { font-size: 22px; }
   .header-price { font-size: 22px; }
   .card-value { font-size: 18px; }
@@ -662,6 +663,8 @@ body {
   .macro-card { min-height: 92px; }
   .macro-card .card-value { font-size: 17px; }
   .main-grid { gap: 12px; }
+  .chart-area { border-radius: 12px; }
+  .chart-container { padding: 4px 3px 2px; }
   .tab-bar { overflow-x: auto; scrollbar-width: none; }
   .tab-bar::-webkit-scrollbar { display: none; }
   .tab-btn { flex: 0 0 auto; min-width: 64px; padding: 8px 12px; }
@@ -673,7 +676,9 @@ body {
 }
 
 @media (max-width: 420px) {
+  .page { padding: 10px 8px 22px; }
   .macro-row { grid-template-columns: 1fr; }
+  .chart-container { padding: 2px 1px 0; }
 }
 </style>
 </head>
@@ -2250,6 +2255,24 @@ function buildChartOption(chart, tf, viewport) {
   const zoomStart = viewport?.start ?? zoom.start;
   const zoomEnd = viewport?.end ?? zoom.end;
   const stats = buildChartStats(chart);
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1280;
+  const isMobile = viewportWidth <= 640;
+  const isTinyMobile = viewportWidth <= 420;
+  const gridLeft = isTinyMobile ? 10 : isMobile ? 12 : 54;
+  const gridRight = isTinyMobile ? 52 : isMobile ? 58 : 92;
+  const gridTop = isMobile ? 52 : 64;
+  const topGraphicLeft = isMobile ? 10 : 16;
+  const topGraphicRight = isMobile ? 10 : 18;
+  const paneGraphicLeft = isMobile ? 10 : 16;
+  const statsTop = isMobile ? 12 : 16;
+  const hintTop = isMobile ? 28 : 34;
+  const sliderBottom = isTinyMobile ? 6 : isMobile ? 8 : 10;
+  const sliderHeight = isMobile ? 14 : 18;
+  const priceFont = isMobile ? "800 15px Inter, sans-serif" : "800 18px Inter, sans-serif";
+  const deltaLeft = isMobile ? 92 : 112;
+  const statsFont = isMobile ? "600 10px Inter, sans-serif" : "600 11px Inter, sans-serif";
+  const hintFont = isMobile ? "500 9px Inter, sans-serif" : "500 10px Inter, sans-serif";
+  const hideTopStats = isTinyMobile;
   const paneLabelTop = {
     rsi: "60.5%",
     macd: "74.5%",
@@ -2263,10 +2286,10 @@ function buildChartOption(chart, tf, viewport) {
       fontFamily: "Inter, -apple-system, sans-serif",
     },
     grid: [
-      { left: 54, right: 92, top: 64, height: "43%" },
-      { left: 54, right: 92, top: "60%", height: "10%" },
-      { left: 54, right: 92, top: "74%", height: "10%" },
-      { left: 54, right: 92, top: "88%", height: "5%" },
+      { left: gridLeft, right: gridRight, top: gridTop, height: "43%" },
+      { left: gridLeft, right: gridRight, top: "60%", height: "10%" },
+      { left: gridLeft, right: gridRight, top: "74%", height: "10%" },
+      { left: gridLeft, right: gridRight, top: "88%", height: "5%" },
     ],
     axisPointer: {
       link: [{ xAxisIndex: "all" }],
@@ -2303,8 +2326,8 @@ function buildChartOption(chart, tf, viewport) {
       {
         type: "slider",
         xAxisIndex: [0, 1, 2, 3],
-        height: 18,
-        bottom: 10,
+        height: sliderHeight,
+        bottom: sliderBottom,
         start: zoomStart,
         end: zoomEnd,
         borderColor: "#E8DDD4",
@@ -2426,8 +2449,8 @@ function buildChartOption(chart, tf, viewport) {
     graphic: [
       {
         type: "group",
-        left: 16,
-        top: 14,
+        left: topGraphicLeft,
+        top: isMobile ? 10 : 14,
         children: [
           {
             type: "text",
@@ -2436,81 +2459,83 @@ function buildChartOption(chart, tf, viewport) {
             style: {
               text: `${tf.toUpperCase()} MARKET VIEW`,
               fill: C.muted,
-              font: "700 11px Inter, sans-serif",
+              font: isMobile ? "700 10px Inter, sans-serif" : "700 11px Inter, sans-serif",
             },
           },
           {
             type: "text",
             left: 0,
-            top: 16,
+            top: isMobile ? 14 : 16,
             style: {
               text: formatUsd(stats.lastClose),
               fill: stats.priceColor,
-              font: "800 18px Inter, sans-serif",
+              font: priceFont,
             },
           },
           {
             type: "text",
-            left: 112,
-            top: 19,
+            left: deltaLeft,
+            top: isMobile ? 16 : 19,
             style: {
               text: stats.changePct === null ? "—" : formatPercent(stats.changePct, 2),
               fill: stats.priceColor,
-              font: "700 12px Inter, sans-serif",
+              font: isMobile ? "700 11px Inter, sans-serif" : "700 12px Inter, sans-serif",
             },
           },
         ],
       },
       {
         type: "text",
-        right: 18,
-        top: 16,
+        right: topGraphicRight,
+        top: statsTop,
+        invisible: hideTopStats,
         style: {
           text: `High ${formatUsd(stats.high, 0)}   Low ${formatUsd(stats.low, 0)}   Vol ${compactNumber(stats.volume, 2)}`,
           fill: C.dim,
-          font: "600 11px Inter, sans-serif",
+          font: statsFont,
           textAlign: "right",
         },
       },
       {
         type: "text",
-        right: 18,
-        top: 34,
+        right: topGraphicRight,
+        top: hintTop,
+        invisible: hideTopStats,
         style: {
           text: "Scroll to zoom, drag to pan",
           fill: C.muted,
-          font: "500 10px Inter, sans-serif",
+          font: hintFont,
           textAlign: "right",
         },
       },
       {
         type: "text",
-        left: 16,
+        left: paneGraphicLeft,
         top: paneLabelTop.rsi,
         style: {
           text: "RSI",
           fill: C.muted,
-          font: "700 11px Inter, sans-serif",
+          font: isMobile ? "700 10px Inter, sans-serif" : "700 11px Inter, sans-serif",
         },
       },
       {
         type: "text",
-        left: 16,
+        left: paneGraphicLeft,
         top: paneLabelTop.macd,
         style: {
           text: "MACD",
           fill: C.muted,
-          font: "700 11px Inter, sans-serif",
+          font: isMobile ? "700 10px Inter, sans-serif" : "700 11px Inter, sans-serif",
         },
       },
       {
         type: "text",
-        left: 16,
+        left: paneGraphicLeft,
         top: paneLabelTop.volume,
         style: {
           text: "Volume",
           fill: C.muted,
-          font: "700 11px Inter, sans-serif",
+          font: isMobile ? "700 10px Inter, sans-serif" : "700 11px Inter, sans-serif",
         },
       },
     ],
