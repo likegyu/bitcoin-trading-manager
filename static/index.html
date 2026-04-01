@@ -1604,12 +1604,17 @@ function renderAccountPanel(account) {
       ? `${formatValue(account.effective_leverage, 1)}x`
       : "—"
   );
+  const totalLabel = account.today_total_label || "오늘 손익";
+  const totalMode = account.today_total_mode || "cash";
+  const anchorSource = account.day_anchor_source || "";
   const totalWallet = formatUsd(account.wallet_balance, 2);
   const available = formatUsd(account.available_balance, 2);
   const totalPnl = formatSignedUsd(account.today_total_pnl, 2);
   const totalPnlColor = Number.isFinite(Number(account.today_total_pnl))
     ? (Number(account.today_total_pnl) >= 0 ? C.bull : C.bear)
     : C.muted;
+  const cashPnl = formatSignedUsd(account.today_cash_pnl, 2);
+  const commissionPnl = formatSignedUsd(account.today_commission_fee, 2);
   const totalUpnl = formatSignedUsd(account.open_position_upnl, 2);
   const totalUpnlColor = Number.isFinite(Number(account.open_position_upnl))
     ? (Number(account.open_position_upnl) >= 0 ? C.bull : C.bear)
@@ -1621,6 +1626,10 @@ function renderAccountPanel(account) {
   const remainingToTarget = Number.isFinite(Number(account.remaining_to_target_pct))
     ? formatPercent(account.remaining_to_target_pct, 2)
     : "—";
+  const totalPnlSub = totalMode === "evaluation"
+    ? `${todayPct} / ${anchorSource === "prev_close" ? "전일 마지막 표본 기준 / " : ""}현금손익 ${cashPnl}`
+    : `${todayPct} / ${anchorSource === "cash_fallback" ? "평가 기준점 대기" : `목표까지 ${remainingToTarget}`}`;
+  const upnlSub = `수수료 ${commissionPnl} / 거래 ${Number.isFinite(Number(account.today_trade_count)) ? `${formatValue(account.today_trade_count, 0)}건` : "—"}`;
   const errorMessages = [
     account.balance_error ? `잔고 조회: ${account.balance_error}` : "",
     account.position_error ? `포지션 조회: ${account.position_error}` : "",
@@ -1639,7 +1648,7 @@ function renderAccountPanel(account) {
       <div class="account-context-card">
         <div class="account-context-head">
           <div class="account-context-title">멀티 윈도우 계좌 맥락</div>
-          <div class="account-context-meta">12h / 72h / 7d</div>
+          <div class="account-context-meta">오늘(KST) / 72h / 7d</div>
         </div>
         ${contextSections.map(section => `
           <div class="account-context-section">
@@ -1753,9 +1762,9 @@ function renderAccountPanel(account) {
         <div class="account-summary-sub">사용 가능 ${available}</div>
       </div>
       <div class="account-summary-card">
-        <div class="account-summary-label">오늘 손익</div>
+        <div class="account-summary-label">${escapeHtml(totalLabel)}</div>
         <div class="account-summary-value" style="color:${totalPnlColor};">${totalPnl}</div>
-        <div class="account-summary-sub">${todayPct} / 목표까지 ${remainingToTarget}</div>
+        <div class="account-summary-sub">${escapeHtml(totalPnlSub)}</div>
       </div>
       <div class="account-summary-card">
         <div class="account-summary-label">오픈 포지션</div>
@@ -1763,9 +1772,9 @@ function renderAccountPanel(account) {
         <div class="account-summary-sub">총 명목 ${totalNotional}</div>
       </div>
       <div class="account-summary-card">
-        <div class="account-summary-label">총 미실현</div>
+        <div class="account-summary-label">현재 미실현</div>
         <div class="account-summary-value" style="color:${totalUpnlColor};">${totalUpnl}</div>
-        <div class="account-summary-sub">거래 기록 ${Number.isFinite(Number(account.today_trade_count)) ? `${formatValue(account.today_trade_count, 0)}건` : "—"}</div>
+        <div class="account-summary-sub">${escapeHtml(upnlSub)}</div>
       </div>
     </div>
     ${contextHtml}
@@ -1776,6 +1785,10 @@ function renderAccountPanel(account) {
 
 function isBtcPositionSymbol(symbol) {
   return String(symbol || "").toUpperCase().startsWith("BTC");
+}
+
+function hasOnlyBtcPositions(positions) {
+  return Array.isArray(positions) && positions.every(pos => isBtcPositionSymbol(pos.symbol));
 }
 
 function getRelevantChartPositions() {
@@ -1828,15 +1841,51 @@ function applyLiveBtcPositionMarks(price) {
 
   if (!changed) return;
 
-  const totalUpnl = nextPositions.reduce(
-    (sum, pos) => sum + (Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl) : 0),
-    0,
-  );
-  state.account = {
+  const canRepriceAccount = hasOnlyBtcPositions(nextPositions);
+  const totalUpnl = canRepriceAccount
+    ? nextPositions.reduce(
+        (sum, pos) => sum + (Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl) : 0),
+        0,
+      )
+    : Number(state.account.open_position_upnl);
+  const prevUpnl = Number(state.account.open_position_upnl);
+  const nextAccount = {
     ...state.account,
     open_positions: nextPositions,
     open_position_upnl: totalUpnl,
   };
+  if (
+    canRepriceAccount &&
+    Number.isFinite(prevUpnl) &&
+    Number.isFinite(Number(state.account.account_equity))
+  ) {
+    nextAccount.account_equity = Number(state.account.account_equity) + (totalUpnl - prevUpnl);
+  }
+  if (
+    canRepriceAccount &&
+    nextAccount.today_total_mode === "evaluation" &&
+    Number.isFinite(Number(nextAccount.account_equity)) &&
+    Number.isFinite(Number(nextAccount.day_start_equity))
+  ) {
+    const nextEval = Number(nextAccount.account_equity) - Number(nextAccount.day_start_equity);
+    nextAccount.today_eval_pnl = nextEval;
+    nextAccount.today_total_pnl = nextEval;
+    if (Number(nextAccount.day_start_equity) > 0) {
+      const nextPct = nextEval / Number(nextAccount.day_start_equity) * 100;
+      nextAccount.today_pnl_pct = nextPct;
+      if (Number.isFinite(Number(nextAccount.daily_target_pct))) {
+        nextAccount.remaining_to_target_pct = Number(nextAccount.daily_target_pct) - nextPct;
+      }
+      if (Number.isFinite(Number(nextAccount.daily_target_pct)) && nextPct >= Number(nextAccount.daily_target_pct)) {
+        nextAccount.risk_status = "target_hit";
+      } else if (Number.isFinite(Number(nextAccount.daily_loss_limit_pct)) && nextPct <= Number(nextAccount.daily_loss_limit_pct)) {
+        nextAccount.risk_status = "loss_limit_hit";
+      } else {
+        nextAccount.risk_status = "active";
+      }
+    }
+  }
+  state.account = nextAccount;
   renderAccountPanel(state.account);
 }
 

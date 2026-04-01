@@ -7,13 +7,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
-from time_utils import format_kst
+from time_utils import format_kst, start_of_kst_day
 
 WINDOW_CONFIGS = (
-    {"key": "intraday", "hours": 12, "label": "12시간 실행 맥락", "mode": "intraday"},
+    {"key": "intraday", "hours": 24, "label": "금일 실행 맥락", "mode": "intraday"},
     {"key": "swing", "hours": 72, "label": "72시간 운영 흐름", "mode": "swing"},
     {"key": "weekly", "hours": 168, "label": "7일 계좌 성향", "mode": "weekly"},
 )
+DAY_ANCHOR_GRACE_SECS = 30 * 60
 RETENTION_HOURS = 192
 MAX_ENTRIES = 12000
 MIN_RECORD_INTERVAL_SECS = 60
@@ -199,7 +200,15 @@ def _snapshot_from_context(ctx: dict, observed_at: datetime | None = None) -> di
         "wallet_balance": _as_float(ctx.get("wallet_balance")),
         "available_balance": _as_float(ctx.get("available_balance")),
         "margin_balance": _as_float(ctx.get("margin_balance")),
+        "account_equity": _as_float(ctx.get("account_equity")),
+        "day_start_equity": _as_float(ctx.get("day_start_equity")),
         "today_total_pnl": _as_float(ctx.get("today_total_pnl")),
+        "today_cash_pnl": _as_float(ctx.get("today_cash_pnl")),
+        "today_eval_pnl": _as_float(ctx.get("today_eval_pnl")),
+        "today_commission_fee": _as_float(ctx.get("today_commission_fee")),
+        "today_total_mode": ctx.get("today_total_mode"),
+        "today_total_label": ctx.get("today_total_label"),
+        "day_anchor_source": ctx.get("day_anchor_source"),
         "today_pnl_pct": _as_float(ctx.get("today_pnl_pct")),
         "open_position_count": (
             int(ctx["open_position_count"])
@@ -216,6 +225,7 @@ def _snapshot_from_context(ctx: dict, observed_at: datetime | None = None) -> di
         "position_symbols": _position_symbol_list(position_list),
         "top_positions": _top_positions(position_list),
         "position_signature": _position_signature(position_list),
+        "carryover_positions": list(ctx.get("carryover_positions") or []),
     }
     return snapshot
 
@@ -300,6 +310,129 @@ def _recent_unique(events: list[str], limit: int = 3) -> list[str]:
     return list(reversed(result))
 
 
+def _snapshot_ts(snapshot: dict | None) -> float | None:
+    if not snapshot:
+        return None
+    return _as_float(snapshot.get("observed_ts"))
+
+
+def _snapshot_equity(snapshot: dict | None) -> float | None:
+    if not snapshot:
+        return None
+    equity = _as_float(snapshot.get("account_equity"))
+    if equity is not None:
+        return equity
+
+    wallet = _as_float(snapshot.get("wallet_balance"))
+    upnl = _as_float(snapshot.get("open_position_upnl"))
+    if wallet is not None and upnl is not None:
+        return wallet + upnl
+    return _as_float(snapshot.get("margin_balance"))
+
+
+def _position_side_pairs_from_signature(signature: str | None) -> set[str]:
+    pairs: set[str] = set()
+    raw = str(signature or "").strip()
+    if not raw:
+        return pairs
+    for chunk in raw.split("|"):
+        parts = chunk.split(":")
+        if len(parts) < 2:
+            continue
+        symbol = parts[0].strip().upper()
+        side = parts[1].strip()
+        if symbol and side:
+            pairs.add(f"{symbol}:{side}")
+    return pairs
+
+
+def _position_keys_from_snapshot(snapshot: dict | None) -> tuple[set[str], set[str]]:
+    if not snapshot:
+        return set(), set()
+    pairs = _position_side_pairs_from_signature(snapshot.get("position_signature"))
+    symbols = {str(symbol or "").upper() for symbol in (snapshot.get("position_symbols") or [])}
+    return pairs, symbols
+
+
+def _resolve_day_anchor_snapshots(
+    entries: list[dict],
+    cutoff_ts: float,
+) -> tuple[dict | None, dict | None, str]:
+    prev_close_snapshot = None
+    day_start_snapshot = None
+
+    for entry in entries:
+        entry_ts = _snapshot_ts(entry)
+        if entry_ts is None:
+            continue
+        if entry_ts >= cutoff_ts:
+            day_start_snapshot = entry
+            break
+        prev_close_snapshot = entry
+
+    reliable_prev = None
+    prev_ts = _snapshot_ts(prev_close_snapshot)
+    if prev_ts is not None and cutoff_ts - prev_ts <= DAY_ANCHOR_GRACE_SECS:
+        reliable_prev = prev_close_snapshot
+
+    reliable_day_start = None
+    day_start_ts = _snapshot_ts(day_start_snapshot)
+    if day_start_ts is not None and day_start_ts - cutoff_ts <= DAY_ANCHOR_GRACE_SECS:
+        reliable_day_start = day_start_snapshot
+
+    if reliable_day_start is not None:
+        return reliable_prev, reliable_day_start, "day_start"
+    if reliable_prev is not None:
+        return reliable_prev, None, "prev_close"
+    return None, None, "cash_fallback"
+
+
+def _carryover_positions(
+    prev_snapshot: dict | None,
+    day_start_snapshot: dict | None,
+    positions: list[dict],
+    limit: int = 3,
+) -> list[str]:
+    if not prev_snapshot or not positions:
+        return []
+
+    prev_pairs, prev_symbols = _position_keys_from_snapshot(prev_snapshot)
+    if day_start_snapshot:
+        day_start_pairs, day_start_symbols = _position_keys_from_snapshot(day_start_snapshot)
+        base_pairs = prev_pairs & day_start_pairs
+        base_symbols = prev_symbols & day_start_symbols
+    else:
+        base_pairs = prev_pairs
+        base_symbols = prev_symbols
+
+    carried: list[str] = []
+    seen: set[str] = set()
+
+    for position in positions:
+        symbol = str(position.get("symbol") or "").upper()
+        side = str(position.get("side") or "")
+        if not symbol:
+            continue
+        pair_key = f"{symbol}:{side}" if side else ""
+        matches = pair_key in base_pairs if base_pairs else symbol in base_symbols
+        if not matches:
+            continue
+        label = _top_positions([position], limit=1)[0]
+        if label in seen:
+            continue
+        carried.append(label)
+        seen.add(label)
+        if len(carried) >= limit:
+            break
+    return carried
+
+
+def _window_cutoff(latest_dt: datetime, config: dict) -> datetime:
+    if config.get("mode") == "intraday":
+        return start_of_kst_day(latest_dt).astimezone(timezone.utc)
+    return latest_dt - timedelta(hours=config["hours"])
+
+
 def _distribution(entries: list[dict], field: str, keys: tuple[str, ...]) -> dict[str, int]:
     counts = {key: 0 for key in keys}
     for entry in entries:
@@ -348,6 +481,8 @@ def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
     pnl_start = _first_value(window, "today_total_pnl")
     pnl_end = _last_value(window, "today_total_pnl")
     pnl_min, pnl_max = _series_range(window, "today_total_pnl")
+    cash_end = _last_value(window, "today_cash_pnl")
+    commission_end = _last_value(window, "today_commission_fee")
 
     count_start = _first_value(window, "open_position_count")
     count_end = _last_value(window, "open_position_count")
@@ -366,6 +501,10 @@ def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
     short_end = _as_float(latest.get("short_notional"))
     bias = latest.get("exposure_bias")
     top_positions = list(latest.get("top_positions") or [])
+    total_label = str(latest.get("today_total_label") or "금일 손익")
+    total_mode = str(latest.get("today_total_mode") or "cash")
+    day_anchor_source = str(latest.get("day_anchor_source") or "")
+    carryover_positions = list(latest.get("carryover_positions") or [])
 
     recent_window = window[-8:]
     transitions: list[str] = []
@@ -396,10 +535,21 @@ def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
                 )
             if pnl_end is not None:
                 parts.append(
-                    f"오늘 손익 현재 {_fmt_money(pnl_end)} / 구간 {_fmt_money(pnl_min)}~{_fmt_money(pnl_max)} / 수익률 {_fmt_pct(_as_float(latest.get('today_pnl_pct')))}"
+                    f"{total_label} 현재 {_fmt_money(pnl_end)} / 구간 {_fmt_money(pnl_min)}~{_fmt_money(pnl_max)} / 수익률 {_fmt_pct(_as_float(latest.get('today_pnl_pct')))}"
                 )
             if parts:
                 lines.append("담보·손익: " + " / ".join(parts))
+        cash_parts: list[str] = []
+        if total_mode == "cash" and day_anchor_source == "cash_fallback":
+            cash_parts.append("평가 기준점 대기 중")
+        elif total_mode == "evaluation" and day_anchor_source == "prev_close":
+            cash_parts.append("전일 마지막 표본 기준")
+        if total_mode == "evaluation" and cash_end is not None:
+            cash_parts.append(f"현금손익 {_fmt_money(cash_end)}")
+        if commission_end is not None:
+            cash_parts.append(f"수수료 {_fmt_money(commission_end)}")
+        if cash_parts:
+            lines.append("실현 흐름: " + " / ".join(cash_parts))
 
         position_parts: list[str] = []
         if count_start is not None and count_end is not None:
@@ -419,9 +569,11 @@ def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
         if top_positions:
             exposure_line += f" / 상위 {', '.join(top_positions[:2])}"
         lines.append(exposure_line)
+        if carryover_positions:
+            lines.append("자정 승계: " + " / ".join(carryover_positions))
         if recent_events:
             lines.append("최근 변화: " + " · ".join(recent_events))
-        highlights = recent_events
+        highlights = recent_events + carryover_positions[:2]
 
     elif config["mode"] == "swing":
         lines.append(f"관찰 구간: {meta}")
@@ -531,11 +683,12 @@ class AccountContextTimeline:
         self._writes_since_compact = 0
 
     def observe(self, ctx: dict) -> dict:
-        snapshot = _snapshot_from_context(ctx)
-        current = snapshot if _is_observable(snapshot) else None
-
         with self._lock:
             self._ensure_loaded_locked()
+            self._apply_day_context_locked(ctx)
+
+            snapshot = _snapshot_from_context(ctx)
+            current = snapshot if _is_observable(snapshot) else None
 
             if current is not None:
                 prev = self._entries[-1] if self._entries else None
@@ -573,6 +726,89 @@ class AccountContextTimeline:
                 self._rewrite_locked()
 
         self._loaded = True
+
+    def _apply_day_context_locked(self, ctx: dict) -> None:
+        now_dt = datetime.now(timezone.utc)
+        cutoff_dt = start_of_kst_day(now_dt).astimezone(timezone.utc)
+        cutoff_ts = cutoff_dt.timestamp()
+
+        current_equity = _as_float(ctx.get("account_equity"))
+        if current_equity is None:
+            wallet = _as_float(ctx.get("wallet_balance"))
+            upnl = _as_float(ctx.get("unrealized_pnl"))
+            if wallet is not None and upnl is not None:
+                current_equity = wallet + upnl
+            else:
+                current_equity = _as_float(ctx.get("margin_balance"))
+            ctx["account_equity"] = current_equity
+
+        reliable_prev_snapshot, reliable_day_start_snapshot, day_anchor_source = (
+            _resolve_day_anchor_snapshots(list(self._entries), cutoff_ts)
+        )
+
+        start_equity = None
+        if reliable_day_start_snapshot is not None:
+            start_equity = _snapshot_equity(reliable_day_start_snapshot)
+        elif reliable_prev_snapshot is not None:
+            start_equity = _snapshot_equity(reliable_prev_snapshot)
+        elif current_equity is not None:
+            day_anchor_source = "cash_fallback"
+
+        cash_pnl = _as_float(ctx.get("today_cash_pnl"))
+        eval_pnl = None
+        if (
+            day_anchor_source in {"day_start", "prev_close"}
+            and current_equity is not None
+            and start_equity is not None
+        ):
+            eval_pnl = current_equity - start_equity
+
+        positions = ctx.get("open_positions")
+        position_list = positions if isinstance(positions, list) else []
+        carryover_positions = _carryover_positions(
+            reliable_prev_snapshot,
+            reliable_day_start_snapshot,
+            position_list,
+        )
+
+        ctx["day_start_equity"] = start_equity
+        ctx["day_anchor_source"] = day_anchor_source
+        ctx["today_eval_pnl"] = eval_pnl
+        ctx["today_cash_pnl"] = cash_pnl
+        ctx["carryover_positions"] = carryover_positions
+        if eval_pnl is not None:
+            total_pnl = eval_pnl
+            total_mode = "evaluation"
+            total_label = "금일 평가손익"
+        else:
+            total_pnl = cash_pnl
+            total_mode = "cash"
+            total_label = "금일 현금손익"
+
+        ctx["today_total_pnl"] = total_pnl
+        ctx["today_total_mode"] = total_mode if total_pnl is not None else None
+        ctx["today_total_label"] = total_label if total_pnl is not None else None
+
+        target = _as_float(ctx.get("daily_target_pct"))
+        loss_lim = _as_float(ctx.get("daily_loss_limit_pct"))
+        pnl_base_equity = start_equity
+        if pnl_base_equity is None and total_mode == "cash" and current_equity is not None and cash_pnl is not None:
+            pnl_base_equity = current_equity - cash_pnl
+
+        ctx["today_pnl_pct"] = None
+        ctx["remaining_to_target_pct"] = None
+        ctx["risk_status"] = None
+        if total_pnl is not None and pnl_base_equity is not None and pnl_base_equity > 0:
+            today_pct = total_pnl / pnl_base_equity * 100
+            ctx["today_pnl_pct"] = today_pct
+            if target is not None:
+                ctx["remaining_to_target_pct"] = target - today_pct
+            if target is not None and today_pct >= target:
+                ctx["risk_status"] = "target_hit"
+            elif loss_lim is not None and today_pct <= loss_lim:
+                ctx["risk_status"] = "loss_limit_hit"
+            else:
+                ctx["risk_status"] = "active"
 
     def _should_store(self, prev: dict | None, curr: dict) -> bool:
         if prev is None:
@@ -667,7 +903,7 @@ class AccountContextTimeline:
         flat_lines: list[str] = []
 
         for config in WINDOW_CONFIGS:
-            cutoff = latest_dt - timedelta(hours=config["hours"])
+            cutoff = _window_cutoff(latest_dt, config)
             window = [
                 entry
                 for entry in timeline

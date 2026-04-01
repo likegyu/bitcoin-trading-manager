@@ -5,14 +5,19 @@
 import hmac
 import hashlib
 import time as _time
+from threading import Lock
 import requests
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Optional
 from urllib.parse import urlsplit
 import config as _cfg
 from account_history import attach_account_context_summary
+from time_utils import start_of_kst_day
 
 TRACKED_COLLATERAL_ASSETS = ("USDT", "USDC")
+INCOME_CACHE_TTL_SECS = 8.0
+_INCOME_CACHE_LOCK = Lock()
+_INCOME_CACHE: dict[tuple[str, int], dict] = {}
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -178,6 +183,72 @@ def _fetch_balance(ctx: dict) -> None:
         )
 
 
+def _account_equity(ctx: dict) -> float | None:
+    wallet = ctx.get("wallet_balance")
+    upnl = ctx.get("unrealized_pnl")
+    try:
+        if wallet is not None and upnl is not None:
+            return float(wallet) + float(upnl)
+        if ctx.get("margin_balance") is not None:
+            return float(ctx["margin_balance"])
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _income_cache_key(symbol: Optional[str], start_ms: int) -> tuple[str, int]:
+    return (str(symbol or "").upper(), int(start_ms))
+
+
+def _fetch_income_summary(symbol: Optional[str], start_ms: int) -> dict:
+    cache_key = _income_cache_key(symbol, start_ms)
+    now_mono = _time.monotonic()
+
+    with _INCOME_CACHE_LOCK:
+        cached = _INCOME_CACHE.get(cache_key)
+        if cached and cached.get("expires_at", 0.0) > now_mono:
+            return dict(cached["value"])
+
+    base_params = {"startTime": start_ms, "limit": 1000}
+    if symbol:
+        base_params["symbol"] = symbol
+
+    pnl_records = _signed_get(
+        "/fapi/v1/income", {**base_params, "incomeType": "REALIZED_PNL"}
+    )
+    fee_records = _signed_get(
+        "/fapi/v1/income", {**base_params, "incomeType": "FUNDING_FEE"}
+    )
+    commission_records = _signed_get(
+        "/fapi/v1/income", {**base_params, "incomeType": "COMMISSION"}
+    )
+
+    trade_keys = {
+        (item.get("symbol"), item.get("time"), item.get("tranId"))
+        for item in [*pnl_records, *commission_records]
+    }
+    summary = {
+        "realized": sum(float(item["income"]) for item in pnl_records),
+        "funding": sum(float(item["income"]) for item in fee_records),
+        "commission": sum(float(item["income"]) for item in commission_records),
+        "trade_count": len(trade_keys),
+    }
+
+    with _INCOME_CACHE_LOCK:
+        expired_keys = [
+            key for key, value in _INCOME_CACHE.items()
+            if value.get("expires_at", 0.0) <= now_mono
+        ]
+        for key in expired_keys:
+            _INCOME_CACHE.pop(key, None)
+        _INCOME_CACHE[cache_key] = {
+            "expires_at": now_mono + INCOME_CACHE_TTL_SECS,
+            "value": summary,
+        }
+
+    return dict(summary)
+
+
 def fetch_account_context(symbol: Optional[str] = None) -> dict:
     """
     Binance Futures API로 계좌 현황을 수집.
@@ -187,6 +258,7 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
 
     # ── 잔고 ──────────────────────────────────
     _fetch_balance(ctx)
+    ctx["account_equity"] = _account_equity(ctx)
 
     # ── 오픈 포지션 ───────────────────────────
     try:
@@ -264,42 +336,39 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
         ctx["leverage_mode"] = "error"
         ctx["position_error"] = _safe_error_message(exc)
 
-    # ── 오늘 손익: 실현 손익 + 펀딩비 (UTC 00:00 기준) ──
+    # ── 오늘 손익: 실현 손익 + 펀딩비 (KST 00:00 기준) ──
     try:
-        now_utc = datetime.now(timezone.utc)
-        today_start_ms = int(
-            now_utc.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000
-        )
-        base_params = {"startTime": today_start_ms, "limit": 1000}
-        if symbol:
-            base_params["symbol"] = symbol
-
-        # 실현 손익
-        pnl_records = _signed_get(
-            "/fapi/v1/income", {**base_params, "incomeType": "REALIZED_PNL"}
-        )
-        today_realized = sum(float(i["income"]) for i in pnl_records)
-        # 거래 기록 수: 멀티 심볼 기준으로도 충돌이 적도록 symbol/time/tranId 조합 사용
-        trade_keys = {
-            (i.get("symbol"), i.get("time"), i.get("tranId"))
-            for i in pnl_records
-        }
-        ctx["today_trade_count"] = len(trade_keys)
-
-        # 펀딩비 (수취 +, 지불 -)
-        fee_records = _signed_get(
-            "/fapi/v1/income", {**base_params, "incomeType": "FUNDING_FEE"}
-        )
-        today_funding = sum(float(i["income"]) for i in fee_records)
+        today_start_ms = int(start_of_kst_day().astimezone(timezone.utc).timestamp() * 1000)
+        income_summary = _fetch_income_summary(symbol, today_start_ms)
+        today_realized = income_summary["realized"]
+        today_funding = income_summary["funding"]
+        today_commission = income_summary["commission"]
+        ctx["today_trade_count"] = income_summary["trade_count"]
 
         ctx["today_realized_pnl"] = today_realized
         ctx["today_funding_fee"]  = today_funding
-        ctx["today_total_pnl"]    = today_realized + today_funding
+        ctx["today_commission_fee"] = today_commission
+        ctx["today_cash_pnl"] = today_realized + today_funding + today_commission
+        ctx["today_eval_pnl"] = None
+        ctx["today_total_pnl"] = ctx["today_cash_pnl"]
+        ctx["today_total_mode"] = "cash"
+        ctx["today_total_label"] = "금일 현금손익"
+        ctx["day_start_equity"] = None
+        ctx["day_anchor_source"] = "cash"
+        ctx["carryover_positions"] = []
         ctx["pnl_error"]          = None
     except Exception as exc:
         ctx["today_realized_pnl"] = None
         ctx["today_funding_fee"]  = None
+        ctx["today_commission_fee"] = None
+        ctx["today_cash_pnl"] = None
+        ctx["today_eval_pnl"] = None
         ctx["today_total_pnl"]    = None
+        ctx["today_total_mode"] = None
+        ctx["today_total_label"] = None
+        ctx["day_start_equity"] = None
+        ctx["day_anchor_source"] = None
+        ctx["carryover_positions"] = []
         ctx["today_trade_count"]  = None
         ctx["pnl_error"]          = _safe_error_message(exc)
 
@@ -310,6 +379,7 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
 
     # ── UI / 보고용 요약 필드 ──────────────────
     wallet = ctx.get("wallet_balance")
+    equity = ctx.get("account_equity")
     total_pnl = ctx.get("today_total_pnl")
     target = ctx.get("daily_target_pct")
     loss_lim = ctx.get("daily_loss_limit_pct")
@@ -317,8 +387,10 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
     ctx["remaining_to_target_pct"] = None
     ctx["risk_status"] = None
 
-    if wallet is not None and total_pnl is not None:
-        start_balance = wallet - total_pnl
+    if equity is not None and total_pnl is not None:
+        start_balance = equity - total_pnl
+        if ctx.get("day_start_equity") is None and start_balance > 0:
+            ctx["day_start_equity"] = start_balance
         today_pct = (total_pnl / start_balance * 100) if start_balance > 0 else 0
         ctx["today_pnl_pct"] = today_pct
         if target is not None:
@@ -363,15 +435,21 @@ def format_account_context(ctx: dict) -> str:
 
     # ── 일일 손익 & 목표/한도 ─────────────────
     total_pnl = ctx.get("today_total_pnl")
+    total_label = ctx.get("today_total_label") or "오늘 손익"
+    total_mode = ctx.get("today_total_mode") or "cash"
+    cash_pnl = ctx.get("today_cash_pnl")
     realized  = ctx.get("today_realized_pnl")
     funding   = ctx.get("today_funding_fee")
+    commission = ctx.get("today_commission_fee")
+    anchor_source = ctx.get("day_anchor_source") or ""
     target    = ctx.get("daily_target_pct", 0.7)
     loss_lim  = ctx.get("daily_loss_limit_pct", -2.0)
     lev_display = ctx.get("leverage_display")
+    start_equity = ctx.get("day_start_equity")
+    current_equity = ctx.get("account_equity")
 
-    if total_pnl is not None and wallet:
-        # 오늘 시작 잔고 기준으로 수익률 계산 (현재 잔고 - 오늘 손익)
-        start_balance = wallet - total_pnl
+    if total_pnl is not None and current_equity is not None:
+        start_balance = start_equity if start_equity is not None else (current_equity - total_pnl)
         today_pct = (total_pnl / start_balance * 100) if start_balance > 0 else 0
         remaining = target - today_pct
         status    = ""
@@ -380,10 +458,29 @@ def format_account_context(ctx: dict) -> str:
         elif today_pct <= loss_lim:
             status = "  🚫 일일 손실 한도 도달 — 추가 거래 중단 권장"
 
-        lines.append(f"  오늘 총 손익:    ${total_pnl:+,.2f} ({today_pct:+.2f}%)")
-        if realized is not None and funding is not None:
-            lines.append(f"    ├ 실현 손익:  ${realized:+,.2f}")
-            lines.append(f"    └ 펀딩비:     ${funding:+,.2f}")
+        lines.append(f"  {total_label}(KST): ${total_pnl:+,.2f} ({today_pct:+.2f}%)")
+        detail_lines: list[str] = []
+        if total_mode == "evaluation" and start_equity is not None:
+            detail_lines.append(
+                f"자정 기준 평가: ${start_equity:,.2f} → 현재 ${current_equity:,.2f}"
+            )
+        if total_mode == "evaluation" and anchor_source == "prev_close":
+            detail_lines.append("평가 기준:  전일 마지막 표본으로 보정")
+        if total_mode == "cash" and anchor_source == "cash_fallback":
+            detail_lines.append("평가 기준:  자정 인근 표본 대기 중")
+        if cash_pnl is not None and total_mode == "evaluation":
+            detail_lines.append(f"현금손익:  ${cash_pnl:+,.2f}")
+        if realized is not None:
+            detail_lines.append(f"실현 손익:  ${realized:+,.2f}")
+        if funding is not None:
+            detail_lines.append(f"펀딩비:     ${funding:+,.2f}")
+        if commission is not None:
+            detail_lines.append(f"거래 수수료: ${commission:+,.2f}")
+        if ctx.get("open_position_upnl") is not None:
+            detail_lines.append(f"현재 미실현: ${ctx['open_position_upnl']:+,.2f}")
+        for idx, detail in enumerate(detail_lines):
+            branch = "└" if idx == len(detail_lines) - 1 else "├"
+            lines.append(f"    {branch} {detail}")
         lines.append(
             f"  일일 목표:       +{target:.1f}%  |  손실 한도: {loss_lim:.1f}%  |  잔여: {remaining:+.2f}%"
         )

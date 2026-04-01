@@ -62,6 +62,8 @@ CHART_WINDOW = 120
 BASE_OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
 ACCOUNT_STREAM_WS_BASE = "wss://fstream.binance.com/ws"
 ACCOUNT_STREAM_KEEPALIVE_SECS = 50 * 60
+ACCOUNT_REFRESH_DEBOUNCE_SECS = 0.35
+ACCOUNT_REFRESH_MIN_INTERVAL_SECS = 1.5
 MARKET_STREAM_WS_BASE = "wss://fstream.binance.com/stream"
 MACRO_REFRESH_SECS = 60 * 60
 
@@ -550,6 +552,8 @@ class AccountStreamManager:
         self._listeners: set[asyncio.Queue] = set()
         self._runner_task: asyncio.Task | None = None
         self._refresh_task: asyncio.Task | None = None
+        self._pending_refresh = False
+        self._last_refresh_started_at = 0.0
         self._stopped = False
 
     async def start(self):
@@ -663,18 +667,41 @@ class AccountStreamManager:
 
     def _schedule_refresh(self):
         if self._refresh_task and not self._refresh_task.done():
+            self._pending_refresh = True
             return
         self._refresh_task = asyncio.create_task(self._refresh_payload())
 
-    async def _refresh_payload(self, delay: float = 0.35, broadcast: bool = True):
-        if delay > 0:
-            await asyncio.sleep(delay)
-        payload = await asyncio.to_thread(_build_account_payload)
-        async with self._lock:
-            self._payload = payload
-            self._ready.set()
-        if broadcast:
-            await self._broadcast({"type": "account", "data": payload})
+    async def _refresh_payload(
+        self,
+        delay: float = ACCOUNT_REFRESH_DEBOUNCE_SECS,
+        broadcast: bool = True,
+    ):
+        loop = asyncio.get_running_loop()
+        min_delay = max(
+            0.0,
+            ACCOUNT_REFRESH_MIN_INTERVAL_SECS - (loop.time() - self._last_refresh_started_at),
+        )
+        wait_for = max(delay, min_delay)
+        if wait_for > 0:
+            await asyncio.sleep(wait_for)
+
+        self._last_refresh_started_at = loop.time()
+        try:
+            payload = await asyncio.to_thread(_build_account_payload)
+            async with self._lock:
+                self._payload = payload
+                self._ready.set()
+            if broadcast:
+                await self._broadcast({"type": "account", "data": payload})
+        finally:
+            pending = self._pending_refresh
+            self._pending_refresh = False
+            if pending and not self._stopped:
+                self._refresh_task = asyncio.create_task(
+                    self._refresh_payload(delay=ACCOUNT_REFRESH_DEBOUNCE_SECS)
+                )
+            else:
+                self._refresh_task = None
 
     async def _broadcast(self, message: dict):
         async with self._lock:
