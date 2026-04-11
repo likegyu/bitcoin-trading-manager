@@ -14,7 +14,7 @@ from account_history import (
 from time_utils import start_of_kst_day
 
 
-def _position(symbol: str = "BTCUSDC", side: str = "롱", notional: float = 10000.0) -> dict:
+def _position(symbol: str = "BTCUSDT", side: str = "롱", notional: float = 10000.0) -> dict:
     return {
         "symbol": symbol,
         "side": side,
@@ -103,7 +103,7 @@ class AccountHistoryDayAnchorTests(unittest.TestCase):
         self.assertEqual(current["today_total_mode"], "evaluation")
         self.assertEqual(current["day_anchor_source"], "prev_close")
         self.assertAlmostEqual(current["today_total_pnl"], 70.0, places=6)
-        self.assertEqual(current["carryover_positions"], ["BTCUSDC 롱 $10,000.00"])
+        self.assertEqual(current["carryover_positions"], ["BTCUSDT 롱 $10,000.00"])
 
     def test_reopened_position_is_not_marked_as_carryover(self):
         self._append_snapshot(
@@ -137,7 +137,7 @@ class AccountHistoryDayAnchorTests(unittest.TestCase):
 
         self.assertEqual(current["today_total_mode"], "evaluation")
         self.assertEqual(current["day_anchor_source"], "day_start")
-        self.assertEqual(current["carryover_positions"], ["BTCUSDC 롱 $10,000.00"])
+        self.assertEqual(current["carryover_positions"], ["BTCUSDT 롱 $10,000.00"])
 
 
 if __name__ == "__main__":
