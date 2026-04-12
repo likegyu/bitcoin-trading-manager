@@ -200,6 +200,26 @@ def _income_cache_key(symbol: Optional[str], start_ms: int) -> tuple[str, int]:
     return (str(symbol or "").upper(), int(start_ms))
 
 
+_INCOME_PAGE_LIMIT = 1000  # Binance 단일 요청 최대값
+
+
+def _fetch_income_all(income_type: str, base_params: dict) -> list:
+    """1000건 초과 거래를 페이지네이션으로 전량 수집."""
+    records: list = []
+    params = {**base_params, "incomeType": income_type, "limit": _INCOME_PAGE_LIMIT}
+    while True:
+        page = _signed_get("/fapi/v1/income", params)
+        if not page:
+            break
+        records.extend(page)
+        if len(page) < _INCOME_PAGE_LIMIT:
+            break
+        # 마지막 항목의 time + 1ms 를 startTime으로 설정해 다음 페이지 조회
+        last_time = int(page[-1].get("time") or 0)
+        params = {**params, "startTime": last_time + 1}
+    return records
+
+
 def _fetch_income_summary(symbol: Optional[str], start_ms: int) -> dict:
     cache_key = _income_cache_key(symbol, start_ms)
     now_mono = _time.monotonic()
@@ -209,28 +229,22 @@ def _fetch_income_summary(symbol: Optional[str], start_ms: int) -> dict:
         if cached and cached.get("expires_at", 0.0) > now_mono:
             return dict(cached["value"])
 
-    base_params = {"startTime": start_ms, "limit": 1000}
+    base_params: dict = {"startTime": start_ms}
     if symbol:
         base_params["symbol"] = symbol
 
-    pnl_records = _signed_get(
-        "/fapi/v1/income", {**base_params, "incomeType": "REALIZED_PNL"}
-    )
-    fee_records = _signed_get(
-        "/fapi/v1/income", {**base_params, "incomeType": "FUNDING_FEE"}
-    )
-    commission_records = _signed_get(
-        "/fapi/v1/income", {**base_params, "incomeType": "COMMISSION"}
-    )
+    pnl_records        = _fetch_income_all("REALIZED_PNL", base_params)
+    fee_records        = _fetch_income_all("FUNDING_FEE",  base_params)
+    commission_records = _fetch_income_all("COMMISSION",   base_params)
 
     trade_keys = {
         (item.get("symbol"), item.get("time"), item.get("tranId"))
         for item in [*pnl_records, *commission_records]
     }
     summary = {
-        "realized": sum(float(item["income"]) for item in pnl_records),
-        "funding": sum(float(item["income"]) for item in fee_records),
-        "commission": sum(float(item["income"]) for item in commission_records),
+        "realized":    sum(float(item["income"]) for item in pnl_records),
+        "funding":     sum(float(item["income"]) for item in fee_records),
+        "commission":  sum(float(item["income"]) for item in commission_records),
         "trade_count": len(trade_keys),
     }
 
@@ -388,7 +402,16 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
     ctx["risk_status"] = None
 
     if equity is not None and total_pnl is not None:
-        start_balance = equity - total_pnl
+        # wallet_balance 기준: unrealized PnL을 분모에서 제외해 수익률 오차 방지
+        # equity(=wallet+unrealized)를 쓰면 오픈 포지션 규모만큼 분모가 부풀려짐
+        wallet = ctx.get("wallet_balance")
+        cash_pnl = ctx.get("today_cash_pnl") or total_pnl
+        if wallet is not None:
+            start_balance = wallet - cash_pnl
+        else:
+            start_balance = equity - total_pnl
+        if start_balance <= 0:
+            start_balance = equity - total_pnl  # fallback
         if ctx.get("day_start_equity") is None and start_balance > 0:
             ctx["day_start_equity"] = start_balance
         today_pct = (total_pnl / start_balance * 100) if start_balance > 0 else 0
@@ -449,7 +472,15 @@ def format_account_context(ctx: dict) -> str:
     current_equity = ctx.get("account_equity")
 
     if total_pnl is not None and current_equity is not None:
-        start_balance = start_equity if start_equity is not None else (current_equity - total_pnl)
+        if start_equity is not None:
+            start_balance = start_equity
+        else:
+            # wallet_balance 기준 역산: unrealized PnL을 분모에서 제외
+            _wallet = ctx.get("wallet_balance")
+            _cash = cash_pnl if cash_pnl is not None else total_pnl
+            start_balance = (_wallet - _cash) if _wallet is not None else (current_equity - total_pnl)
+            if start_balance <= 0:
+                start_balance = current_equity - total_pnl
         today_pct = (total_pnl / start_balance * 100) if start_balance > 0 else 0
         remaining = target - today_pct
         status    = ""
