@@ -185,6 +185,13 @@ body {
   border-radius: 8px; cursor: pointer; transition: all .15s;
 }
 .tab-btn.active { background: #FFFFFF; color: #C2410C; }
+.arrow-toggle-btn {
+  flex: none; padding: 5px 8px; font-size: 14px;
+  background: transparent; border: none; border-radius: 8px;
+  cursor: pointer; transition: all .15s; opacity: 0.45;
+  margin-left: auto;
+}
+.arrow-toggle-btn.active { background: #FFFFFF; opacity: 1; }
 .chart-container {
   padding: 8px 8px 6px;
   background:
@@ -991,6 +998,7 @@ body {
         <button class="tab-btn"        data-tf="1h"  onclick="switchTab('1h')">1h</button>
         <button class="tab-btn"        data-tf="4h"  onclick="switchTab('4h')">4h</button>
         <button class="tab-btn"        data-tf="1d"  onclick="switchTab('1d')">1d</button>
+        <button id="arrow-toggle-btn" class="arrow-toggle-btn" onclick="toggleHistoryArrows()" title="분석 신호 화살표 표시/숨김">📍</button>
       </div>
       <div class="chart-container">
         <div id="chart-plot">
@@ -1091,10 +1099,10 @@ body {
             </div>
             <div id="aa-controls" style="display:none;">
               <select id="aa-interval" class="interval-select" onchange="onIntervalChange()">
-                <option value="15">15분마다</option>
-                <option value="30" selected>30분마다</option>
-                <option value="60">1시간마다</option>
+                <option value="30">30분마다</option>
+                <option value="60" selected>1시간마다</option>
                 <option value="240">4시간마다</option>
+                <option value="720">12시간마다</option>
               </select>
               <div id="aa-countdown" class="countdown-badge">—</div>
             </div>
@@ -1239,6 +1247,9 @@ const state = {
   analysisFromCache:false,
   analysisStale:false,
   lastMarketUpdate:null,
+  // 차트 분석 화살표 오버레이
+  analysisHistory: [],
+  showHistoryArrows: localStorage.getItem("showHistoryArrows") !== "false",
 };
 
 function persistAnalysisCache(data) {
@@ -1527,6 +1538,8 @@ function applyResult(data, options = {}) {
   if (persist) {
     persistAnalysisCache(data);
     notifyAnalysisResult(data);
+    // 분석 완료 후 화살표 오버레이 갱신 (약간 딜레이 후 서버 기록이 확정된 뒤 로드)
+    setTimeout(() => loadAnalysisHistory(), 1200);
   }
 }
 
@@ -2489,6 +2502,109 @@ function buildTooltipHtml(chart, params) {
   ].join("");
 }
 
+// ── 분석 히스토리 화살표 오버레이 ─────────────────
+// 분석 히스토리를 가져와 state에 캐시하고 차트를 재렌더링
+async function loadAnalysisHistory() {
+  try {
+    const res = await fetch("/api/analysis-history?limit=200");
+    const data = await res.json();
+    state.analysisHistory = data.entries || [];
+    renderCurrentChart(); // 화살표 포함해서 차트 재렌더
+  } catch (e) {
+    // 히스토리 로드 실패는 조용히 무시
+  }
+}
+
+// 차트 labels 배열에서 ISO timestamp에 가장 가까운 인덱스를 찾음
+function findClosestLabelIndex(labels, isoTimestamp) {
+  if (!labels || !labels.length || !isoTimestamp) return -1;
+  // ISO → "YYYY-MM-DD HH:MM" 형식으로 변환
+  const dt = new Date(isoTimestamp);
+  if (isNaN(dt)) return -1;
+  const pad = n => String(n).padStart(2, "0");
+  const target = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  const targetMs = dt.getTime();
+
+  // 완전 일치 먼저 탐색
+  const exactIdx = labels.indexOf(target);
+  if (exactIdx !== -1) return exactIdx;
+
+  // 가장 가까운 라벨 (밀리초 차이 기준)
+  let bestIdx = -1, bestDiff = Infinity;
+  labels.forEach((lbl, i) => {
+    const t = new Date(lbl.replace(" ", "T") + ":00Z").getTime();
+    if (!isNaN(t)) {
+      const diff = Math.abs(t - targetMs);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    }
+  });
+  // 한 캔들 간격(타임프레임별)보다 너무 멀면 무시
+  return bestIdx;
+}
+
+// 분석 히스토리 → markPoint data 배열 생성
+function buildAnalysisMarkPoints(chart, tf) {
+  if (!state.showHistoryArrows || !state.analysisHistory.length) return [];
+
+  // 타임프레임별 허용 오차 (ms)
+  const TF_TOLERANCE = { "5m": 5*60e3, "15m": 15*60e3, "1h": 60*60e3, "4h": 4*60*60e3, "1d": 24*60*60e3 };
+  const tolerance = (TF_TOLERANCE[tf] || 60*60e3) * 1.5; // 1.5배 여유
+
+  const labels = chart.labels || [];
+  const candles = chart.candles || [];
+  const points = [];
+
+  state.analysisHistory.forEach(entry => {
+    if (!entry.timestamp || !entry.signal) return;
+    if (entry.signal === "홀드") return; // 홀드는 표시 안 함
+
+    const idx = findClosestLabelIndex(labels, entry.timestamp);
+    if (idx < 0) return;
+
+    // 오차 체크
+    const entryMs = new Date(entry.timestamp).getTime();
+    const labelMs = new Date((labels[idx] || "").replace(" ", "T") + ":00Z").getTime();
+    if (!isNaN(labelMs) && Math.abs(entryMs - labelMs) > tolerance) return;
+
+    const candle = candles[idx]; // [open, close, low, high]
+    if (!candle) return;
+    const high = Number(candle[3]);
+    const low  = Number(candle[2]);
+    if (!Number.isFinite(high) || !Number.isFinite(low)) return;
+
+    const isBuy  = entry.signal === "매수";
+    const color  = isBuy ? "#16A34A" : "#DC2626";
+    const borderColor = isBuy ? "#BBF7D0" : "#FECACA";
+    const conf   = entry.confidence != null ? `${entry.confidence}%` : "";
+    const priceStr = entry.price != null ? `$${Number(entry.price).toLocaleString("en-US",{maximumFractionDigits:0})}` : "";
+
+    points.push({
+      coord: [labels[idx], isBuy ? low : high],
+      symbolOffset: isBuy ? [0, "70%"] : [0, "-70%"],
+      symbol: isBuy ? "triangle" : "triangle",
+      symbolRotate: isBuy ? 0 : 180,
+      symbolSize: [14, 10],
+      itemStyle: { color, borderColor, borderWidth: 1 },
+      label: {
+        show: true,
+        position: isBuy ? "bottom" : "top",
+        distance: 4,
+        formatter: isBuy ? "▲" : "▼",
+        color: "#FFFFFF",
+        fontSize: 10,
+        fontWeight: 700,
+      },
+      tooltip: {
+        formatter: () => {
+          const time = entry.timestamp.replace("T", " ").slice(0, 16);
+          return `<b>${entry.signal}</b> ${conf}<br/>${time}<br/>${priceStr}`;
+        },
+      },
+    });
+  });
+  return points;
+}
+
 function buildChartOption(chart, tf, viewport) {
   const len = chart.labels.length;
   const zoom = getChartViewport(tf, len);
@@ -2805,6 +2921,12 @@ function buildChartOption(chart, tf, viewport) {
             formatter: params => params?.data?.name || "",
           },
           data: buildPriceGuides(chart, viewport),
+        },
+        markPoint: {
+          animation: false,
+          data: buildAnalysisMarkPoints(chart, tf),
+          tooltip: { trigger: "item" },
+          z: 10,
         },
         z: 3,
       },
@@ -3459,7 +3581,7 @@ updateNotifBtn();
 // ══════════════════════════════════════════════
 const autoAnalyze = {
   on:            false,
-  intervalMin:   30,
+  intervalMin:   60,
   timer:         null,
   countdownTimer:null,
   nextTime:      null,
@@ -3469,7 +3591,7 @@ const autoAnalyze = {
   try {
     const saved = JSON.parse(localStorage.getItem("auto_analyze") || "{}");
     if (saved.on) {
-      autoAnalyze.intervalMin = Number(saved.intervalMin) || 30;
+      autoAnalyze.intervalMin = Number(saved.intervalMin) || 60;
       const sel = document.getElementById("aa-interval");
       if (sel) sel.value = String(autoAnalyze.intervalMin);
       startAutoAnalyze();
@@ -3483,7 +3605,7 @@ function toggleAutoAnalyze() {
 
 function startAutoAnalyze() {
   autoAnalyze.on = true;
-  const mins = Number(document.getElementById("aa-interval")?.value || 30);
+  const mins = Number(document.getElementById("aa-interval")?.value || 60);
   autoAnalyze.intervalMin = mins;
   localStorage.setItem("auto_analyze", JSON.stringify({ on: true, intervalMin: mins }));
   scheduleNextAnalyze();
@@ -3624,6 +3746,25 @@ function renderHistory(entries) {
 
 // 초기 로드
 fetchHistory();
+
+// ── 화살표 오버레이 토글 ──────────────────────
+function toggleHistoryArrows() {
+  state.showHistoryArrows = !state.showHistoryArrows;
+  localStorage.setItem("showHistoryArrows", state.showHistoryArrows ? "true" : "false");
+  updateArrowToggleBtn();
+  renderCurrentChart();
+}
+
+function updateArrowToggleBtn() {
+  const btn = document.getElementById("arrow-toggle-btn");
+  if (!btn) return;
+  btn.classList.toggle("active", state.showHistoryArrows);
+  btn.title = state.showHistoryArrows ? "분석 신호 화살표 숨김" : "분석 신호 화살표 표시";
+}
+
+// 초기 버튼 상태 설정 및 히스토리 로드
+updateArrowToggleBtn();
+loadAnalysisHistory();
 
 // ══════════════════════════════════════════════
 // 성과 대시보드

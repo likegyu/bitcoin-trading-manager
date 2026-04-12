@@ -15,7 +15,7 @@ load_dotenv()
 
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 FRED_API_KEY   = os.getenv("FRED_API_KEY", "")
-CLAUDE_MODEL   = os.getenv("CLAUDE_MODEL", "claude-opus-4-6")
+CLAUDE_MODEL   = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 BINANCE_BASE_URL    = "https://api.binance.com"
 BINANCE_FUTURES_URL = "https://fapi.binance.com"
