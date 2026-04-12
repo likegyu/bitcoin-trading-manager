@@ -969,6 +969,95 @@ _analysis_manager = AnalysisManager()
 
 
 # ══════════════════════════════════════════════
+# 서버 사이드 자동 분석 스케줄러
+# ══════════════════════════════════════════════
+import datetime as _dt
+
+SCHEDULE_STATE_PATH = os.path.join(BASE_DIR, "data", "schedule_state.json")
+
+class ScheduleManager:
+    """서버에서 주기적으로 분석을 실행하는 백그라운드 스케줄러."""
+
+    def __init__(self):
+        self._enabled: bool = False
+        self._interval_min: int = 60        # 기본 1시간
+        self._next_run_at: str | None = None
+        self._task: asyncio.Task | None = None
+        self._lock = asyncio.Lock()
+        self._load_state()
+
+    def _load_state(self):
+        """서버 재시작 후에도 설정을 복원한다."""
+        try:
+            if os.path.exists(SCHEDULE_STATE_PATH):
+                with open(SCHEDULE_STATE_PATH, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                self._enabled      = bool(saved.get("enabled", False))
+                self._interval_min = int(saved.get("interval_min", 60))
+        except Exception:
+            pass
+
+    def _save_state(self):
+        try:
+            os.makedirs(os.path.dirname(SCHEDULE_STATE_PATH), exist_ok=True)
+            with open(SCHEDULE_STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump({"enabled": self._enabled, "interval_min": self._interval_min}, f)
+        except Exception:
+            pass
+
+    def status(self) -> dict:
+        return {
+            "enabled":      self._enabled,
+            "interval_min": self._interval_min,
+            "next_run_at":  self._next_run_at,
+        }
+
+    async def set_schedule(self, enabled: bool, interval_min: int):
+        async with self._lock:
+            self._enabled      = enabled
+            self._interval_min = max(5, interval_min)   # 최소 5분
+            self._save_state()
+            await self._restart_task()
+
+    async def start(self):
+        """앱 시작 시 호출. 저장된 설정이 enabled면 태스크 재개."""
+        if self._enabled:
+            await self._restart_task()
+
+    async def stop(self):
+        if self._task and not self._task.done():
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+
+    async def _restart_task(self):
+        await self.stop()
+        if self._enabled:
+            self._task = asyncio.create_task(
+                self._loop(), name="schedule-auto-analyze"
+            )
+
+    async def _loop(self):
+        while True:
+            wait_sec = self._interval_min * 60
+            next_dt  = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(seconds=wait_sec)
+            self._next_run_at = next_dt.isoformat()
+            try:
+                await asyncio.sleep(wait_sec)
+            except asyncio.CancelledError:
+                self._next_run_at = None
+                raise
+            # 분석 실행 (이미 진행 중이면 skip)
+            _, started = await _analysis_manager.start_job()
+            if not started:
+                print("[scheduler] analysis already running – skipped")
+
+
+_schedule_manager = ScheduleManager()
+
+
+# ══════════════════════════════════════════════
 # Routes
 # ══════════════════════════════════════════════
 @app.on_event("startup")
@@ -976,6 +1065,7 @@ async def on_startup():
     await _market_stream.start()
     await _account_stream.start()
     await _macro_snapshot.start()
+    await _schedule_manager.start()
 
 
 @app.on_event("shutdown")
@@ -984,6 +1074,7 @@ async def on_shutdown():
     await _account_stream.stop()
     await _macro_snapshot.stop()
     await _analysis_manager.stop()
+    await _schedule_manager.stop()
 
 
 @app.get("/api/market-stream")
@@ -1034,6 +1125,24 @@ async def account_stream():
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/api/schedule")
+async def schedule_get():
+    """현재 자동분석 스케줄 상태 반환."""
+    return _schedule_manager.status()
+
+
+class ScheduleSetRequest(BaseModel):
+    enabled:      bool
+    interval_min: int = 60
+
+
+@app.post("/api/schedule")
+async def schedule_set(body: ScheduleSetRequest):
+    """자동분석 스케줄 설정. enabled=true + interval_min(분) 으로 서버 측 타이머를 제어."""
+    await _schedule_manager.set_schedule(body.enabled, body.interval_min)
+    return _schedule_manager.status()
 
 
 @app.post("/api/analyze")

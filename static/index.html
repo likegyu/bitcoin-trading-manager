@@ -3577,79 +3577,98 @@ function notifyAnalysisResult(data) {
 updateNotifBtn();
 
 // ══════════════════════════════════════════════
-// 자동 주기 분석
+// 자동 주기 분석 — 서버 사이드 스케줄 기반
 // ══════════════════════════════════════════════
 const autoAnalyze = {
-  on:            false,
-  intervalMin:   60,
-  timer:         null,
-  countdownTimer:null,
-  nextTime:      null,
+  on:           false,
+  intervalMin:  60,
+  nextRunAt:    null,   // ISO string from server
+  _pollTimer:   null,   // 서버 상태 polling 타이머
+  _cdTimer:     null,   // 카운트다운 tick 타이머
 };
 
-(function _loadAutoAnalyzeState() {
+// ── 서버 스케줄 API 호출 ──────────────────────
+async function _fetchSchedule() {
   try {
-    const saved = JSON.parse(localStorage.getItem("auto_analyze") || "{}");
-    if (saved.on) {
-      autoAnalyze.intervalMin = Number(saved.intervalMin) || 60;
-      const sel = document.getElementById("aa-interval");
-      if (sel) sel.value = String(autoAnalyze.intervalMin);
-      startAutoAnalyze();
-    }
-  } catch (e) {}
-})();
+    const res  = await fetch("/api/schedule");
+    const data = await res.json();
+    _applyScheduleState(data);
+  } catch (e) { /* 네트워크 오류 무시 */ }
+}
 
+async function _postSchedule(enabled, intervalMin) {
+  try {
+    const res  = await fetch("/api/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, interval_min: intervalMin }),
+    });
+    const data = await res.json();
+    _applyScheduleState(data);
+  } catch (e) { /* 실패 시 조용히 무시 */ }
+}
+
+function _applyScheduleState(data) {
+  autoAnalyze.on          = !!data.enabled;
+  autoAnalyze.intervalMin = data.interval_min || 60;
+  autoAnalyze.nextRunAt   = data.next_run_at  || null;
+
+  // 드롭다운 동기화
+  const sel = document.getElementById("aa-interval");
+  if (sel) sel.value = String(autoAnalyze.intervalMin);
+
+  updateAutoAnalyzeUI();
+  _startCountdown();
+}
+
+// ── 카운트다운 (로컬 tick, 서버 next_run_at 기준) ─
+function _startCountdown() {
+  clearInterval(autoAnalyze._cdTimer);
+  if (autoAnalyze.on && autoAnalyze.nextRunAt) {
+    autoAnalyze._cdTimer = setInterval(_tickCountdown, 1000);
+    _tickCountdown();
+  }
+}
+
+function _tickCountdown() {
+  const el = document.getElementById("aa-countdown");
+  if (!el) return;
+  if (!autoAnalyze.nextRunAt) { el.textContent = "—"; return; }
+  const remaining = Math.max(0, Math.round((new Date(autoAnalyze.nextRunAt) - Date.now()) / 1000));
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  el.textContent = `다음 분석까지 ${m}:${String(s).padStart(2, "0")}`;
+}
+
+// ── 서버 상태 polling (30초마다) ─────────────
+// 스케줄이 ON인 경우 최신 분석 결과도 함께 체크해 브라우저에 반영
+async function _schedulePollTick() {
+  await _fetchSchedule();
+  // 브라우저가 직접 분석을 돌리는 중이 아닐 때만 서버 결과 조회
+  if (autoAnalyze.on && !state.analyzing) {
+    await syncAnalysisStatus({ includeLatest: true });
+  }
+}
+
+function _startSchedulePoll() {
+  clearInterval(autoAnalyze._pollTimer);
+  autoAnalyze._pollTimer = setInterval(_schedulePollTick, 30_000);
+}
+
+// ── 공개 함수 (HTML onclick에서 호출) ────────
 function toggleAutoAnalyze() {
-  if (autoAnalyze.on) stopAutoAnalyze(); else startAutoAnalyze();
-}
-
-function startAutoAnalyze() {
-  autoAnalyze.on = true;
+  const next = !autoAnalyze.on;
   const mins = Number(document.getElementById("aa-interval")?.value || 60);
-  autoAnalyze.intervalMin = mins;
-  localStorage.setItem("auto_analyze", JSON.stringify({ on: true, intervalMin: mins }));
-  scheduleNextAnalyze();
-  updateAutoAnalyzeUI();
-}
-
-function stopAutoAnalyze() {
-  autoAnalyze.on = false;
-  clearTimeout(autoAnalyze.timer);
-  clearInterval(autoAnalyze.countdownTimer);
-  autoAnalyze.timer = null;
-  autoAnalyze.countdownTimer = null;
-  autoAnalyze.nextTime = null;
-  localStorage.setItem("auto_analyze", JSON.stringify({ on: false, intervalMin: autoAnalyze.intervalMin }));
-  updateAutoAnalyzeUI();
-}
-
-function scheduleNextAnalyze() {
-  clearTimeout(autoAnalyze.timer);
-  clearInterval(autoAnalyze.countdownTimer);
-  const ms = autoAnalyze.intervalMin * 60 * 1000;
-  autoAnalyze.nextTime = Date.now() + ms;
-  autoAnalyze.timer = setTimeout(() => {
-    if (autoAnalyze.on && !state.analyzing) runAnalysis();
-    if (autoAnalyze.on) scheduleNextAnalyze();
-  }, ms);
-  autoAnalyze.countdownTimer = setInterval(updateCountdown, 1000);
+  _postSchedule(next, mins);
 }
 
 function onIntervalChange() {
   if (!autoAnalyze.on) return;
-  stopAutoAnalyze();
-  startAutoAnalyze();
+  const mins = Number(document.getElementById("aa-interval")?.value || 60);
+  _postSchedule(true, mins);
 }
 
-function updateCountdown() {
-  const el = document.getElementById("aa-countdown");
-  if (!el || !autoAnalyze.nextTime) return;
-  const remaining = Math.max(0, Math.round((autoAnalyze.nextTime - Date.now()) / 1000));
-  const m = Math.floor(remaining / 60);
-  const s = remaining % 60;
-  el.textContent = `다음 분석까지 ${m}:${String(s).padStart(2,"0")}`;
-}
-
+// UI 반영 (기존과 동일한 DOM 조작)
 function updateAutoAnalyzeUI() {
   const toggle   = document.getElementById("aa-toggle");
   const track    = document.getElementById("aa-track");
@@ -3665,9 +3684,16 @@ function updateAutoAnalyzeUI() {
   if (dot)      dot.className   = "auto-dot "   + (on ? "on" : "off");
   if (text)     text.textContent = on ? "ON" : "OFF";
   if (controls) controls.style.display = on ? "block" : "none";
-  if (!on && document.getElementById("aa-countdown"))
-    document.getElementById("aa-countdown").textContent = "—";
+  if (!on) {
+    clearInterval(autoAnalyze._cdTimer);
+    const cd = document.getElementById("aa-countdown");
+    if (cd) cd.textContent = "—";
+  }
 }
+
+// 초기 로드: 서버에서 스케줄 상태를 가져오고 polling 시작
+_fetchSchedule();
+_startSchedulePoll();
 
 // ══════════════════════════════════════════════
 // 하단 탭 전환
