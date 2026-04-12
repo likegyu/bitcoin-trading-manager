@@ -68,7 +68,9 @@ ACCOUNT_REFRESH_MIN_INTERVAL_SECS = 1.5
 MARKET_STREAM_WS_BASE = "wss://fstream.binance.com/stream"
 MACRO_REFRESH_SECS = 60 * 60
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LATEST_ANALYSIS_PATH = os.path.join(BASE_DIR, "data", "latest_analysis.json")
+LATEST_ANALYSIS_PATH   = os.path.join(BASE_DIR, "data", "latest_analysis.json")
+ANALYSIS_HISTORY_PATH  = os.path.join(BASE_DIR, "data", "analysis_history.jsonl")
+ANALYSIS_HISTORY_MAX   = 500   # JSONL 최대 보관 건수
 
 
 # ══════════════════════════════════════════════
@@ -117,6 +119,35 @@ def _persist_latest_analysis(payload: dict):
         os.replace(tmp_path, LATEST_ANALYSIS_PATH)
     except Exception as exc:
         print(f"[analysis-cache] persist failed: {exc}")
+
+
+def _persist_analysis_history(payload: dict):
+    """분석 결과 핵심 필드를 JSONL 히스토리 파일에 누적 저장."""
+    try:
+        os.makedirs(os.path.dirname(ANALYSIS_HISTORY_PATH), exist_ok=True)
+        sections = payload.get("report_sections") or {}
+        entry = {
+            "timestamp":   payload.get("analysis_time") or _now_iso(),
+            "signal":      payload.get("signal"),
+            "confidence":  payload.get("confidence"),
+            "price":       payload.get("price"),
+            "pair_label":  payload.get("pair_label"),
+            "regime":      sections.get("regime"),
+            "summary":     sections.get("summary"),
+            "trade_levels": payload.get("trade_levels"),
+        }
+        # 추가
+        with open(ANALYSIS_HISTORY_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # 최대 건수 초과 시 앞쪽 줄 잘라내기
+        with open(ANALYSIS_HISTORY_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > ANALYSIS_HISTORY_MAX:
+            with open(ANALYSIS_HISTORY_PATH, "w", encoding="utf-8") as f:
+                f.writelines(lines[-ANALYSIS_HISTORY_MAX:])
+    except Exception as exc:
+        print(f"[analysis-history] persist failed: {exc}")
 
 
 def build_chart_payload(df, fib: dict | None) -> dict:
@@ -926,6 +957,7 @@ class AnalysisManager:
             )
             await self._complete(job_id, payload)
             await asyncio.to_thread(_persist_latest_analysis, payload)
+            await asyncio.to_thread(_persist_analysis_history, payload)
         except asyncio.CancelledError:
             await self._fail(job_id, "분석 작업이 취소되었습니다.", status="cancelled")
             raise
@@ -1124,6 +1156,85 @@ async def setup_save(body: SetupSaveRequest):
     await _account_stream.start()
 
     return {"ok": True}
+
+
+@app.get("/api/analysis-history")
+async def analysis_history_endpoint(limit: int = 100):
+    """저장된 분석 히스토리 반환 (최신순)."""
+    entries: list = []
+    try:
+        if os.path.exists(ANALYSIS_HISTORY_PATH):
+            with open(ANALYSIS_HISTORY_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except Exception:
+                            pass
+    except Exception as exc:
+        print(f"[analysis-history] read failed: {exc}")
+    return {"entries": list(reversed(entries[-limit:]))}
+
+
+@app.get("/api/performance")
+async def performance_endpoint(days: int = 30):
+    """account_history.jsonl 기반 성과 지표 반환."""
+    from datetime import datetime, timezone, timedelta
+    history_path = os.path.join(BASE_DIR, "data", "account_history.jsonl")
+    entries: list = []
+    try:
+        if os.path.exists(history_path):
+            with open(history_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except Exception:
+                            pass
+    except Exception as exc:
+        return {"error": str(exc), "snapshots": [], "daily": []}
+
+    # days 범위 필터
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+    snapshots = [e for e in entries if (e.get("observed_ts") or 0) >= cutoff]
+
+    # 일별 집계 (KST 기준 날짜로 그룹)
+    from collections import defaultdict
+    from time_utils import format_kst
+    daily_map: dict = defaultdict(list)
+    for snap in snapshots:
+        try:
+            dt = datetime.fromtimestamp(snap["observed_ts"], tz=timezone.utc)
+            day_key = format_kst(dt, "%Y-%m-%d")
+            daily_map[day_key].append(snap)
+        except Exception:
+            pass
+
+    daily = []
+    for day_key in sorted(daily_map.keys()):
+        day_snaps = daily_map[day_key]
+        # 당일 마지막 스냅샷 기준
+        last = day_snaps[-1]
+        first = day_snaps[0]
+        pnl_vals = [s.get("today_total_pnl") for s in day_snaps if s.get("today_total_pnl") is not None]
+        eq_vals  = [s.get("account_equity")  for s in day_snaps if s.get("account_equity")  is not None]
+        daily.append({
+            "date":           day_key,
+            "pnl":            last.get("today_total_pnl"),
+            "pnl_pct":        last.get("today_pnl_pct"),
+            "equity_start":   first.get("account_equity"),
+            "equity_end":     last.get("account_equity"),
+            "equity_high":    max(eq_vals)  if eq_vals  else None,
+            "equity_low":     min(eq_vals)  if eq_vals  else None,
+            "pnl_high":       max(pnl_vals) if pnl_vals else None,
+            "pnl_low":        min(pnl_vals) if pnl_vals else None,
+            "risk_status":    last.get("risk_status"),
+            "snap_count":     len(day_snaps),
+        })
+
+    return {"snapshots": snapshots, "daily": daily}
 
 
 @app.get("/")

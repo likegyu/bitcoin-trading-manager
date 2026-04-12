@@ -680,6 +680,99 @@ body {
   .macro-row { grid-template-columns: 1fr; }
   .chart-container { padding: 2px 1px 0; }
 }
+
+/* ══ 알림 버튼 ═════════════════════════════ */
+.notif-btn {
+  background: #F5F0EB; border: 1px solid #E8DDD4; border-radius: 8px;
+  padding: 6px 11px; cursor: pointer; font-size: 15px; line-height: 1;
+  color: #78716C; transition: background .15s, border-color .15s;
+}
+.notif-btn:hover { background: #EDE8E0; }
+.notif-btn.on { background: #FFF7ED; border-color: #FDBA74; }
+
+/* ══ 자동 분석 ═════════════════════════════ */
+.auto-analyze-section {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid #F0EAE2;
+}
+.auto-analyze-label {
+  font-size: 10px; font-weight: 700; color: #A8978A; letter-spacing: .06em;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.auto-analyze-row { display: flex; align-items: center; gap: 8px; }
+.interval-select {
+  margin-top: 8px; width: 100%; padding: 6px 8px; border: 1px solid #E8DDD4;
+  border-radius: 7px; font-size: 12px; color: #1C1917; background: #FAFAF9; cursor: pointer;
+}
+.interval-select:focus { outline: none; border-color: #EA580C; }
+.countdown-badge {
+  margin-top: 6px; font-size: 12px; color: #57534E; font-weight: 600;
+  background: #F5F0EB; border-radius: 6px; padding: 5px 10px; text-align: center;
+}
+
+/* ══ 하단 탭 섹션 ════════════════════════ */
+.bottom-section {
+  margin-top: 22px; background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px; overflow: hidden;
+}
+.bottom-tab-bar {
+  display: flex; align-items: stretch; border-bottom: 1px solid #E8DDD4; background: #F5F0EB; padding: 0 8px;
+}
+.bottom-tab-btn {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 12px 16px; font-size: 13px; font-weight: 600; color: #78716C;
+  cursor: pointer; transition: color .15s, border-color .15s; white-space: nowrap;
+}
+.bottom-tab-btn.active { color: #EA580C; border-bottom-color: #EA580C; }
+.bottom-tab-btn:hover:not(.active) { color: #1C1917; }
+.bottom-tab-refresh {
+  margin-left: auto; background: none; border: none; font-size: 17px;
+  color: #A8978A; cursor: pointer; padding: 8px 12px; transition: color .15s, transform .2s;
+  align-self: center;
+}
+.bottom-tab-refresh:hover { color: #EA580C; transform: rotate(180deg); }
+.bottom-tab-content { padding: 16px; }
+
+/* ══ 히스토리 테이블 ════════════════════ */
+.history-empty { color: #A8978A; font-size: 13px; text-align: center; padding: 28px 0; }
+.history-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.history-table th {
+  text-align: left; padding: 7px 10px; color: #A8978A; font-weight: 700;
+  border-bottom: 1px solid #E8DDD4; white-space: nowrap; font-size: 10px;
+  letter-spacing: .05em; text-transform: uppercase;
+}
+.history-table td { padding: 8px 10px; border-bottom: 1px solid #F5F0EB; vertical-align: middle; }
+.history-table tr:last-child td { border-bottom: none; }
+.history-table tr:hover td { background: #FAF8F5; }
+.hist-signal {
+  display: inline-flex; align-items: center; gap: 3px; font-weight: 700;
+  font-size: 11px; padding: 3px 7px; border-radius: 5px; white-space: nowrap;
+}
+.hist-signal.buy  { background: #DCFCE7; color: #16A34A; }
+.hist-signal.sell { background: #FEE2E2; color: #DC2626; }
+.hist-signal.hold { background: #FEF3C7; color: #D97706; }
+.hist-conf  { color: #78716C; font-size: 11px; }
+.hist-price { color: #1C1917; font-weight: 600; }
+.hist-regime { font-size: 11px; color: #57534E; }
+.hist-summary { color: #57534E; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ══ 성과 대시보드 ═════════════════════ */
+.perf-summary-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 16px; }
+.perf-stat-card { background: #FAF8F5; border: 1px solid #E8DDD4; border-radius: 10px; padding: 12px 14px; }
+.perf-stat-label { font-size: 10px; color: #A8978A; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 4px; }
+.perf-stat-value { font-size: 20px; font-weight: 800; color: #1C1917; }
+.perf-stat-sub { font-size: 11px; color: #78716C; margin-top: 2px; }
+.perf-charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.perf-chart-wrap { background: #FAF8F5; border: 1px solid #E8DDD4; border-radius: 10px; padding: 12px; }
+.perf-chart-label { font-size: 12px; font-weight: 700; color: #78716C; margin-bottom: 8px; }
+.perf-no-data { color: #A8978A; font-size: 13px; text-align: center; padding: 32px 0; }
+@media (max-width: 900px) {
+  .perf-summary-grid { grid-template-columns: repeat(2,1fr); }
+  .perf-charts-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .history-table th, .history-table td { padding: 6px 7px; }
+  .hist-summary { display: none; }
+  .bottom-tab-btn { padding: 10px 12px; font-size: 12px; }
+}
 </style>
 </head>
 <body>
@@ -812,6 +905,7 @@ body {
         <span id="analysis-status-dot" class="status-dot"></span>
         <span id="analysis-status-text">분석 대기</span>
       </div>
+      <button id="notif-btn" class="notif-btn" onclick="toggleNotifications()" title="브라우저 알림">🔔</button>
     </div>
     <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
   </div>
@@ -982,6 +1076,29 @@ body {
           <div id="auto-hint" class="auto-hint">
             활성화하면 바이낸스 실시간 스트림으로 차트와 현재가를 반영합니다.
           </div>
+          <!-- 자동 분석 -->
+          <div class="auto-analyze-section">
+            <div class="auto-analyze-label">자동 AI 분석</div>
+            <div class="auto-analyze-row">
+              <button id="aa-toggle" type="button" class="toggle-wrap" onclick="toggleAutoAnalyze()" aria-pressed="false">
+                <span id="aa-track" class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">주기 자동 실행</span>
+              </button>
+              <span id="aa-badge" class="auto-badge off">
+                <span id="aa-dot" class="auto-dot off"></span>
+                <span id="aa-text">OFF</span>
+              </span>
+            </div>
+            <div id="aa-controls" style="display:none;">
+              <select id="aa-interval" class="interval-select" onchange="onIntervalChange()">
+                <option value="15">15분마다</option>
+                <option value="30" selected>30분마다</option>
+                <option value="60">1시간마다</option>
+                <option value="240">4시간마다</option>
+              </select>
+              <div id="aa-countdown" class="countdown-badge">—</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1015,6 +1132,33 @@ body {
             <button class="btn-send" id="btn-send" onclick="sendChat()">전송</button>
             <button class="btn-clear" onclick="clearChat()">초기화</button>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 하단 탭: 히스토리 + 성과 대시보드 -->
+  <div class="bottom-section">
+    <div class="bottom-tab-bar">
+      <button id="btab-history" class="bottom-tab-btn active" onclick="switchBottomTab('history')">📋 분석 히스토리</button>
+      <button id="btab-performance" class="bottom-tab-btn" onclick="switchBottomTab('performance')">📈 성과 대시보드</button>
+      <button class="bottom-tab-refresh" onclick="refreshBottomTab()" title="새로고침">↻</button>
+    </div>
+    <div id="bottom-tab-history" class="bottom-tab-content">
+      <div id="history-container"><div class="history-empty">로딩 중...</div></div>
+    </div>
+    <div id="bottom-tab-performance" class="bottom-tab-content" style="display:none;">
+      <div class="perf-summary-grid" id="perf-summary">
+        <div class="perf-no-data" style="grid-column:1/-1;">로딩 중...</div>
+      </div>
+      <div class="perf-charts-row">
+        <div class="perf-chart-wrap">
+          <div class="perf-chart-label">자산 곡선</div>
+          <div id="perf-equity-chart" style="height:200px;"></div>
+        </div>
+        <div class="perf-chart-wrap">
+          <div class="perf-chart-label">일별 손익</div>
+          <div id="perf-daily-chart" style="height:200px;"></div>
         </div>
       </div>
     </div>
@@ -1382,6 +1526,7 @@ function applyResult(data, options = {}) {
 
   if (persist) {
     persistAnalysisCache(data);
+    notifyAnalysisResult(data);
   }
 }
 
@@ -3243,6 +3388,368 @@ function skipSetup() {
 
 // 페이지 로드 시 키 확인
 checkSetup();
+
+// ══════════════════════════════════════════════
+// 브라우저 알림
+// ══════════════════════════════════════════════
+let _lastNotifiedSignal = null;
+
+function _notifGranted() {
+  return typeof Notification !== "undefined" && Notification.permission === "granted";
+}
+
+async function toggleNotifications() {
+  if (typeof Notification === "undefined") {
+    alert("이 브라우저는 알림을 지원하지 않습니다.");
+    return;
+  }
+  if (Notification.permission === "granted") {
+    // 이미 허용 → OFF (토글 표시만 바꿈, 실제 권한 취소는 브라우저 설정에서)
+    localStorage.setItem("notif_off", "1");
+    updateNotifBtn();
+    return;
+  }
+  if (Notification.permission === "denied") {
+    alert("알림이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 알림을 허용해주세요.");
+    return;
+  }
+  // default → 요청
+  localStorage.removeItem("notif_off");
+  const perm = await Notification.requestPermission();
+  if (perm === "granted") {
+    new Notification("BTC Signal Analyzer", { body: "알림이 활성화되었습니다.", icon: "" });
+  }
+  updateNotifBtn();
+}
+
+function updateNotifBtn() {
+  const btn = document.getElementById("notif-btn");
+  if (!btn) return;
+  const off = localStorage.getItem("notif_off") === "1";
+  const granted = _notifGranted();
+  const active = granted && !off;
+  btn.classList.toggle("on", active);
+  btn.title = active ? "알림 ON (클릭하면 끔)" : "알림 OFF (클릭하면 켬)";
+  btn.textContent = active ? "🔔" : "🔕";
+}
+
+function notifyAnalysisResult(data) {
+  if (!_notifGranted() || localStorage.getItem("notif_off") === "1") return;
+  const sig = data.signal || null;
+  const conf = data.confidence ?? "";
+  const changed = sig && sig !== _lastNotifiedSignal;
+  const sigEmoji = { "매수": "▲", "매도": "▼", "홀드": "●" };
+  if (changed || sig === "매수" || sig === "매도") {
+    const emoji = sigEmoji[sig] || "";
+    const title = `${emoji} ${sig} 신호 (확신도 ${conf}%)`;
+    const summary = data.report_sections?.summary || "";
+    new Notification("BTC Signal Analyzer", {
+      body: summary ? `${summary}` : `새 분석 완료`,
+      tag: "signal",
+    });
+    _lastNotifiedSignal = sig;
+  }
+}
+
+// 초기화
+updateNotifBtn();
+
+// ══════════════════════════════════════════════
+// 자동 주기 분석
+// ══════════════════════════════════════════════
+const autoAnalyze = {
+  on:            false,
+  intervalMin:   30,
+  timer:         null,
+  countdownTimer:null,
+  nextTime:      null,
+};
+
+(function _loadAutoAnalyzeState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("auto_analyze") || "{}");
+    if (saved.on) {
+      autoAnalyze.intervalMin = Number(saved.intervalMin) || 30;
+      const sel = document.getElementById("aa-interval");
+      if (sel) sel.value = String(autoAnalyze.intervalMin);
+      startAutoAnalyze();
+    }
+  } catch (e) {}
+})();
+
+function toggleAutoAnalyze() {
+  if (autoAnalyze.on) stopAutoAnalyze(); else startAutoAnalyze();
+}
+
+function startAutoAnalyze() {
+  autoAnalyze.on = true;
+  const mins = Number(document.getElementById("aa-interval")?.value || 30);
+  autoAnalyze.intervalMin = mins;
+  localStorage.setItem("auto_analyze", JSON.stringify({ on: true, intervalMin: mins }));
+  scheduleNextAnalyze();
+  updateAutoAnalyzeUI();
+}
+
+function stopAutoAnalyze() {
+  autoAnalyze.on = false;
+  clearTimeout(autoAnalyze.timer);
+  clearInterval(autoAnalyze.countdownTimer);
+  autoAnalyze.timer = null;
+  autoAnalyze.countdownTimer = null;
+  autoAnalyze.nextTime = null;
+  localStorage.setItem("auto_analyze", JSON.stringify({ on: false, intervalMin: autoAnalyze.intervalMin }));
+  updateAutoAnalyzeUI();
+}
+
+function scheduleNextAnalyze() {
+  clearTimeout(autoAnalyze.timer);
+  clearInterval(autoAnalyze.countdownTimer);
+  const ms = autoAnalyze.intervalMin * 60 * 1000;
+  autoAnalyze.nextTime = Date.now() + ms;
+  autoAnalyze.timer = setTimeout(() => {
+    if (autoAnalyze.on && !state.analyzing) runAnalysis();
+    if (autoAnalyze.on) scheduleNextAnalyze();
+  }, ms);
+  autoAnalyze.countdownTimer = setInterval(updateCountdown, 1000);
+}
+
+function onIntervalChange() {
+  if (!autoAnalyze.on) return;
+  stopAutoAnalyze();
+  startAutoAnalyze();
+}
+
+function updateCountdown() {
+  const el = document.getElementById("aa-countdown");
+  if (!el || !autoAnalyze.nextTime) return;
+  const remaining = Math.max(0, Math.round((autoAnalyze.nextTime - Date.now()) / 1000));
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  el.textContent = `다음 분석까지 ${m}:${String(s).padStart(2,"0")}`;
+}
+
+function updateAutoAnalyzeUI() {
+  const toggle   = document.getElementById("aa-toggle");
+  const track    = document.getElementById("aa-track");
+  const badge    = document.getElementById("aa-badge");
+  const dot      = document.getElementById("aa-dot");
+  const text     = document.getElementById("aa-text");
+  const controls = document.getElementById("aa-controls");
+  if (!track) return;
+  const on = autoAnalyze.on;
+  if (toggle)   toggle.setAttribute("aria-pressed", String(on));
+  if (track)    track.classList.toggle("on", on);
+  if (badge)    badge.className = "auto-badge " + (on ? "on" : "off");
+  if (dot)      dot.className   = "auto-dot "   + (on ? "on" : "off");
+  if (text)     text.textContent = on ? "ON" : "OFF";
+  if (controls) controls.style.display = on ? "block" : "none";
+  if (!on && document.getElementById("aa-countdown"))
+    document.getElementById("aa-countdown").textContent = "—";
+}
+
+// ══════════════════════════════════════════════
+// 하단 탭 전환
+// ══════════════════════════════════════════════
+let currentBottomTab = "history";
+
+function switchBottomTab(tab) {
+  currentBottomTab = tab;
+  ["history", "performance"].forEach(t => {
+    const btn     = document.getElementById("btab-" + t);
+    const content = document.getElementById("bottom-tab-" + t);
+    if (btn)     btn.classList.toggle("active", t === tab);
+    if (content) content.style.display = t === tab ? "block" : "none";
+  });
+  if (tab === "history")     fetchHistory();
+  if (tab === "performance") fetchPerformance();
+}
+
+function refreshBottomTab() {
+  if (currentBottomTab === "history")     fetchHistory();
+  if (currentBottomTab === "performance") fetchPerformance();
+}
+
+// ══════════════════════════════════════════════
+// 분석 히스토리 뷰어
+// ══════════════════════════════════════════════
+async function fetchHistory() {
+  const container = document.getElementById("history-container");
+  if (!container) return;
+  container.innerHTML = '<div class="history-empty">로딩 중...</div>';
+  try {
+    const res = await fetch("/api/analysis-history?limit=100");
+    const data = await res.json();
+    renderHistory(data.entries || []);
+  } catch (e) {
+    container.innerHTML = `<div class="history-empty">불러오기 실패: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderHistory(entries) {
+  const container = document.getElementById("history-container");
+  if (!container) return;
+  if (!entries.length) {
+    container.innerHTML = '<div class="history-empty">분석 기록이 없습니다. 분석을 실행하면 여기에 쌓입니다.</div>';
+    return;
+  }
+  const sigClass  = { "매수": "buy", "매도": "sell", "홀드": "hold" };
+  const sigEmoji  = { "매수": "▲", "매도": "▼", "홀드": "●" };
+  let rows = "";
+  entries.forEach(e => {
+    const time  = e.timestamp ? e.timestamp.replace("T", " ").slice(0, 16) : "—";
+    const sig   = e.signal  || "—";
+    const cls   = sigClass[sig] || "hold";
+    const emoji = sigEmoji[sig] || "";
+    const conf  = e.confidence != null ? `${e.confidence}%` : "—";
+    const price = e.price    != null ? `$${Number(e.price).toLocaleString("en-US",{minimumFractionDigits:0,maximumFractionDigits:0})}` : "—";
+    const regime  = escapeHtml(e.regime  || "—");
+    const summary = escapeHtml(e.summary || "—");
+    rows += `<tr>
+      <td style="white-space:nowrap;color:#78716C;">${time}</td>
+      <td><span class="hist-signal ${cls}">${emoji} ${sig}</span></td>
+      <td class="hist-conf">${conf}</td>
+      <td class="hist-price">${price}</td>
+      <td class="hist-regime">${regime}</td>
+      <td class="hist-summary" title="${summary}">${summary}</td>
+    </tr>`;
+  });
+  container.innerHTML = `
+    <table class="history-table">
+      <thead><tr>
+        <th>시간 (KST)</th><th>신호</th><th>확신도</th><th>가격</th><th>레짐</th><th>한줄 요약</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// 초기 로드
+fetchHistory();
+
+// ══════════════════════════════════════════════
+// 성과 대시보드
+// ══════════════════════════════════════════════
+let _perfEquityChart = null;
+let _perfDailyChart  = null;
+
+async function fetchPerformance() {
+  const summary = document.getElementById("perf-summary");
+  if (summary) summary.innerHTML = '<div class="perf-no-data" style="grid-column:1/-1;">로딩 중...</div>';
+  try {
+    const res  = await fetch("/api/performance?days=30");
+    const data = await res.json();
+    renderPerformance(data);
+  } catch (e) {
+    if (summary) summary.innerHTML = `<div class="perf-no-data" style="grid-column:1/-1;">불러오기 실패: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderPerformance(data) {
+  const daily     = data.daily     || [];
+  const snapshots = data.snapshots || [];
+  renderPerfSummary(daily);
+  renderEquityChart(snapshots);
+  renderDailyChart(daily);
+}
+
+function renderPerfSummary(daily) {
+  const el = document.getElementById("perf-summary");
+  if (!el) return;
+  if (!daily.length) {
+    el.innerHTML = '<div class="perf-no-data" style="grid-column:1/-1;">계좌 히스토리 데이터가 부족합니다. 서비스를 계속 실행하면 데이터가 쌓입니다.</div>';
+    return;
+  }
+  const totalPnl = daily.reduce((s, d) => s + (d.pnl || 0), 0);
+  const winDays  = daily.filter(d => (d.pnl || 0) > 0).length;
+  const loseDays = daily.filter(d => (d.pnl || 0) < 0).length;
+  const winRate  = daily.length ? Math.round(winDays / daily.length * 100) : 0;
+  const pnlPcts  = daily.map(d => d.pnl_pct).filter(v => v != null);
+  const avgPct   = pnlPcts.length ? (pnlPcts.reduce((s,v) => s + v, 0) / pnlPcts.length) : null;
+
+  // 최대 드로다운 (equity_end 기준)
+  const equities = daily.map(d => d.equity_end).filter(v => v != null);
+  let maxDD = 0;
+  if (equities.length > 1) {
+    let peak = equities[0];
+    for (const eq of equities) {
+      if (eq > peak) peak = eq;
+      const dd = (peak - eq) / peak * 100;
+      if (dd > maxDD) maxDD = dd;
+    }
+  }
+
+  const fmtMoney = v => v == null ? "—" : (v >= 0 ? "+" : "") + "$" + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits:2,maximumFractionDigits:2});
+  const pnlColor = totalPnl >= 0 ? "#16A34A" : "#DC2626";
+  el.innerHTML = `
+    <div class="perf-stat-card">
+      <div class="perf-stat-label">30일 손익</div>
+      <div class="perf-stat-value" style="color:${pnlColor};">${fmtMoney(totalPnl)}</div>
+      <div class="perf-stat-sub">${daily.length}거래일</div>
+    </div>
+    <div class="perf-stat-card">
+      <div class="perf-stat-label">승률</div>
+      <div class="perf-stat-value">${winRate}%</div>
+      <div class="perf-stat-sub">수익 ${winDays}일 / 손실 ${loseDays}일</div>
+    </div>
+    <div class="perf-stat-card">
+      <div class="perf-stat-label">평균 일손익</div>
+      <div class="perf-stat-value" style="color:${avgPct != null && avgPct >= 0 ? '#16A34A' : '#DC2626'};">
+        ${avgPct != null ? (avgPct >= 0 ? "+" : "") + avgPct.toFixed(2) + "%" : "—"}
+      </div>
+      <div class="perf-stat-sub">거래일 평균</div>
+    </div>
+    <div class="perf-stat-card">
+      <div class="perf-stat-label">최대 드로다운</div>
+      <div class="perf-stat-value" style="color:#DC2626;">-${maxDD.toFixed(2)}%</div>
+      <div class="perf-stat-sub">equity 기준</div>
+    </div>`;
+}
+
+function renderEquityChart(snapshots) {
+  const el = document.getElementById("perf-equity-chart");
+  if (!el) return;
+  const valid = snapshots.filter(s => s.account_equity != null && s.observed_ts);
+  if (valid.length < 2) {
+    el.innerHTML = '<div class="perf-no-data">데이터 부족</div>';
+    return;
+  }
+  if (!_perfEquityChart) _perfEquityChart = echarts.init(el, null, { renderer: "canvas" });
+  const labels = valid.map(s => {
+    const d = new Date(s.observed_ts * 1000);
+    return `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  });
+  const values = valid.map(s => s.account_equity);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  _perfEquityChart.setOption({
+    backgroundColor: "transparent",
+    grid: { top:10, right:10, bottom:28, left:60, containLabel:false },
+    xAxis: { type:"category", data:labels, axisLabel:{ fontSize:10, color:"#A8978A", interval:"auto", rotate:30 }, axisLine:{ lineStyle:{ color:"#E8DDD4" } }, splitLine:{ show:false } },
+    yAxis: { type:"value", min: minVal * 0.998, max: maxVal * 1.002, axisLabel:{ fontSize:10, color:"#A8978A", formatter: v => "$" + v.toLocaleString("en-US",{maximumFractionDigits:0}) }, splitLine:{ lineStyle:{ color:"#F0EAE2" } } },
+    series:[{ type:"line", data:values, smooth:true, symbol:"none", lineStyle:{ color:"#EA580C", width:2 }, areaStyle:{ color:{ type:"linear", x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:"rgba(234,88,12,.18)"},{offset:1,color:"rgba(234,88,12,.01)"}] } } }],
+    tooltip:{ trigger:"axis", formatter: p => `${p[0].axisValue}<br>$${Number(p[0].value).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}` },
+  });
+}
+
+function renderDailyChart(daily) {
+  const el = document.getElementById("perf-daily-chart");
+  if (!el) return;
+  if (!daily.length) {
+    el.innerHTML = '<div class="perf-no-data">데이터 부족</div>';
+    return;
+  }
+  if (!_perfDailyChart) _perfDailyChart = echarts.init(el, null, { renderer: "canvas" });
+  const labels = daily.map(d => d.date ? d.date.slice(5) : "");
+  const values = daily.map(d => d.pnl != null ? parseFloat(d.pnl.toFixed(2)) : 0);
+  const colors = values.map(v => v >= 0 ? "rgba(22,163,74,.75)" : "rgba(220,38,38,.75)");
+  _perfDailyChart.setOption({
+    backgroundColor: "transparent",
+    grid: { top:10, right:10, bottom:28, left:60, containLabel:false },
+    xAxis: { type:"category", data:labels, axisLabel:{ fontSize:10, color:"#A8978A" }, axisLine:{ lineStyle:{ color:"#E8DDD4" } }, splitLine:{ show:false } },
+    yAxis: { type:"value", axisLabel:{ fontSize:10, color:"#A8978A", formatter: v => (v >= 0 ? "+" : "") + "$" + v.toLocaleString("en-US",{maximumFractionDigits:0}) }, splitLine:{ lineStyle:{ color:"#F0EAE2" } } },
+    series:[{ type:"bar", data:values, itemStyle:{ color: p => colors[p.dataIndex], borderRadius:3 } }],
+    tooltip:{ trigger:"axis", formatter: p => `${p[0].axisValue}<br>${p[0].value >= 0 ? "+" : ""}$${Number(p[0].value).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}` },
+  });
+}
 
 // ══════════════════════════════════════════════
 // 거시경제 지표
