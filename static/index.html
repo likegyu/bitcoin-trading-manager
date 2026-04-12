@@ -3633,6 +3633,14 @@ function toggleNotifications() {
 function updateNotifBtn() {
   const btn = document.getElementById("notif-btn");
   if (!btn) return;
+  // HTTP 접속이거나 브라우저가 알림을 아예 지원하지 않으면 버튼 숨김
+  const isHttps = location.protocol === "https:";
+  const supported = _notifSupported();
+  if (!isHttps || !supported) {
+    btn.style.display = "none";
+    return;
+  }
+  btn.style.display = "";
   const off = localStorage.getItem("notif_off") === "1";
   const granted = _notifGranted();
   const active = granted && !off;
