@@ -3552,18 +3552,34 @@ function _isSafari() {
 
 // ★ 핵심: async/await 없이 동기적으로 requestPermission 호출
 // Safari는 클릭 핸들러 안에서 동기적으로 호출해야 권한 팝업이 뜸
+// 브라우저 팝업(alert) 없이 페이지 내 토스트로 안내
+function _notifToast(msg, duration = 5000) {
+  let toast = document.getElementById("notif-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "notif-toast";
+    toast.style.cssText = [
+      "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);",
+      "background:#292524;color:#FAF8F5;font-size:13px;font-weight:500;",
+      "padding:11px 18px;border-radius:10px;z-index:9999;",
+      "max-width:360px;text-align:center;line-height:1.5;",
+      "box-shadow:0 4px 16px rgba(0,0,0,.25);",
+      "transition:opacity .25s;",
+    ].join("");
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = "1";
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => { toast.style.opacity = "0"; }, duration);
+}
+
 function toggleNotifications() {
   if (!_notifSupported()) {
     if (_isSafari()) {
-      alert(
-        "Safari 알림 설정 방법:\n\n" +
-        "1. 상단 메뉴 Safari → 설정 (⌘,)\n" +
-        "2. '웹사이트' 탭 → 왼쪽 '알림' 클릭\n" +
-        "3. 이 사이트를 '허용'으로 변경\n\n" +
-        "또는 macOS 시스템 설정 → 알림 → Safari에서 허용 여부를 확인하세요."
-      );
+      _notifToast("Safari 설정 → 웹사이트 → 알림에서 이 사이트를 '허용'으로 변경해주세요.");
     } else {
-      alert("이 브라우저는 알림을 지원하지 않습니다.");
+      _notifToast("이 브라우저는 알림을 지원하지 않습니다.");
     }
     return;
   }
@@ -3582,16 +3598,14 @@ function toggleNotifications() {
 
   if (Notification.permission === "denied") {
     if (_isSafari()) {
-      alert("알림이 차단되어 있습니다.\n\nSafari 설정 → 웹사이트 → 알림에서\n이 사이트를 '허용'으로 변경해주세요.");
+      _notifToast("알림이 차단됨 — Safari 설정 → 웹사이트 → 알림에서 이 사이트를 '허용'으로 변경해주세요.");
     } else {
-      alert("알림이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 알림을 허용해주세요.");
+      _notifToast("알림이 차단됨 — 브라우저 설정에서 이 사이트의 알림을 허용해주세요.");
     }
     return;
   }
 
-  // default 상태 → 권한 요청
-  // Safari: 콜백 방식으로 동기 호출 (async/await 없이)
-  // Chrome/Firefox: Promise를 반환하므로 .then()으로 처리
+  // default 상태 → 권한 요청 (사용자가 직접 벨 버튼을 눌렀을 때만)
   localStorage.removeItem("notif_off");
 
   function _onPermResult(perm) {
@@ -3599,18 +3613,14 @@ function toggleNotifications() {
       try {
         new Notification("BTC Signal Analyzer", { body: "✅ 알림이 활성화되었습니다." });
       } catch (e) { /* Safari 일부 버전 오류 무시 */ }
-    } else if (perm === "denied" && _isSafari()) {
-      setTimeout(() => alert(
-        "알림 권한이 거부되었습니다.\n\nSafari 메뉴 → 설정 → 웹사이트 → 알림\n에서 수동으로 허용해주세요."
-      ), 100);
+    } else if (perm === "denied") {
+      _notifToast("알림 권한이 거부됨 — Safari 설정 → 웹사이트 → 알림에서 수동으로 허용해주세요.");
     }
     updateNotifBtn();
   }
 
   try {
-    // 콜백 방식으로 직접 호출 (Safari 동기 제스처 체인 유지)
     const result = Notification.requestPermission(_onPermResult);
-    // Chrome/Firefox는 Promise를 반환 → .then()으로도 처리
     if (result && typeof result.then === "function") {
       result.then(_onPermResult).catch(() => updateNotifBtn());
     }
