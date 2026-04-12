@@ -21,12 +21,12 @@ BINANCE_BASE_URL    = "https://api.binance.com"
 BINANCE_FUTURES_URL = "https://fapi.binance.com"
 BINANCE_API_KEY     = os.getenv("BINANCE_API_KEY", "")
 BINANCE_SECRET_KEY  = os.getenv("BINANCE_SECRET_KEY", "")
-DEFAULT_SYMBOL      = os.getenv("DEFAULT_SYMBOL", "BTCUSDT").upper()
+DEFAULT_SYMBOL      = os.getenv("DEFAULT_SYMBOL", "BTCUSDC").upper()
 
 
 def symbol_to_pair(symbol: str) -> str:
     symbol = (symbol or "").upper()
-    quote_candidates = ("USDT", "USDC", "FDUSD", "BUSD", "TUSD", "USD", "BTC", "ETH", "BNB")
+    quote_candidates = ("USDC", "USDT", "FDUSD", "BUSD", "TUSD", "USD", "BTC", "ETH", "BNB")
     for quote in quote_candidates:
         if symbol.endswith(quote) and len(symbol) > len(quote):
             return f"{symbol[:-len(quote)]}/{quote}"

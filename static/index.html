@@ -800,7 +800,7 @@ body {
   <div class="header">
     <div>
       <span id="header-base" class="header-title">₿ BTC</span>
-      <span id="header-quote" class="header-pair">/ USDT</span>
+      <span id="header-quote" class="header-pair">/ USDC</span>
     </div>
     <div id="header-price" class="header-price"></div>
     <div class="header-meta">
@@ -1594,7 +1594,7 @@ function renderHeaderSymbol() {
   const quoteEl = document.getElementById("header-quote");
   if (!baseEl || !quoteEl) return;
 
-  const pair = state.pairLabel || state.symbol || "BTC/USDT";
+  const pair = state.pairLabel || state.symbol || "BTC/USDC";
   const parts = String(pair).split("/");
   const base = parts[0] || "BTC";
   const quote = parts[1] || "";

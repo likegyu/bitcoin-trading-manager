@@ -14,7 +14,7 @@ import config as _cfg
 from account_history import attach_account_context_summary
 from time_utils import start_of_kst_day
 
-TRACKED_COLLATERAL_ASSETS = ("USDT",)
+TRACKED_COLLATERAL_ASSETS = ("USDT", "USDC")
 INCOME_CACHE_TTL_SECS = 8.0
 _INCOME_CACHE_LOCK = Lock()
 _INCOME_CACHE: dict[tuple[str, int], dict] = {}
@@ -160,7 +160,7 @@ def _fetch_balance(ctx: dict) -> None:
     except Exception as exc:
         first_error = exc
     else:
-        first_error = RuntimeError("USDT 담보 자산을 찾지 못했습니다.")
+        first_error = RuntimeError("USDT/USDC 담보 자산을 찾지 못했습니다.")
 
     # ── 2순위: fapi/v2/account (폴백) ──────────
     try:
@@ -420,7 +420,7 @@ def format_account_context(ctx: dict) -> str:
                 for a in balance_assets
             )
             lines.append(f"  담보 자산 잔고:  {assets_str}")
-            lines.append(f"  추적 자산 합계:  ${wallet:,.2f} (USDT)")
+            lines.append(f"  추적 자산 합계:  ${wallet:,.2f} (USDT+USDC)")
         else:
             lines.append(f"  계좌 지갑 잔고:  ${wallet:,.2f}")
         if ctx.get("margin_balance") is not None:
