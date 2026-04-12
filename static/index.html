@@ -748,7 +748,10 @@ body {
 }
 .history-table td { padding: 8px 10px; border-bottom: 1px solid #F5F0EB; vertical-align: middle; }
 .history-table tr:last-child td { border-bottom: none; }
+.history-table tbody tr { cursor: pointer; transition: background .12s; }
 .history-table tr:hover td { background: #FAF8F5; }
+.history-table tr.hist-selected td { background: #FFF7ED !important; box-shadow: inset 3px 0 0 #F97316; }
+.history-table tr.hist-selected:hover td { background: #FFEDD5 !important; }
 .hist-signal {
   display: inline-flex; align-items: center; gap: 3px; font-weight: 700;
   font-size: 11px; padding: 3px 7px; border-radius: 5px; white-space: nowrap;
@@ -1250,6 +1253,8 @@ const state = {
   // 차트 분석 화살표 오버레이
   analysisHistory: [],
   showHistoryArrows: localStorage.getItem("showHistoryArrows") !== "false",
+  // 히스토리 행 클릭 오버레이 선택 상태
+  selectedHistoryTs: null,
 };
 
 function persistAnalysisCache(data) {
@@ -2554,6 +2559,9 @@ function buildAnalysisMarkPoints(chart, tf) {
   const candles = chart.candles || [];
   const points = [];
 
+  const selectedTs = state.selectedHistoryTs;
+  const hasSelection = !!selectedTs;
+
   state.analysisHistory.forEach(entry => {
     if (!entry.timestamp || !entry.signal) return;
     if (entry.signal === "홀드") return; // 홀드는 표시 안 함
@@ -2573,25 +2581,36 @@ function buildAnalysisMarkPoints(chart, tf) {
     if (!Number.isFinite(high) || !Number.isFinite(low)) return;
 
     const isBuy  = entry.signal === "매수";
-    const color  = isBuy ? "#16A34A" : "#DC2626";
-    const borderColor = isBuy ? "#BBF7D0" : "#FECACA";
+    const isSelected = hasSelection && entry.timestamp === selectedTs;
+    const isDimmed   = hasSelection && !isSelected;
+
+    // 선택 시: 해당 마커 크게+선명, 나머지 흐리게
+    const baseColor  = isBuy ? "#16A34A" : "#DC2626";
+    const dimColor   = isBuy ? "rgba(22,163,74,0.25)"  : "rgba(220,38,38,0.25)";
+    const color      = isDimmed ? dimColor : baseColor;
+    const borderColor = isSelected
+      ? "#F97316"                              // 선택: 주황 테두리
+      : (isBuy ? "#BBF7D0" : "#FECACA");
+    const borderWidth = isSelected ? 2.5 : 1;
+    const symbolSize  = isSelected ? [22, 16] : [14, 10];
+    const labelColor  = isDimmed ? "rgba(255,255,255,0.3)" : "#FFFFFF";
     const conf   = entry.confidence != null ? `${entry.confidence}%` : "";
     const priceStr = entry.price != null ? `$${Number(entry.price).toLocaleString("en-US",{maximumFractionDigits:0})}` : "";
 
     points.push({
       coord: [labels[idx], isBuy ? low : high],
       symbolOffset: isBuy ? [0, "70%"] : [0, "-70%"],
-      symbol: isBuy ? "triangle" : "triangle",
+      symbol: "triangle",
       symbolRotate: isBuy ? 0 : 180,
-      symbolSize: [14, 10],
-      itemStyle: { color, borderColor, borderWidth: 1 },
+      symbolSize,
+      itemStyle: { color, borderColor, borderWidth },
       label: {
         show: true,
         position: isBuy ? "bottom" : "top",
         distance: 4,
         formatter: isBuy ? "▲" : "▼",
-        color: "#FFFFFF",
-        fontSize: 10,
+        color: labelColor,
+        fontSize: isSelected ? 12 : 10,
         fontWeight: 700,
       },
       tooltip: {
@@ -3520,26 +3539,90 @@ function _notifGranted() {
   return typeof Notification !== "undefined" && Notification.permission === "granted";
 }
 
+// Safari 구버전(콜백 방식) + 최신 브라우저(Promise 방식) 모두 지원
+function _requestNotifPermission() {
+  return new Promise((resolve) => {
+    try {
+      const result = Notification.requestPermission(resolve); // 구Safari: 콜백 반환
+      if (result && typeof result.then === "function") {
+        result.then(resolve).catch(() => resolve("denied")); // Chrome/Firefox: Promise 반환
+      }
+    } catch (e) {
+      resolve("denied");
+    }
+  });
+}
+
+// Safari에서 알림이 지원되는지 더 엄격하게 체크
+function _notifSupported() {
+  if (typeof Notification === "undefined") return false;
+  // Safari 구버전은 Notification은 있지만 requestPermission이 없는 경우 있음
+  if (typeof Notification.requestPermission !== "function") return false;
+  return true;
+}
+
 async function toggleNotifications() {
-  if (typeof Notification === "undefined") {
-    alert("이 브라우저는 알림을 지원하지 않습니다.");
+  if (!_notifSupported()) {
+    // macOS Safari: 시스템 환경설정 → 알림에서 Safari 알림을 허용해야 함
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isSafari) {
+      alert(
+        "Safari 알림 설정 방법:\n\n" +
+        "1. 상단 메뉴 Safari → 설정 (⌘,)\n" +
+        "2. '웹사이트' 탭 → 왼쪽 '알림' 클릭\n" +
+        "3. 이 사이트를 '허용'으로 변경\n\n" +
+        "또는 macOS 시스템 설정 → 알림 → Safari에서 허용 여부를 확인하세요."
+      );
+    } else {
+      alert("이 브라우저는 알림을 지원하지 않습니다.");
+    }
     return;
   }
+
   if (Notification.permission === "granted") {
-    // 이미 허용 → OFF (토글 표시만 바꿈, 실제 권한 취소는 브라우저 설정에서)
-    localStorage.setItem("notif_off", "1");
+    // 이미 허용 → OFF 토글
+    const isOff = localStorage.getItem("notif_off") === "1";
+    if (isOff) {
+      localStorage.removeItem("notif_off");
+    } else {
+      localStorage.setItem("notif_off", "1");
+    }
     updateNotifBtn();
     return;
   }
+
   if (Notification.permission === "denied") {
-    alert("알림이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 알림을 허용해주세요.");
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isSafari) {
+      alert(
+        "알림이 차단되어 있습니다.\n\n" +
+        "Safari 설정 → 웹사이트 → 알림에서\n" +
+        "이 사이트를 '허용'으로 변경해주세요."
+      );
+    } else {
+      alert("알림이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 알림을 허용해주세요.");
+    }
     return;
   }
-  // default → 요청
+
+  // default → 권한 요청 (반드시 사용자 제스처 내에서 호출됨)
   localStorage.removeItem("notif_off");
-  const perm = await Notification.requestPermission();
+  const perm = await _requestNotifPermission();
   if (perm === "granted") {
-    new Notification("BTC Signal Analyzer", { body: "알림이 활성화되었습니다.", icon: "" });
+    try {
+      new Notification("BTC Signal Analyzer", { body: "✅ 알림이 활성화되었습니다." });
+    } catch (e) {
+      // 일부 Safari 버전에서 첫 Notification 객체 생성 시 오류 무시
+    }
+  } else if (perm === "denied") {
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isSafari) {
+      setTimeout(() => alert(
+        "알림 권한이 거부되었습니다.\n\n" +
+        "Safari 메뉴 → 설정 → 웹사이트 → 알림\n" +
+        "에서 수동으로 허용해주세요."
+      ), 100);
+    }
   }
   updateNotifBtn();
 }
@@ -3565,10 +3648,15 @@ function notifyAnalysisResult(data) {
     const emoji = sigEmoji[sig] || "";
     const title = `${emoji} ${sig} 신호 (확신도 ${conf}%)`;
     const summary = data.report_sections?.summary || "";
-    new Notification("BTC Signal Analyzer", {
-      body: summary ? `${summary}` : `새 분석 완료`,
-      tag: "signal",
-    });
+    try {
+      new Notification("BTC Signal Analyzer", {
+        body: summary ? `${summary}` : `새 분석 완료`,
+        tag: "signal",
+      });
+    } catch (e) {
+      // Safari에서 Notification 생성 오류 무시 (권한은 있지만 생성 실패하는 케이스)
+      console.warn("[알림] Notification 생성 실패:", e);
+    }
     _lastNotifiedSignal = sig;
   }
 }
@@ -3744,7 +3832,8 @@ function renderHistory(entries) {
   const sigEmoji  = { "매수": "▲", "매도": "▼", "홀드": "●" };
   let rows = "";
   entries.forEach(e => {
-    const time  = e.timestamp ? e.timestamp.replace("T", " ").slice(0, 16) : "—";
+    const ts    = e.timestamp || "";
+    const time  = ts ? ts.replace("T", " ").slice(0, 16) : "—";
     const sig   = e.signal  || "—";
     const cls   = sigClass[sig] || "hold";
     const emoji = sigEmoji[sig] || "";
@@ -3752,7 +3841,7 @@ function renderHistory(entries) {
     const price = e.price    != null ? `$${Number(e.price).toLocaleString("en-US",{minimumFractionDigits:0,maximumFractionDigits:0})}` : "—";
     const regime  = escapeHtml(e.regime  || "—");
     const summary = escapeHtml(e.summary || "—");
-    rows += `<tr>
+    rows += `<tr data-ts="${escapeHtml(ts)}" onclick="onHistoryRowClick(this)">
       <td style="white-space:nowrap;color:#78716C;">${time}</td>
       <td><span class="hist-signal ${cls}">${emoji} ${sig}</span></td>
       <td class="hist-conf">${conf}</td>
@@ -3764,14 +3853,85 @@ function renderHistory(entries) {
   container.innerHTML = `
     <table class="history-table">
       <thead><tr>
-        <th>시간 (KST)</th><th>신호</th><th>확신도</th><th>가격</th><th>레짐</th><th>한줄 요약</th>
+        <th>시간 (KST)</th><th>신호</th><th>확신도</th><th>가격</th><th>레짐</th>
+        <th style="display:flex;align-items:center;gap:6px;">한줄 요약
+          <span style="font-size:9px;font-weight:500;color:#B8A898;letter-spacing:0;">(행 클릭 → 차트 이동)</span>
+        </th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+
+  // 이전 선택 상태 복원
+  if (state.selectedHistoryTs) {
+    const sel = container.querySelector(`tr[data-ts="${CSS.escape(state.selectedHistoryTs)}"]`);
+    if (sel) sel.classList.add("hist-selected");
+  }
 }
 
 // 초기 로드
 fetchHistory();
+
+// ── 히스토리 행 클릭 → 차트 오버레이 ─────────────
+function onHistoryRowClick(trEl) {
+  const ts = trEl.dataset.ts;
+  if (!ts) return;
+
+  const isAlreadySelected = state.selectedHistoryTs === ts;
+
+  // 모든 행 선택 해제
+  document.querySelectorAll(".history-table tr.hist-selected")
+    .forEach(r => r.classList.remove("hist-selected"));
+
+  if (isAlreadySelected) {
+    // 같은 행 재클릭 → 선택 해제
+    state.selectedHistoryTs = null;
+    renderCurrentChart();
+    return;
+  }
+
+  // 새 행 선택
+  state.selectedHistoryTs = ts;
+  trEl.classList.add("hist-selected");
+
+  // 화살표 토글이 꺼져 있으면 자동으로 켬
+  if (!state.showHistoryArrows) {
+    state.showHistoryArrows = true;
+    localStorage.setItem("showHistoryArrows", "true");
+    updateArrowToggleBtn();
+  }
+
+  // 차트 마커 하이라이트 + 뷰포트 이동
+  renderCurrentChart();
+  highlightHistoryOnChart(ts);
+}
+
+function highlightHistoryOnChart(ts) {
+  const chart = state.chartInstance;
+  if (!chart) return;
+  const tf = state.currentTf;
+  const chartData = state.charts[tf];
+  if (!chartData || !chartData.labels || !chartData.labels.length) return;
+
+  const labels = chartData.labels;
+  const total  = labels.length;
+  const idx    = findClosestLabelIndex(labels, ts);
+  if (idx < 0) return;
+
+  // 선택된 캔들 중심으로 ~40개 캔들 보이도록 zoom
+  const windowSize = Math.min(40, total);
+  const half = Math.floor(windowSize / 2);
+  const startIdx = Math.max(0, idx - half);
+  const endIdx   = Math.min(total - 1, idx + half);
+  const startPct = total > 1 ? (startIdx / (total - 1)) * 100 : 0;
+  const endPct   = total > 1 ? (endIdx   / (total - 1)) * 100 : 100;
+
+  chart.dispatchAction({ type: "dataZoom", start: startPct, end: endPct });
+
+  // 약간의 딜레이 후 해당 캔들에 툴팁 표시
+  setTimeout(() => {
+    chart.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: idx });
+  }, 120);
+}
 
 // ── 화살표 오버레이 토글 ──────────────────────
 function toggleHistoryArrows() {
@@ -3787,6 +3947,16 @@ function updateArrowToggleBtn() {
   btn.classList.toggle("active", state.showHistoryArrows);
   btn.title = state.showHistoryArrows ? "분석 신호 화살표 숨김" : "분석 신호 화살표 표시";
 }
+
+// ESC 키로 히스토리 행 선택 해제
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.selectedHistoryTs) {
+    state.selectedHistoryTs = null;
+    document.querySelectorAll(".history-table tr.hist-selected")
+      .forEach(r => r.classList.remove("hist-selected"));
+    renderCurrentChart();
+  }
+});
 
 // 초기 버튼 상태 설정 및 히스토리 로드
 updateArrowToggleBtn();
