@@ -868,6 +868,29 @@ _macro_snapshot = MacroSnapshotManager()
 
 # 수동 분석 버튼 쿨다운: 15분
 MANUAL_COOLDOWN_SECS = 15 * 60
+# 수동 실행 시각만 별도 파일로 저장 (스케줄러 실행과 구분하기 위해)
+MANUAL_COOLDOWN_STATE_PATH = os.path.join(BASE_DIR, "data", "manual_cooldown.json")
+
+
+def _load_manual_cooldown_time() -> float:
+    """서버 재시작 후 수동 클릭 시각을 복원. 없으면 0.0 반환."""
+    try:
+        with open(MANUAL_COOLDOWN_STATE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return float(data.get("last_manual_started_at", 0.0))
+    except Exception:
+        return 0.0
+
+
+def _save_manual_cooldown_time(ts: float) -> None:
+    """수동 클릭 시각을 파일에 저장."""
+    try:
+        os.makedirs(os.path.dirname(MANUAL_COOLDOWN_STATE_PATH), exist_ok=True)
+        with open(MANUAL_COOLDOWN_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"last_manual_started_at": ts}, f)
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).warning("manual cooldown 저장 실패 — %s", exc)
 
 
 class AnalysisManager:
@@ -876,24 +899,8 @@ class AnalysisManager:
         self._job: dict | None = None
         self._task: asyncio.Task | None = None
         self._latest_result: dict | None = _load_latest_analysis()
-        # 마지막 수동 분석 시작 시각 (wall-clock, 서버 재시작 시 최근 결과로 초기화)
-        self._last_manual_started_at: float = self._init_last_manual_time()
-
-    def _init_last_manual_time(self) -> float:
-        """서버 재시작 후에도 쿨다운이 유지되도록 최근 분석 결과의 시각을 복원한다."""
-        if self._latest_result:
-            ts_str = (
-                self._latest_result.get("analysis_time")
-                or self._latest_result.get("started_at")
-            )
-            if ts_str:
-                try:
-                    import datetime as _dt2
-                    dt = _dt2.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                    return dt.timestamp()
-                except Exception:
-                    pass
-        return 0.0
+        # 마지막 수동 클릭 시각만 별도 파일에서 복원 (스케줄러 실행은 영향 없음)
+        self._last_manual_started_at: float = _load_manual_cooldown_time()
 
     async def stop(self):
         task = None
@@ -925,7 +932,9 @@ class AnalysisManager:
                             "cooldown_remaining_secs": int(remaining),
                         },
                     )
-            self._last_manual_started_at = time.time()
+                # 수동 클릭일 때만 타이머 갱신 (스케줄러 실행은 수동 쿨다운에 영향 없음)
+                self._last_manual_started_at = time.time()
+                _save_manual_cooldown_time(self._last_manual_started_at)
 
             started_at = _now_iso()
             job = {
