@@ -329,3 +329,80 @@ def get_memory(name: str = "analyst") -> FinancialSituationMemory:
             mem = FinancialSituationMemory(name=name)
             _MEMORIES[name] = mem
         return mem
+
+
+# ══════════════════════════════════════════════════════
+# AgentMemories — 역할별 독립 메모리 집합
+# ══════════════════════════════════════════════════════
+# TradingAgents 의 bull_memory / bear_memory / trader_memory 패턴을
+# BTC 선물 에이전트 구조에 맞게 확장.
+# 각 역할이 자신의 과거 판단 이력을 분리해 학습하므로,
+# Bull 의 상승 편향 실수는 Bull 메모리에, Bear 의 하락 과신은 Bear 메모리에 쌓인다.
+
+AGENT_ROLES = ("bull", "bear", "judge", "aggressive", "conservative", "neutral", "analyst")
+
+_AGENT_MEMORIES_INSTANCE: Optional["AgentMemories"] = None
+_AGENT_MEMORIES_LOCK = threading.Lock()
+
+
+class AgentMemories:
+    """
+    역할별 FinancialSituationMemory 를 한 곳에서 관리하는 컨테이너.
+
+    사용 예:
+        am = get_agent_memories()
+        past = am.recall("bull", situation_query)   # 프롬프트 삽입용 문자열
+        am.get("bull").add_situation(...)           # 직접 저장
+    """
+
+    def __init__(self, memory_dir: Optional[Path] = None):
+        _dir = Path(memory_dir) if memory_dir else DEFAULT_MEMORY_DIR
+        self._stores: dict[str, FinancialSituationMemory] = {
+            role: FinancialSituationMemory(role, _dir)
+            for role in AGENT_ROLES
+        }
+
+    def get(self, role: str) -> FinancialSituationMemory:
+        """역할별 메모리 인스턴스 반환. 알 수 없는 role 도 자동 생성."""
+        if role not in self._stores:
+            self._stores[role] = FinancialSituationMemory(role)
+        return self._stores[role]
+
+    def recall(self, role: str, situation: str, top_k: int = 2) -> str:
+        """
+        역할별 과거 기억을 회상해 프롬프트 삽입용 텍스트로 반환.
+        기억이 없거나 BM25 매칭 실패 시 빈 문자열.
+        """
+        mems = self.get(role).get_memories(situation, top_k=top_k)
+        if not mems:
+            return ""
+        lines = ["[과거 유사 상황에서의 내 판단 이력]"]
+        for i, item in enumerate(mems, 1):
+            rec = item.get("record", {}) if isinstance(item, dict) else {}
+            score = item.get("score", 0.0)
+            advice = (rec.get("advice") or "").strip()
+            outcome = (rec.get("outcome") or "").strip()
+            ts = rec.get("timestamp", "?")
+            # 너무 길면 잘라서 프롬프트 토큰 절약
+            advice_snippet = advice[:300] + " …" if len(advice) > 300 else advice
+            outcome_snippet = outcome[:200] + " …" if len(outcome) > 200 else outcome
+            lines.append(f"\n— 사례 {i} · {ts} · 유사도 {score:.2f} —")
+            if advice_snippet:
+                lines.append(f"  당시 주장: {advice_snippet}")
+            if outcome_snippet:
+                lines.append(f"  이후 결과: {outcome_snippet}")
+            else:
+                lines.append("  이후 결과: (미기록 — reflection 대기)")
+        return "\n".join(lines)
+
+    def all_roles(self) -> list[str]:
+        return list(self._stores.keys())
+
+
+def get_agent_memories() -> "AgentMemories":
+    """프로세스 전역 싱글턴 AgentMemories."""
+    global _AGENT_MEMORIES_INSTANCE
+    with _AGENT_MEMORIES_LOCK:
+        if _AGENT_MEMORIES_INSTANCE is None:
+            _AGENT_MEMORIES_INSTANCE = AgentMemories()
+        return _AGENT_MEMORIES_INSTANCE

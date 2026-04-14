@@ -23,9 +23,18 @@ try:
 except Exception:
     get_memory = None  # type: ignore
 try:
+    from agents import get_agent_memories  # AgentMemories 싱글턴 팩토리
+except Exception:
+    get_agent_memories = None  # type: ignore
+try:
     from agents.situation_digest import summarize_situation_tags
 except Exception:
     summarize_situation_tags = None  # type: ignore
+try:
+    from agents.signal_processing import extract_trading_signal, TradingSignal
+except Exception:
+    extract_trading_signal = None  # type: ignore
+    TradingSignal = None           # type: ignore
 
 import os as _os
 import logging as _logging
@@ -592,6 +601,20 @@ def analyze_with_claude(
     trade_levels = parse_trade_levels(raw_text)
     report_meta = parse_report_sections(raw_text)
 
+    # Judge 결과 추출 (signal processing 에 활용)
+    judge_result = (
+        pipeline.judge if pipeline is not None else None
+    )
+
+    # Trading Signal 구조화 (extract_trading_signal 이 가용할 때만)
+    trading_signal_dict = None
+    if extract_trading_signal is not None:
+        try:
+            ts = extract_trading_signal(raw_text, judge_result=judge_result)
+            trading_signal_dict = ts.to_dict()
+        except Exception as _ts_exc:
+            _memory_logger.warning("extract_trading_signal 실패 — %s", _ts_exc)
+
     return {
         "signal":       signal,
         "confidence":   confidence,
@@ -601,9 +624,14 @@ def analyze_with_claude(
         "report_sections": report_meta["sections"],
         "report_format_ok": report_meta["format_ok"],
         "report_missing_sections": report_meta["missing_sections"],
+        "trading_signal": trading_signal_dict,
         "debate":       (
             pipeline.debate.to_payload() if pipeline is not None and pipeline.debate
             else (debate.to_payload() if debate is not None else None)
+        ),
+        "judge":        (
+            pipeline.judge.to_payload() if pipeline is not None and pipeline.judge is not None
+            else None
         ),
         "risk":         (
             pipeline.risk.to_payload() if pipeline is not None and pipeline.risk
@@ -671,16 +699,26 @@ def run_full_analysis(
         except Exception:
             memory_obj = None
 
-    # 쿼리로는 정규화 태그를 쓰고, 태그가 없으면 blob 으로 폴백
-    memory_query = situation_tags or context_blob
+    # 역할별 에이전트 메모리 (AgentMemories 싱글턴)
+    agent_memories_obj = None
+    if get_agent_memories is not None:
+        try:
+            agent_memories_obj = get_agent_memories()
+        except Exception as exc:
+            _memory_logger.warning("get_agent_memories 실패 — %s", exc)
 
-    # 3) 파이프라인 실행: Bull/Bear → Risk Triad → Memory
+    # 쿼리로는 정규화 태그를 쓰고, 태그가 없으면 blob 앞 200자만 사용
+    # (context_blob 전체는 수천 토큰이어서 BM25 잡음이 심해짐)
+    memory_query = situation_tags or context_blob[:200]
+
+    # 3) 파이프라인 실행: Bull/Bear → Judge → Risk Triad → Memory
     pipeline = run_pipeline(
         context_blob=context_blob,
         pair_label=PAIR_LABEL,
         memory=memory_obj,
         current_situation=memory_query,
         progress_cb=progress_cb,
+        agent_memories=agent_memories_obj,
     )
 
     # 4) 최종 애널리스트 호출
@@ -697,6 +735,14 @@ def run_full_analysis(
     if memory_obj is not None and MEMORY_WRITE_ENABLED:
         try:
             situation_for_memory = situation_tags if situation_tags else context_blob
+            # judge 판정도 메타에 기록
+            judge_meta = {}
+            if pipeline is not None and pipeline.judge is not None and pipeline.judge.enabled:
+                judge_meta = {
+                    "judge_verdict": pipeline.judge.verdict,
+                    "judge_bull_key": pipeline.judge.bull_key,
+                    "judge_bear_key": pipeline.judge.bear_key,
+                }
             stored = memory_obj.add_situation(
                 situation=situation_for_memory,
                 advice=result.get("raw_text", ""),
@@ -705,9 +751,11 @@ def run_full_analysis(
                     "signal": result.get("signal"),
                     "confidence": result.get("confidence"),
                     "trade_levels": result.get("trade_levels"),
+                    "trading_signal": result.get("trading_signal"),
                     "pair": PAIR_LABEL,
                     "price_at_analysis": price_at_analysis,
                     "situation_tags": situation_tags,
+                    **judge_meta,
                 },
             )
             if stored is None:

@@ -25,10 +25,16 @@ from .risk_prompts import (
     risk_opponent_block,
 )
 
+# AgentMemories 는 선택적 의존
+try:
+    from .memory import AgentMemories
+except Exception:
+    AgentMemories = None  # type: ignore
+
 
 # ── 설정 ──────────────────────────────────────────
-# Risk Triad 도 비용/지연을 위해 기본적으로 quick 모델 사용.
-RISK_MODEL = os.getenv("RISK_MODEL", "claude-haiku-4-5")
+# Risk Triad 모델. 필요 시 env 로 오버라이드.
+RISK_MODEL = os.getenv("RISK_MODEL", "claude-sonnet-4-6")
 
 # 한 라운드 = Aggressive → Conservative → Neutral 순서로 1발언씩.
 # 기본 1라운드 (총 3회 호출). 2라운드면 6회 — 토론이 길어진다.
@@ -91,7 +97,7 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
         try:
             msg = client.messages.create(
                 model=RISK_MODEL,
-                max_tokens=1200,
+                max_tokens=4000,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )
@@ -112,6 +118,9 @@ def run_risk_triad(
     bear_final: str,
     max_rounds: Optional[int] = None,
     progress_cb: Optional[ProgressCallback] = None,
+    agent_memories: Optional["AgentMemories"] = None,
+    memory_query: str = "",
+    judge_block: str = "",
 ) -> RiskTriadResult:
     """
     Aggressive/Conservative/Neutral 3자 토론을 실행한다.
@@ -128,6 +137,12 @@ def run_risk_triad(
         None 이면 env RISK_MAX_ROUNDS 사용.
     progress_cb : callable, optional
         (phase, detail) — phase 는 "risk_aggressive"/"risk_conservative"/"risk_neutral".
+    agent_memories : AgentMemories, optional
+        역할별 과거 메모리 — aggressive/conservative/neutral 각자의 회상.
+    memory_query : str
+        BM25 쿼리용 상황 요약 문자열.
+    judge_block : str
+        투자 심판 결론 블록. 빈 문자열이면 생략.
 
     Returns
     -------
@@ -143,6 +158,7 @@ def run_risk_triad(
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
     result = RiskTriadResult(enabled=True, rounds=rounds)
 
+    _query = memory_query or context_blob[:200]
     last = {"aggressive": "", "conservative": "", "neutral": ""}
 
     try:
@@ -163,6 +179,11 @@ def run_risk_triad(
                     speaking_side=side,
                 )
 
+                # 역할별 메모리 회상 (첫 라운드에만)
+                past = ""
+                if r == 0 and agent_memories is not None:
+                    past = agent_memories.recall(side, _query, top_k=2)
+
                 # 이번 라운드에서 본인 외 누군가 발언이 있었는지 → 반박 지시
                 has_opponent = any(v for k, v in last.items() if k != side)
                 rebuttal_instruction = (
@@ -177,7 +198,15 @@ def run_risk_triad(
                     context_blob=context_blob,
                     bull_final=bull_final or "(직전 Bull 의견 없음)",
                     bear_final=bear_final or "(직전 Bear 의견 없음)",
+                    judge_block=(
+                        f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{judge_block}\n"
+                        if judge_block else ""
+                    ),
                     opponent_block=opponent_block,
+                    past_memories_block=(
+                        f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{past}\n"
+                        if past else ""
+                    ),
                     rebuttal_instruction=rebuttal_instruction,
                 )
 

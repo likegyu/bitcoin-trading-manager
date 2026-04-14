@@ -22,11 +22,16 @@ from .prompts import (
     opponent_block,
 )
 
+# AgentMemories 는 선택적 의존 (rank_bm25 없어도 동작)
+try:
+    from .memory import AgentMemories
+except Exception:
+    AgentMemories = None  # type: ignore
+
 
 # ── 설정 ──────────────────────────────────────────
-# 토론 에이전트는 "quick" 모델 사용 (비용/지연 최적화).
-# 기본값: Haiku 4.5. 필요 시 env 로 오버라이드.
-DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-haiku-4-5")
+# 토론 에이전트 모델. 필요 시 env 로 오버라이드.
+DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-sonnet-4-6")
 
 # 한 라운드 = Bull 1회 + Bear 1회.
 # max_rounds=1 → 총 2회 LLM 호출 (가장 가벼운 조합).
@@ -81,11 +86,10 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
         try:
             msg = client.messages.create(
                 model=DEBATE_MODEL,
-                max_tokens=1500,
+                max_tokens=4000,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )
-            # Haiku 4.5 는 thinking 미지원 → 그대로 text 블록만.
             text = next((b.text for b in msg.content if b.type == "text"), "")
             return text.strip()
         except anthropic.APIStatusError as e:
@@ -101,6 +105,8 @@ def run_bull_bear_debate(
     pair_label: str,
     max_rounds: Optional[int] = None,
     progress_cb: Optional[ProgressCallback] = None,
+    agent_memories: Optional["AgentMemories"] = None,
+    memory_query: str = "",
 ) -> DebateResult:
     """
     Bull ↔ Bear 사전 토론을 실행한다.
@@ -131,6 +137,9 @@ def run_bull_bear_debate(
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
     result = DebateResult(enabled=True, rounds=rounds)
 
+    # 메모리 쿼리 — situation_tags 또는 context_blob 앞 200자
+    _query = memory_query or context_blob[:200]
+
     last_bull: str = ""
     last_bear: str = ""
 
@@ -140,10 +149,19 @@ def run_bull_bear_debate(
             if progress_cb:
                 progress_cb("bull", f"Bull 라운드 {r + 1}/{rounds} 분석 중")
 
+            # 역할별 메모리 회상 (첫 라운드에만 — 이후엔 실시간 토론이 더 중요)
+            bull_past = ""
+            if r == 0 and agent_memories is not None:
+                bull_past = agent_memories.recall("bull", _query, top_k=2)
+
             bull_user = BULL_USER_TEMPLATE.format(
                 pair_label=pair_label,
                 context_blob=context_blob,
                 opponent_block=opponent_block("bull", last_bear),
+                past_memories_block=(
+                    f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{bull_past}\n"
+                    if bull_past else ""
+                ),
                 rebuttal_instruction=(
                     "Bear 의 반박 포인트를 하나씩 짚어 재반박하세요."
                     if last_bear
@@ -166,10 +184,18 @@ def run_bull_bear_debate(
             if progress_cb:
                 progress_cb("bear", f"Bear 라운드 {r + 1}/{rounds} 반박 중")
 
+            bear_past = ""
+            if r == 0 and agent_memories is not None:
+                bear_past = agent_memories.recall("bear", _query, top_k=2)
+
             bear_user = BEAR_USER_TEMPLATE.format(
                 pair_label=pair_label,
                 context_blob=context_blob,
                 opponent_block=opponent_block("bear", last_bull),
+                past_memories_block=(
+                    f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{bear_past}\n"
+                    if bear_past else ""
+                ),
                 rebuttal_instruction=(
                     "Bull 의 근거 하나하나를 구체적으로 반박하세요."
                 ),

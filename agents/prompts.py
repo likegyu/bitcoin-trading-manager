@@ -52,7 +52,7 @@ BULL_USER_TEMPLATE = """{pair_label} 현재 데이터입니다.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {opponent_block}
-
+{past_memories_block}
 위 데이터를 근거로 상방 시나리오를 논증하세요.
 {rebuttal_instruction}"""
 
@@ -63,7 +63,7 @@ BEAR_USER_TEMPLATE = """{pair_label} 현재 데이터입니다.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {opponent_block}
-
+{past_memories_block}
 위 데이터를 근거로 하방 시나리오를 논증하세요.
 {rebuttal_instruction}"""
 

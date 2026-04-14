@@ -605,17 +605,9 @@ def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
             f"양방향 {_share_text(bias_counts, 'balanced')} / "
             f"무포지션 {_share_text(bias_counts, 'flat')}"
         )
-        lines.append(
-            "리스크 이력: "
-            f"목표 도달 {target_hits}회 / 손실 한도 {loss_hits}회 / "
-            f"대부분 {_bias_label(dominant_bias)}"
-        )
+        lines.append(f"우세 성향: {_bias_label(dominant_bias)}")
         if recent_events:
             highlights = recent_events[:2]
-        highlights.extend([
-            f"목표 도달 {target_hits}회",
-            f"손실 한도 {loss_hits}회",
-        ])
 
     else:
         lines.append(f"관찰 구간: {meta}")
@@ -646,10 +638,7 @@ def _build_section(window: list[dict], config: dict, latest: dict) -> dict:
             f"무포지션 {_share_text(bias_counts, 'flat')}"
         )
         lines.append(
-            "운용 메모: "
-            f"가장 자주 보인 상태는 {_bias_label(dominant_bias)} / "
-            f"목표 도달 표본 {risk_counts.get('target_hit', 0)}개 / "
-            f"손실 한도 표본 {risk_counts.get('loss_limit_hit', 0)}개"
+            f"운용 메모: 가장 자주 보인 성향 {_bias_label(dominant_bias)}"
         )
         highlights = [
             f"우세 성향 {_bias_label(dominant_bias)}",

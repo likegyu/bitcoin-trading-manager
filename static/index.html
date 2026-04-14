@@ -6,6 +6,7 @@
 <title>₿ BTC Signal Analyzer</title>
 <!-- ECharts for multi-pane trading chart rendering -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 /* ══ 전역 ═════════════════════════════════════ */
@@ -280,7 +281,7 @@ body {
 .agents-tab-body {
   background: #FDFAF7; border: 1px solid #E8DDD4; border-radius: 10px;
   padding: 10px 12px; font-size: 12px; line-height: 1.7; color: #44403C;
-  max-height: 380px; overflow-y: auto;
+  max-height: 380px; overflow-y: auto; overflow-x: hidden;
 }
 .agents-placeholder { color: #A8978A; text-align: center; padding: 24px 0; font-size: 12.5px; }
 .agent-turn {
@@ -300,7 +301,24 @@ body {
 .agent-turn-side.neutral     { color: #7C3AED; }
 .agent-turn-meta { color: #A8978A; font-size: 10px; margin-left: auto; }
 .agent-turn-body {
-  white-space: pre-wrap; font-size: 12px; line-height: 1.75; color: #44403C;
+  font-size: 12px; line-height: 1.75; color: #44403C;
+  overflow-wrap: break-word; word-break: break-word;
+}
+.agent-turn-body p { margin: 0 0 6px; }
+.agent-turn-body p:last-child { margin-bottom: 0; }
+.agent-turn-body ul, .agent-turn-body ol { padding-left: 18px; margin: 4px 0 6px; }
+.agent-turn-body li { margin-bottom: 3px; }
+.agent-turn-body strong { font-weight: 700; }
+.agent-turn-body em { font-style: italic; }
+.agent-turn-body h1, .agent-turn-body h2, .agent-turn-body h3,
+.agent-turn-body h4, .agent-turn-body h5 {
+  font-size: 12px; font-weight: 700; margin: 6px 0 4px; color: #1C1917;
+}
+.agent-turn-body code {
+  background: #F0EBE5; border-radius: 3px; padding: 1px 4px; font-size: 11px;
+}
+.agent-turn-body hr {
+  border: none; border-top: 1px solid #E8DDD4; margin: 8px 0;
 }
 .agent-final-pair {
   display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;
@@ -1135,8 +1153,9 @@ body {
         <div class="panel-card-body" style="padding:10px 12px 14px;">
           <div id="agents-tabs" class="agents-tabs">
             <button type="button" class="agents-tab" data-agents-tab="debate">🐂🐻 Bull vs Bear</button>
-            <button type="button" class="agents-tab" data-agents-tab="risk">⚖️ Risk Triad</button>
-            <button type="button" class="agents-tab" data-agents-tab="memory">🧠 과거 유사 상황</button>
+            <button type="button" class="agents-tab" data-agents-tab="judge">⚖️ 투자 심판</button>
+            <button type="button" class="agents-tab" data-agents-tab="risk">🛡️ Risk Triad</button>
+            <button type="button" class="agents-tab" data-agents-tab="memory">🧠 과거 상황</button>
           </div>
           <div id="agents-tab-body" class="agents-tab-body">
             <div class="agents-placeholder">아직 토론 데이터가 없습니다. 분석을 실행하면 여기에 표시됩니다.</div>
@@ -1356,12 +1375,17 @@ const PHASE_TO_STEP_INDEX = {
 const PHASE_LABEL = {
   "bull":              "🐂 Bull 리서처 분석 중",
   "bear":              "🐻 Bear 리서처 반박 중",
+  "debate_warn":       "⚠️ 토론 부분 실패 — 하위 단계 입력 비대칭",
+  "judge":             "⚖️ 투자 심판 중재 중",
   "risk_aggressive":   "⚔️ Aggressive Risk 발언 중",
   "risk_conservative": "🛡️ Conservative Risk 발언 중",
   "risk_neutral":      "⚖️ Neutral Risk 중재 중",
   "memory":            "🧠 과거 유사 상황 회상 중",
   "final":             "🧠 최종 애널리스트 종합 중",
 };
+
+// 경고성 phase — 오버레이에 황색으로 표시
+const PHASE_WARN_SET = new Set(["debate_warn"]);
 
 // ══════════════════════════════════════════════
 // 앱 상태
@@ -1389,8 +1413,10 @@ const state = {
   analysisPhaseDetail: null,
   agentsActiveTab: "debate",
   debate: null,
+  judge: null,
   risk: null,
   memories: [],
+  tradingSignal: null,
   fibs:         {},
   price:        null,
   account:      null,
@@ -1691,10 +1717,12 @@ function applyResult(data, options = {}) {
   state.analysisFromCache = fromCache;
   state.analysisStale = fromCache;
 
-  // 멀티 에이전트 토론 데이터 보관
+  // 멀티 에이전트 토론/심판/메모리 데이터 보관
   state.debate = data.debate || null;
+  state.judge = data.judge || null;
   state.risk = data.risk || null;
   state.memories = Array.isArray(data.memories) ? data.memories : [];
+  state.tradingSignal = data.trading_signal || null;
 
   applyMarketData(data, "analysis");
   renderSignalBadge(data.signal, data.confidence);
@@ -1897,6 +1925,25 @@ function renderSignalBadge(signal, confidence) {
   const confValue = Number.isFinite(Number(confidence)) ? Number(confidence) : 0;
   const badge = document.getElementById("sig-badge");
   badge.className = "sig-badge " + cls;
+
+  // 투자 심판 판정 배지 — state.judge 에서 읽기
+  let judgeBadgeHtml = "";
+  if (state.judge && state.judge.enabled && state.judge.verdict) {
+    const jv = state.judge.verdict;
+    const jColor = jv === "상방 우위" ? "#16A34A" : jv === "하방 우위" ? "#DC2626" : "#78716C";
+    const jIcon  = jv === "상방 우위" ? "📈" : jv === "하방 우위" ? "📉" : "⚖️";
+    const jAligned = (
+      (signal === "매수" && jv === "상방 우위") ||
+      (signal === "매도" && jv === "하방 우위") ||
+      (signal === "홀드" && jv === "중립")
+    );
+    const alignIcon = jAligned ? "✅" : "⚠️";
+    judgeBadgeHtml = `
+      <div class="card-sub" style="margin-top:5px;padding:3px 6px;background:#F5F0EB;border-radius:6px;font-size:10px;">
+        ${alignIcon} 심판: <span style="color:${jColor};font-weight:700">${jIcon} ${jv}</span>
+      </div>`;
+  }
+
   badge.innerHTML = `
     <div class="card-label">AI 관점</div>
     <div class="card-value" style="color:${color};font-size:26px;letter-spacing:-.3px;">${emoji} ${view}</div>
@@ -1906,6 +1953,7 @@ function renderSignalBadge(signal, confidence) {
         <div class="conf-bar-fill" style="width:${confValue}%;background:${color};"></div>
       </div>
     </div>
+    ${judgeBadgeHtml}
     <div class="card-sub" style="color:${state.analysisStale ? C.orange : C.dim};margin-top:4px;">
       ${getAnalysisFreshnessCopy()}
     </div>
@@ -3361,14 +3409,16 @@ function renderAgentsPanel() {
   if (!card) return;
 
   const debate = state.debate;
+  const judge = state.judge;
   const risk = state.risk;
   const memories = state.memories || [];
 
   const hasDebate = !!(debate && (debate.turns?.length || debate.final_bull || debate.final_bear || debate.error));
+  const hasJudge = !!(judge && judge.enabled && (judge.verdict || judge.error));
   const hasRisk = !!(risk && (risk.turns?.length || risk.error));
   const hasMemory = Array.isArray(memories) && memories.length > 0;
 
-  if (!hasDebate && !hasRisk && !hasMemory) {
+  if (!hasDebate && !hasJudge && !hasRisk && !hasMemory) {
     card.style.display = "none";
     return;
   }
@@ -3379,6 +3429,10 @@ function renderAgentsPanel() {
   if (hasDebate) {
     const rounds = debate.rounds ?? (debate.turns ? Math.ceil(debate.turns.length / 2) : 0);
     parts.push(`Debate ${rounds}R`);
+  }
+  if (hasJudge && judge.verdict) {
+    const verdictShort = judge.verdict === "상방 우위" ? "📈" : judge.verdict === "하방 우위" ? "📉" : "⚖️";
+    parts.push(`심판 ${verdictShort}`);
   }
   if (hasRisk) {
     const rounds = risk.rounds ?? 1;
@@ -3391,9 +3445,9 @@ function renderAgentsPanel() {
   if (summaryEl) summaryEl.textContent = parts.join(" · ");
 
   // 탭 상태 — 활성화할 수 있는 탭 중 현재 선택된 것이 없으면 첫 탭으로
-  const availability = { debate: hasDebate, risk: hasRisk, memory: hasMemory };
+  const availability = { debate: hasDebate, judge: hasJudge, risk: hasRisk, memory: hasMemory };
   if (!availability[state.agentsActiveTab]) {
-    state.agentsActiveTab = (hasDebate && "debate") || (hasRisk && "risk") || (hasMemory && "memory") || "debate";
+    state.agentsActiveTab = (hasDebate && "debate") || (hasJudge && "judge") || (hasRisk && "risk") || (hasMemory && "memory") || "debate";
   }
 
   // 탭 버튼 활성/비활성
@@ -3418,6 +3472,8 @@ function renderAgentsPanel() {
   const bodyEl = document.getElementById("agents-tab-body");
   if (state.agentsActiveTab === "debate") {
     bodyEl.innerHTML = renderDebateTab(debate);
+  } else if (state.agentsActiveTab === "judge") {
+    bodyEl.innerHTML = renderJudgeTab(judge);
   } else if (state.agentsActiveTab === "risk") {
     bodyEl.innerHTML = renderRiskTab(risk);
   } else {
@@ -3426,6 +3482,38 @@ function renderAgentsPanel() {
 
   // 리플렉션 버튼은 탭과 무관하게 항상 보임 (tab-locked deadlock 방지)
   // — CSS 기본값 display:flex 사용. 여기서 토글하지 않는다.
+}
+
+function renderJudgeTab(judge) {
+  if (!judge) return `<div class="agents-placeholder">투자 심판 데이터가 없습니다.</div>`;
+  if (!judge.enabled) return `<div class="agents-placeholder">투자 심판 비활성 상태입니다.</div>`;
+  if (judge.error && !judge.verdict) {
+    return `<div class="agents-error-note">심판 실패 — ${escapeHtml(judge.error)}</div>`;
+  }
+
+  const verdictColor = judge.verdict === "상방 우위" ? "#16A34A"
+    : judge.verdict === "하방 우위" ? "#DC2626"
+    : "#78716C";
+  const verdictIcon = judge.verdict === "상방 우위" ? "📈"
+    : judge.verdict === "하방 우위" ? "📉" : "⚖️";
+
+  const elapsed = typeof judge.elapsed_s === "number" ? `${judge.elapsed_s.toFixed(1)}s` : "";
+  const errorHtml = judge.error
+    ? `<div class="agents-error-note" style="margin-top:8px">일부 실패 — ${escapeHtml(judge.error)}</div>`
+    : "";
+
+  return `
+    <div class="agent-turn" style="border-left:3px solid ${verdictColor}">
+      <div class="agent-turn-head" style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">${verdictIcon}</span>
+        <span style="font-weight:700;font-size:14px;color:${verdictColor}">${escapeHtml(judge.verdict || "판정 없음")}</span>
+        <span class="agent-turn-meta" style="margin-left:auto">${escapeHtml(judge.model || "")} · ${elapsed}</span>
+      </div>
+      ${judge.reasoning ? `<div class="agent-turn-body" style="margin-top:6px"><strong>판정 이유:</strong> ${renderMarkdown(judge.reasoning)}</div>` : ""}
+      ${judge.bull_key ? `<div class="agent-turn-body" style="color:#16A34A;margin-top:4px">🐂 Bull 핵심: ${escapeHtml(judge.bull_key)}</div>` : ""}
+      ${judge.bear_key ? `<div class="agent-turn-body" style="color:#DC2626;margin-top:4px">🐻 Bear 핵심: ${escapeHtml(judge.bear_key)}</div>` : ""}
+      ${errorHtml}
+    </div>`;
 }
 
 function renderDebateTab(debate) {
@@ -3445,7 +3533,7 @@ function renderDebateTab(debate) {
           <span>라운드 ${t.round_index + 1}</span>
           <span class="agent-turn-meta">${escapeHtml(t.model || "")} · ${elapsed}</span>
         </div>
-        <div class="agent-turn-body">${escapeHtml(t.content || "")}</div>
+        <div class="agent-turn-body">${renderMarkdown(t.content || "")}</div>
       </div>`;
   }).join("");
 
@@ -3478,7 +3566,7 @@ function renderRiskTab(risk) {
           <span>라운드 ${t.round_index + 1}</span>
           <span class="agent-turn-meta">${escapeHtml(t.model || "")} · ${elapsed}</span>
         </div>
-        <div class="agent-turn-body">${escapeHtml(t.content || "")}</div>
+        <div class="agent-turn-body">${renderMarkdown(t.content || "")}</div>
       </div>`;
   }).join("");
 
@@ -3518,11 +3606,11 @@ function renderMemoryTab(memories) {
           <span style="margin-left:auto;">${escapeHtml(ts)}</span>
         </div>
         ${(sigChip || confChip) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;">${sigChip}${confChip}</div>` : ""}
-        ${situation ? `<div class="memory-field"><span class="memory-field-label">상황</span>${escapeHtml(trim(situation, 500))}</div>` : ""}
-        ${advice ? `<div class="memory-field"><span class="memory-field-label">당시 조언</span>${escapeHtml(trim(advice, 400))}</div>` : ""}
+        ${situation ? `<div class="memory-field"><span class="memory-field-label">상황</span><div class="agent-turn-body" style="display:inline;">${renderMarkdown(trim(situation, 500))}</div></div>` : ""}
+        ${advice ? `<div class="memory-field"><span class="memory-field-label">당시 조언</span><div class="agent-turn-body" style="display:inline;">${renderMarkdown(trim(advice, 400))}</div></div>` : ""}
         <div class="memory-field">
           <span class="memory-field-label">실제 결과</span>
-          ${outcome ? escapeHtml(trim(outcome, 400)) : '<span class="memory-outcome-missing">아직 리플렉션 미기록</span>'}
+          ${outcome ? `<div class="agent-turn-body" style="display:inline;">${renderMarkdown(trim(outcome, 400))}</div>` : '<span class="memory-outcome-missing">아직 리플렉션 미기록</span>'}
         </div>
       </div>`;
   }).join("");
@@ -3713,6 +3801,9 @@ function showLoadingOverlay(activeStep, phase = null, phaseDetail = null) {
     || (phase ? phase : "");
   phaseEl.textContent = phaseText;
   phaseEl.style.display = phaseText ? "block" : "none";
+  // 경고 phase 는 황색으로 강조
+  const isWarn = phase && PHASE_WARN_SET.has(phase);
+  phaseEl.style.color = isWarn ? "#B45309" : "";
 }
 
 function hideLoadingOverlay() {
@@ -3838,6 +3929,17 @@ function renderChatHistory(typing = false) {
 function escapeHtml(str) {
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
             .replace(/"/g,"&quot;").replace(/\n/g,"<br>");
+}
+
+function renderMarkdown(str) {
+  if (!str) return "";
+  if (typeof marked !== "undefined") {
+    try {
+      return marked.parse(str, { breaks: true, gfm: true });
+    } catch(e) { /* fallback */ }
+  }
+  // marked 로드 실패 시 기본 escapeHtml 처리
+  return escapeHtml(str);
 }
 
 // ══════════════════════════════════════════════

@@ -34,8 +34,6 @@ def symbol_to_pair(symbol: str) -> str:
 
 # ── 매매 설정 (복리 전략 파라미터) ──────────────
 DEFAULT_LEVERAGE      = 3       # 희망 레버리지 배수
-DAILY_TARGET_PCT      = 0.7     # 일일 목표 수익률 (%)  ← 원하는 값으로 수정
-DAILY_LOSS_LIMIT_PCT  = -2.0    # 일일 손실 한도 (%)    ← 원하는 값으로 수정
 
 # 분석할 시간봉 목록
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]

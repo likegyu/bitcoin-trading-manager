@@ -387,19 +387,13 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
         ctx["pnl_error"]          = _safe_error_message(exc)
 
     # ── 사용자 설정 ───────────────────────────
-    ctx["daily_target_pct"]     = _cfg.DAILY_TARGET_PCT
-    ctx["daily_loss_limit_pct"] = _cfg.DAILY_LOSS_LIMIT_PCT
     ctx["configured_leverage"]  = _cfg.DEFAULT_LEVERAGE
 
     # ── UI / 보고용 요약 필드 ──────────────────
     wallet = ctx.get("wallet_balance")
     equity = ctx.get("account_equity")
     total_pnl = ctx.get("today_total_pnl")
-    target = ctx.get("daily_target_pct")
-    loss_lim = ctx.get("daily_loss_limit_pct")
     ctx["today_pnl_pct"] = None
-    ctx["remaining_to_target_pct"] = None
-    ctx["risk_status"] = None
 
     if equity is not None and total_pnl is not None:
         # wallet_balance 기준: unrealized PnL을 분모에서 제외해 수익률 오차 방지
@@ -416,14 +410,6 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
             ctx["day_start_equity"] = start_balance
         today_pct = (total_pnl / start_balance * 100) if start_balance > 0 else 0
         ctx["today_pnl_pct"] = today_pct
-        if target is not None:
-            ctx["remaining_to_target_pct"] = target - today_pct
-        if target is not None and today_pct >= target:
-            ctx["risk_status"] = "target_hit"
-        elif loss_lim is not None and today_pct <= loss_lim:
-            ctx["risk_status"] = "loss_limit_hit"
-        else:
-            ctx["risk_status"] = "active"
 
     attach_account_context_summary(ctx)
     return ctx
@@ -465,8 +451,6 @@ def format_account_context(ctx: dict) -> str:
     funding   = ctx.get("today_funding_fee")
     commission = ctx.get("today_commission_fee")
     anchor_source = ctx.get("day_anchor_source") or ""
-    target    = ctx.get("daily_target_pct", 0.7)
-    loss_lim  = ctx.get("daily_loss_limit_pct", -2.0)
     lev_display = ctx.get("leverage_display")
     start_equity = ctx.get("day_start_equity")
     current_equity = ctx.get("account_equity")
@@ -482,12 +466,6 @@ def format_account_context(ctx: dict) -> str:
             if start_balance <= 0:
                 start_balance = current_equity - total_pnl
         today_pct = (total_pnl / start_balance * 100) if start_balance > 0 else 0
-        remaining = target - today_pct
-        status    = ""
-        if today_pct >= target:
-            status = "  ⚠️ 일일 목표 달성 — 신규 진입 자제 권장"
-        elif today_pct <= loss_lim:
-            status = "  🚫 일일 손실 한도 도달 — 추가 거래 중단 권장"
 
         lines.append(f"  {total_label}(KST): ${total_pnl:+,.2f} ({today_pct:+.2f}%)")
         detail_lines: list[str] = []
@@ -512,17 +490,11 @@ def format_account_context(ctx: dict) -> str:
         for idx, detail in enumerate(detail_lines):
             branch = "└" if idx == len(detail_lines) - 1 else "├"
             lines.append(f"    {branch} {detail}")
-        lines.append(
-            f"  일일 목표:       +{target:.1f}%  |  손실 한도: {loss_lim:.1f}%  |  잔여: {remaining:+.2f}%"
-        )
-        if status:
-            lines.append(status)
         if ctx.get("today_trade_count") is not None:
             lines.append(f"  오늘 거래 기록:  {ctx['today_trade_count']}건")
     else:
         err = ctx.get("pnl_error") or "income 조회 실패"
         lines.append(f"  오늘 손익 조회 실패 — {err}")
-        lines.append(f"  일일 목표: +{target:.1f}%  |  손실 한도: {loss_lim:.1f}%")
 
     if lev_display:
         lines.append(f"  레버리지 상태:   {lev_display}")
