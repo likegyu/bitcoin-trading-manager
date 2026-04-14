@@ -1435,6 +1435,9 @@ const state = {
   showHistoryArrows: localStorage.getItem("showHistoryArrows") !== "false",
   // 히스토리 행 클릭 오버레이 선택 상태
   selectedHistoryTs: null,
+  // 수동 분석 쿨다운: 15분 경과 전 버튼 비활성화
+  cooldownUntilMs: 0,       // Date.now() 기준, 이 시각까지 버튼 비활성
+  cooldownTimerId: null,    // 1초 카운트다운 interval ID
 };
 
 function persistAnalysisCache(data) {
@@ -1529,7 +1532,7 @@ function setAnalysisRunning(job) {
   showLoadingOverlay(overlayStep, state.analysisPhase, state.analysisPhaseDetail);
 }
 
-function finishAnalysisRun() {
+function finishAnalysisRun({ startCooldown = false } = {}) {
   clearAnalysisPollTimer();
   hideLoadingOverlay();
   state.analyzing = false;
@@ -1537,6 +1540,9 @@ function finishAnalysisRun() {
   state.analysisStep = 0;
   state.analysisPhase = null;
   state.analysisPhaseDetail = null;
+  if (startCooldown) {
+    applyCooldown(15 * 60); // 분석 완료 직후 15분 쿨다운 시작
+  }
   setAnalyzeBtn(true);
   updateAnalysisStatus();
 }
@@ -1571,6 +1577,12 @@ function handleAnalysisStatusResponse(statusPayload = {}) {
   const latestResult = statusPayload.latest_result || null;
   const result = statusPayload.result || null;
 
+  // 서버에서 내려온 쿨다운 잔여 시간을 적용 (분석 중이 아닐 때만)
+  const serverCooldown = statusPayload.cooldown_remaining_secs ?? 0;
+  if (serverCooldown > 0 && !state.analyzing) {
+    applyCooldown(serverCooldown);
+  }
+
   if (latestResult && shouldApplyAnalysisPayload(latestResult)) {
     applyResult(latestResult);
   }
@@ -1584,7 +1596,7 @@ function handleAnalysisStatusResponse(statusPayload = {}) {
   clearAnalysisPollTimer();
 
   if (job && job.status === "completed" && result) {
-    finishAnalysisRun();
+    finishAnalysisRun({ startCooldown: true });
     if (shouldApplyAnalysisPayload(result)) {
       applyResult(result);
     }
@@ -1616,10 +1628,28 @@ async function syncAnalysisStatus(options = {}) {
 
 async function runAnalysis() {
   if (state.analyzing) return;
+  // 쿨다운 중이면 클릭 차단
+  const remaining = state.cooldownUntilMs - Date.now();
+  if (remaining > 0) {
+    const m = Math.floor(remaining / 60000);
+    const s = Math.ceil((remaining % 60000) / 1000);
+    showError(`마지막 분석으로부터 15분이 지나야 수동 분석을 실행할 수 있습니다. (${m}분 ${s}초 남음)`);
+    return;
+  }
   setAnalysisRunning({ step: 0 });
 
   try {
     const res = await fetch("/api/analyze", { method: "POST", keepalive: true });
+    if (res.status === 429) {
+      // 서버가 쿨다운 중이라고 응답
+      const errData = await res.json().catch(() => ({}));
+      const secs = errData?.detail?.cooldown_remaining_secs ?? 0;
+      finishAnalysisRun();
+      applyCooldown(secs);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      showError(`15분 쿨다운 중입니다. ${m}분 ${s}초 후에 다시 시도하세요.`);
+      return;
+    }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
@@ -1635,7 +1665,52 @@ async function runAnalysis() {
   }
 }
 
+/**
+ * 쿨다운을 remainingSecs 초 동안 적용하고, 버튼에 카운트다운을 표시한다.
+ */
+function applyCooldown(remainingSecs) {
+  if (remainingSecs <= 0) return;
+  state.cooldownUntilMs = Date.now() + remainingSecs * 1000;
+  _startCooldownTick();
+}
+
+function _startCooldownTick() {
+  if (state.cooldownTimerId) clearInterval(state.cooldownTimerId);
+  _updateCooldownBtn();
+  state.cooldownTimerId = setInterval(() => {
+    const left = state.cooldownUntilMs - Date.now();
+    if (left <= 0) {
+      clearInterval(state.cooldownTimerId);
+      state.cooldownTimerId = null;
+      state.cooldownUntilMs = 0;
+      if (!state.analyzing) setAnalyzeBtn(true);
+    } else {
+      _updateCooldownBtn();
+    }
+  }, 1000);
+}
+
+function _updateCooldownBtn() {
+  const btn = document.getElementById("btn-analyze");
+  if (!btn) return;
+  const left = Math.max(0, state.cooldownUntilMs - Date.now());
+  const m = Math.floor(left / 60000);
+  const s = Math.ceil((left % 60000) / 1000);
+  btn.disabled = true;
+  btn.setAttribute("aria-busy", "false");
+  btn.textContent = `⏳ ${m}분 ${s}초 후 가능`;
+}
+
 function setAnalyzeBtn(enabled) {
+  // 쿨다운 중이면 카운트다운 버튼으로 유지
+  if (enabled && state.cooldownUntilMs > Date.now()) {
+    _updateCooldownBtn();
+    return;
+  }
+  if (state.cooldownTimerId && enabled) {
+    clearInterval(state.cooldownTimerId);
+    state.cooldownTimerId = null;
+  }
   const btn = document.getElementById("btn-analyze");
   btn.disabled = !enabled;
   btn.setAttribute("aria-busy", String(!enabled));

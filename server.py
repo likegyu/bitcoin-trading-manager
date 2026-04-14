@@ -12,11 +12,12 @@ import functools
 import json
 import math
 import os
+import time
 import uuid
 
 import pandas as pd
 import websockets
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -865,12 +866,34 @@ class MacroSnapshotManager:
 _macro_snapshot = MacroSnapshotManager()
 
 
+# 수동 분석 버튼 쿨다운: 15분
+MANUAL_COOLDOWN_SECS = 15 * 60
+
+
 class AnalysisManager:
     def __init__(self):
         self._lock = asyncio.Lock()
         self._job: dict | None = None
         self._task: asyncio.Task | None = None
         self._latest_result: dict | None = _load_latest_analysis()
+        # 마지막 수동 분석 시작 시각 (wall-clock, 서버 재시작 시 최근 결과로 초기화)
+        self._last_manual_started_at: float = self._init_last_manual_time()
+
+    def _init_last_manual_time(self) -> float:
+        """서버 재시작 후에도 쿨다운이 유지되도록 최근 분석 결과의 시각을 복원한다."""
+        if self._latest_result:
+            ts_str = (
+                self._latest_result.get("analysis_time")
+                or self._latest_result.get("started_at")
+            )
+            if ts_str:
+                try:
+                    import datetime as _dt2
+                    dt = _dt2.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    return dt.timestamp()
+                except Exception:
+                    pass
+        return 0.0
 
     async def stop(self):
         task = None
@@ -881,10 +904,28 @@ class AnalysisManager:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    async def start_job(self) -> tuple[dict, bool]:
+    def cooldown_remaining(self) -> float:
+        """수동 클릭 쿨다운 잔여 시간(초). 0 이면 분석 가능."""
+        elapsed = time.time() - self._last_manual_started_at
+        return max(0.0, MANUAL_COOLDOWN_SECS - elapsed)
+
+    async def start_job(self, bypass_cooldown: bool = False) -> tuple[dict, bool]:
         async with self._lock:
             if self._job and self._job["status"] in {"pending", "running"}:
                 return self._serialize_job(self._job), False
+
+            # 쿨다운 체크 (스케줄러는 bypass)
+            if not bypass_cooldown:
+                remaining = max(0.0, MANUAL_COOLDOWN_SECS - (time.time() - self._last_manual_started_at))
+                if remaining > 0:
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "reason": "cooldown",
+                            "cooldown_remaining_secs": int(remaining),
+                        },
+                    )
+            self._last_manual_started_at = time.time()
 
             started_at = _now_iso()
             job = {
@@ -910,7 +951,10 @@ class AnalysisManager:
 
     async def get_status(self, include_latest: bool = False) -> dict:
         async with self._lock:
-            response = {"job": self._serialize_job(self._job)}
+            response = {
+                "job": self._serialize_job(self._job),
+                "cooldown_remaining_secs": int(max(0.0, MANUAL_COOLDOWN_SECS - (time.time() - self._last_manual_started_at))),
+            }
             if (
                 self._job
                 and self._job["status"] == "completed"
@@ -1114,8 +1158,8 @@ class ScheduleManager:
             except asyncio.CancelledError:
                 self._next_run_at = None
                 raise
-            # 분석 실행 (이미 진행 중이면 skip)
-            _, started = await _analysis_manager.start_job()
+            # 분석 실행 (이미 진행 중이면 skip, 스케줄러는 쿨다운 우회)
+            _, started = await _analysis_manager.start_job(bypass_cooldown=True)
             if not started:
                 print("[scheduler] analysis already running – skipped")
 
