@@ -1397,12 +1397,19 @@ async def reflect_endpoint():
             import logging as _logging
             _logging.getLogger(__name__).warning("에이전트 역할 reflection 실패 — %s", exc)
 
+    # 전체 기록 수 (outcome 유무 무관)
+    total_records = analyst_memory.size()
+    # 아직 리플렉션이 안 된 기록 수 (outcome 비어있는 것)
+    still_pending = len(analyst_memory.list_pending_reflections(min_age_seconds=0, limit=9999))
+
     return {
         "ok": True,
         "price_now": price_now,
         "processed": len(all_results),
         "skipped_no_baseline": total_skipped,
-        "analyst_memory_size": analyst_memory.size(),
+        "memory_size": total_records,          # 프론트엔드 호환 필드
+        "analyst_memory_size": total_records,  # 하위 호환
+        "pending_count": still_pending,
         "results": all_results,
     }
 

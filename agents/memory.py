@@ -150,8 +150,8 @@ class FinancialSituationMemory:
         advice: str,
         outcome: str = "",
         meta: Optional[dict] = None,
-        dedup_threshold: float = 0.92,
-        dedup_window: int = 5,
+        dedup_threshold: float = 0.70,
+        dedup_window: int = 2,
     ) -> Optional[MemoryRecord]:
         """
         이번 판단을 메모리에 추가한다.
@@ -160,6 +160,9 @@ class FinancialSituationMemory:
           최근 `dedup_window` 개 기록의 situation 토큰과 Jaccard >= threshold 이면
           '실질적으로 같은 구조' 로 보고 저장을 건너뛴다 (무한 누적 방지).
           건너뛴 경우 반환값은 None.
+
+          BTC 분석처럼 지표가 비슷한 상황이 반복될 때 0.92는 너무 엄격해서
+          대부분이 dedup 처리됨 → 0.70 / window=2 로 완화.
         """
         new_tokens = _tokenize(situation)
         with self._lock:

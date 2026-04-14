@@ -3706,10 +3706,17 @@ async function runReflection() {
     } else {
       if (status) {
         const processed = data.processed || 0;
-        const total = data.memory_size || 0;
-        status.textContent = processed
-          ? `✅ ${processed}건 리플렉션 기록 완료 (메모리 ${total}건)`
-          : `ℹ️ 리플렉션 대상 기록이 없습니다 (메모리 ${total}건)`;
+        const total = data.memory_size ?? data.analyst_memory_size ?? 0;
+        const pending = data.pending_count ?? 0;
+        if (processed > 0) {
+          status.textContent = `✅ ${processed}건 리플렉션 완료 (전체 ${total}건 · 대기 ${pending}건)`;
+        } else if (total === 0) {
+          status.textContent = `ℹ️ 저장된 분석 기록이 없습니다. 분석을 먼저 실행해주세요.`;
+        } else if (pending === 0) {
+          status.textContent = `ℹ️ 모든 기록이 이미 리플렉션 완료됐습니다 (전체 ${total}건)`;
+        } else {
+          status.textContent = `ℹ️ 대기 기록 ${pending}건이 30분 미경과로 아직 대상 아님 (전체 ${total}건)`;
+        }
       }
     }
   } catch (e) {
