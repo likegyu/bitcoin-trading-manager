@@ -1,0 +1,40 @@
+# 시크릿
+.env
+.env.*
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# VCS / IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 로그
+*.log
+logs/
+
+# 로컬 데이터 — 이미지에 포함되면 안 됨 (서버 기동 시 볼륨 마운트)
+data/
+
+# 테스트 / 개발 전용
+tests/
+*.ipynb

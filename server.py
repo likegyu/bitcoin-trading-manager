@@ -8,6 +8,7 @@ import asyncio
 import copy
 import concurrent.futures
 import contextlib
+import functools
 import json
 import math
 import os
@@ -29,9 +30,24 @@ from account_context import (
 )
 from data_fetcher import fetch_ohlcv, fetch_current_price
 from indicators import add_all_indicators, fibonacci_swing_levels, fib_window_for_tf
-from analyzer import analyze_with_claude, chat_with_claude
+from analyzer import analyze_with_claude, chat_with_claude, run_full_analysis
 from macro_fetcher import fetch_macro_context
 from time_utils import format_kst, now_kst
+
+# ── Reflection / Memory (optional: rank_bm25 미설치 시 None) ──
+try:
+    from agents import get_memory as _get_memory
+    from agents import reflect_on_record as _reflect_on_record
+    _REFLECTION_ENABLED = _get_memory is not None and _reflect_on_record is not None
+except Exception as _reflect_exc:  # pragma: no cover
+    _get_memory = None           # type: ignore
+    _reflect_on_record = None    # type: ignore
+    _REFLECTION_ENABLED = False
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "Reflection/Memory 비활성 — %s: %s",
+        type(_reflect_exc).__name__, _reflect_exc,
+    )
 
 # ── 색상 팔레트 ────────────────────────────────
 C = {
@@ -382,6 +398,12 @@ def _build_payload(tf_data: dict, price: float, analysis: dict) -> dict:
         "report_sections": analysis.get("report_sections", {}),
         "report_format_ok": analysis.get("report_format_ok", False),
         "report_missing_sections": analysis.get("report_missing_sections", []),
+        # Bull/Bear 사전 토론 결과 (frontend 에서 아코디언 등으로 노출 가능)
+        "debate": analysis.get("debate"),
+        # Risk Triad (Aggressive / Conservative / Neutral) 토론 결과
+        "risk": analysis.get("risk"),
+        # 과거 유사 상황 (BM25 회상 결과)
+        "memories": analysis.get("memories", []),
         "account": _build_account_payload(),
         "chat_context": f"{analysis.get('prompt_used', '')}\n\n[Claude 분석 결과]\n{analysis['raw_text']}",
     }
@@ -858,6 +880,10 @@ class AnalysisManager:
                 "id": uuid.uuid4().hex,
                 "status": "running",
                 "step": 0,
+                # phase/phase_detail: step 2 내부의 세부 진행 상태
+                # (예: "bull", "bear", "final"). UI 진행 표시용.
+                "phase": None,
+                "phase_detail": None,
                 "error": None,
                 "result": None,
                 "started_at": started_at,
@@ -891,6 +917,8 @@ class AnalysisManager:
             "id": job["id"],
             "status": job["status"],
             "step": job["step"],
+            "phase": job.get("phase"),
+            "phase_detail": job.get("phase_detail"),
             "error": job["error"],
             "started_at": job["started_at"],
             "updated_at": job["updated_at"],
@@ -903,6 +931,16 @@ class AnalysisManager:
                 return
             self._job["status"] = "running"
             self._job["step"] = step
+            self._job["updated_at"] = _now_iso()
+
+    async def _set_phase(self, job_id: str, phase: str, detail: str):
+        """step 2 내부의 세부 진행 상태(phase)를 갱신한다.
+        토론 진행(Bull/Bear) 중 UI 프로그레스 표시를 위한 용도."""
+        async with self._lock:
+            if not self._job or self._job["id"] != job_id:
+                return
+            self._job["phase"] = phase
+            self._job["phase_detail"] = detail
             self._job["updated_at"] = _now_iso()
 
     async def _complete(self, job_id: str, payload: dict):
@@ -947,8 +985,25 @@ class AnalysisManager:
                 macro_snapshot = await loop.run_in_executor(_executor, fetch_macro_context)
 
             await self._set_step(job_id, 2)
+
+            # 토론 진행률 콜백 — 워커 스레드에서 호출되므로 이벤트 루프로 넘긴다.
+            def _progress_cb(phase: str, detail: str):
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._set_phase(job_id, phase, detail), loop
+                    )
+                except Exception:
+                    # 진행률 실패가 분석 흐름을 끊어서는 안 된다.
+                    pass
+
             analysis = await loop.run_in_executor(
-                _executor, analyze_with_claude, tf_data, macro_snapshot
+                _executor,
+                functools.partial(
+                    run_full_analysis,
+                    tf_data,
+                    macro_snapshot,
+                    progress_cb=_progress_cb,
+                ),
             )
 
             await self._set_step(job_id, 3)
@@ -1169,6 +1224,92 @@ async def chat_endpoint(body: ChatRequest):
         lambda: chat_with_claude(body.messages, body.context),
     )
     return {"reply": reply}
+
+
+@app.post("/api/reflect")
+async def reflect_endpoint():
+    """
+    메모리에 누적된 과거 기록들 중 outcome 이 비어 있는 것들을
+    '현재가 vs 기록 당시 가격' 변화와 함께 Reflection 에이전트에 돌려
+    교훈을 기록한다.
+
+    사용 예:
+      - 프론트엔드 '리플렉션' 버튼
+      - schedule 스킬로 6시간마다 자동 호출
+
+    가격 베이스라인 우선순위:
+      1) meta["price_at_analysis"]  ← 분석 시점 현재가 (정확)
+      2) meta["trade_levels"]["entry"]  ← 진입가가 있으면 그것
+      3) skip (잘못된 피드백 방지 — bull_trigger/resistance 는 미래가이므로 사용 안 함)
+    """
+    if not _REFLECTION_ENABLED:
+        return {
+            "ok": False,
+            "error": "rank_bm25 또는 관련 모듈이 설치되지 않아 reflection 을 사용할 수 없습니다.",
+        }
+
+    memory = _get_memory("analyst")
+    loop = asyncio.get_event_loop()
+
+    # 현재가 수집 (단일 호출)
+    try:
+        price_now = await loop.run_in_executor(_executor, fetch_current_price, DEFAULT_SYMBOL)
+    except Exception as exc:
+        return {"ok": False, "error": f"가격 수집 실패 — {exc}"}
+
+    # Reflection 대상 — 최소 30분 경과 + outcome 비어 있음, 최대 5건
+    import datetime as _dt
+    pending = memory.list_pending_reflections(min_age_seconds=1800.0, limit=5)
+
+    targets = []
+    now_utc = _dt.datetime.now(_dt.timezone.utc)
+    skipped_no_baseline = 0
+    for rec in pending:
+        try:
+            ts = _dt.datetime.fromisoformat(rec.timestamp.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        elapsed = (now_utc - ts).total_seconds()
+
+        meta = rec.meta or {}
+        # 1) 분석 시점 현재가 (최우선)
+        price_then = meta.get("price_at_analysis")
+        if not isinstance(price_then, (int, float)) or price_then <= 0:
+            # 2) trade_levels.entry 만 허용 — bull_trigger/resistance 는 '미래 가격' 이므로 제외
+            trade_levels = meta.get("trade_levels") or {}
+            entry = trade_levels.get("entry")
+            if isinstance(entry, (int, float)) and entry > 0:
+                price_then = float(entry)
+            else:
+                skipped_no_baseline += 1
+                continue
+        price_then = float(price_then)
+        targets.append((rec, price_then, elapsed))
+
+    results = []
+    for rec, price_then, elapsed_s in targets:
+        res = await loop.run_in_executor(
+            _executor,
+            lambda r=rec, pt=price_then, el=elapsed_s: _reflect_on_record(
+                record_ts=r.timestamp,
+                situation=r.situation,
+                advice=r.advice,
+                price_then=pt,
+                price_now=price_now,
+                elapsed_seconds=el,
+                memory=memory,
+            ),
+        )
+        results.append(res.to_dict())
+
+    return {
+        "ok": True,
+        "price_now": price_now,
+        "processed": len(results),
+        "skipped_no_baseline": skipped_no_baseline,
+        "memory_size": memory.size(),
+        "results": results,
+    }
 
 
 @app.get("/api/macro")

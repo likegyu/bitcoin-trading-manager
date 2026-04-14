@@ -11,6 +11,28 @@ from account_context import fetch_account_context, format_account_context
 from market_context import fetch_market_context, format_market_context
 from macro_fetcher import fetch_macro_context, format_macro_context
 from time_utils import now_kst
+from agents import (
+    run_bull_bear_debate,
+    format_debate_block,
+    DebateResult,
+    run_pipeline,
+    PipelineResult,
+)
+try:
+    from agents import get_memory  # may be None if rank_bm25 missing
+except Exception:
+    get_memory = None  # type: ignore
+try:
+    from agents.situation_digest import summarize_situation_tags
+except Exception:
+    summarize_situation_tags = None  # type: ignore
+
+import os as _os
+import logging as _logging
+
+_memory_logger = _logging.getLogger(__name__)
+# 메모리 쓰기 전역 스위치 — 스테이징/백테스트 환경에서 기록 방지용
+MEMORY_WRITE_ENABLED = _os.getenv("MEMORY_WRITE_ENABLED", "1").lower() not in ("0", "false", "no")
 
 PAIR_LABEL = symbol_to_pair(DEFAULT_SYMBOL)
 
@@ -53,21 +75,8 @@ USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_kst} (KST)
 
 다음은 {pair_label}의 현재 멀티 타임프레임 기술적 분석 데이터입니다.
 
-{tf_alignment}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{macro_context}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{market_context}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{account_context}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{indicators_summary}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-[피보나치 레벨]
-1h 기준: {fib_1h}
-4h 기준: {fib_4h}
+{context_blob}
+{debate_block_separator}{debate_block}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 이 데이터를 바탕으로 지금 {pair_label}의 시장 관점을 애널리스트처럼 정리해주세요.
@@ -134,7 +143,21 @@ def _tf_alignment_summary(multi_tf_data: dict) -> str:
     return "\n".join(lines)
 
 
-def build_prompt(multi_tf_data: dict, macro_snapshot: Optional[dict] = None) -> str:
+def _build_context_blob(
+    multi_tf_data: dict,
+    macro_snapshot: Optional[dict] = None,
+    return_raw: bool = False,
+):
+    """
+    Bull/Bear/최종 애널리스트가 공통으로 보는 데이터 블록을 조립한다.
+    (기존 build_prompt 의 데이터 수집부를 추출 — debate 에도 재사용하기 위함)
+
+    Parameters
+    ----------
+    return_raw : bool
+        True 이면 (context_blob, raw_ctx_dict) 튜플을 반환.
+        raw_ctx_dict 는 situation digest 생성 등 정규화 태그용.
+    """
     # 타임프레임 정렬 요약
     tf_alignment = _tf_alignment_summary(multi_tf_data)
 
@@ -154,15 +177,19 @@ def build_prompt(multi_tf_data: dict, macro_snapshot: Optional[dict] = None) -> 
 
     # 시장 데이터 수집
     market_context_str  = "[시장 심리 & 파생상품 데이터]\n  데이터 수집 실패 — 기술적 지표만으로 판단"
+    market_ctx: Optional[dict] = None
     try:
-        market_context_str = format_market_context(fetch_market_context())
+        market_ctx = fetch_market_context()
+        market_context_str = format_market_context(market_ctx)
     except Exception as exc:
         market_context_str = f"[시장 심리 & 파생상품 데이터]\n  데이터 수집 실패 — {exc}"
 
     # 계좌 / 리스크 제약 수집
     account_context_str = "[계좌 / 리스크 제약]\n  데이터 수집 실패 — 계좌 제약 없이 시장 데이터만으로 판단"
+    account_ctx: Optional[dict] = None
     try:
-        account_context_str = format_account_context(fetch_account_context())
+        account_ctx = fetch_account_context()
+        account_context_str = format_account_context(account_ctx)
     except Exception as exc:
         account_context_str = f"[계좌 / 리스크 제약]\n  데이터 수집 실패 — {exc}"
 
@@ -223,18 +250,64 @@ def build_prompt(multi_tf_data: dict, macro_snapshot: Optional[dict] = None) -> 
     fib_1h = fib_format(multi_tf_data["1h"], _res_1h, _overlap_note) if "1h" in multi_tf_data else "N/A"
     fib_4h = fib_format(multi_tf_data["4h"], _res_4h, _overlap_note) if "4h" in multi_tf_data else "N/A"
 
+    # 최종 블록 조립 (기존 USER_PROMPT_TEMPLATE 의 내부 데이터 섹션과 동일 순서)
+    indicators_summary = "\n\n".join(parts)
+    context_blob = (
+        f"{tf_alignment}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{macro_context_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{market_context_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{account_context_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{indicators_summary}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"[피보나치 레벨]\n"
+        f"1h 기준: {fib_1h}\n"
+        f"4h 기준: {fib_4h}"
+    )
+    if return_raw:
+        return context_blob, {
+            "macro": macro_payload,
+            "market": market_ctx,
+            "account": account_ctx,
+        }
+    return context_blob
+
+
+def build_prompt(
+    multi_tf_data: dict,
+    macro_snapshot: Optional[dict] = None,
+    debate_block: str = "",
+) -> str:
+    """
+    최종 애널리스트 Claude 호출용 user prompt 를 조립한다.
+
+    Parameters
+    ----------
+    multi_tf_data : dict
+        {tf: DataFrame} 형태의 멀티 TF 인디케이터 데이터.
+    macro_snapshot : dict, optional
+        미리 수집된 거시 스냅샷. None 이면 fetch_macro_context() 수행.
+    debate_block : str, optional
+        agents.format_debate_block() 의 출력. 빈 문자열이면 토론 섹션 생략.
+    """
+    context_blob = _build_context_blob(multi_tf_data, macro_snapshot)
     now_kst_label = now_kst().strftime("%Y-%m-%d %H:%M")
+
+    # debate_block 앞에 ━━━ 구분선을 붙여 시각적 경계를 만든다. 비어 있으면 통째로 생략.
+    if debate_block:
+        debate_separator = "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    else:
+        debate_separator = ""
 
     return USER_PROMPT_TEMPLATE.format(
         now_kst=now_kst_label,
         pair_label=PAIR_LABEL,
-        tf_alignment=tf_alignment,
-        macro_context=macro_context_str,
-        market_context=market_context_str,
-        account_context=account_context_str,
-        indicators_summary="\n\n".join(parts),
-        fib_1h=fib_1h,
-        fib_4h=fib_4h,
+        context_blob=context_blob,
+        debate_block_separator=debate_separator,
+        debate_block=debate_block,
     )
 
 
@@ -441,9 +514,34 @@ def parse_trade_levels(text: str) -> dict:
     }
 
 
-def analyze_with_claude(multi_tf_data: dict, macro_snapshot: Optional[dict] = None) -> dict:
+def analyze_with_claude(
+    multi_tf_data: dict,
+    macro_snapshot: Optional[dict] = None,
+    debate: Optional[DebateResult] = None,
+    pipeline: Optional[PipelineResult] = None,
+) -> dict:
+    """
+    최종 애널리스트 Claude 호출.
+
+    토론/리스크/메모리 컨텍스트 주입 우선순위:
+      1) pipeline (Phase 2+3 통합 블록, combined_block)
+      2) debate   (Phase 1 단독 블록, 하위 호환)
+      3) 없음
+    """
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-    prompt = build_prompt(multi_tf_data, macro_snapshot=macro_snapshot)
+
+    if pipeline is not None and pipeline.combined_block:
+        debate_block = pipeline.combined_block
+    elif debate is not None:
+        debate_block = format_debate_block(debate)
+    else:
+        debate_block = ""
+
+    prompt = build_prompt(
+        multi_tf_data,
+        macro_snapshot=macro_snapshot,
+        debate_block=debate_block,
+    )
     request_kwargs = {
         "model": CLAUDE_MODEL,
         "max_tokens": 16000,
@@ -503,7 +601,122 @@ def analyze_with_claude(multi_tf_data: dict, macro_snapshot: Optional[dict] = No
         "report_sections": report_meta["sections"],
         "report_format_ok": report_meta["format_ok"],
         "report_missing_sections": report_meta["missing_sections"],
+        "debate":       (
+            pipeline.debate.to_payload() if pipeline is not None and pipeline.debate
+            else (debate.to_payload() if debate is not None else None)
+        ),
+        "risk":         (
+            pipeline.risk.to_payload() if pipeline is not None and pipeline.risk
+            else None
+        ),
+        "memories":     (
+            list(pipeline.memories) if pipeline is not None else []
+        ),
     }
+
+
+def run_full_analysis(
+    multi_tf_data: dict,
+    macro_snapshot: Optional[dict] = None,
+    progress_cb=None,
+) -> dict:
+    """
+    Bull/Bear 토론 + Risk Triad + 메모리 회상 + 최종 애널리스트 호출까지
+    묶은 편의 함수. server.py 의 _run_job 에서 ThreadPoolExecutor 로 호출.
+
+    Parameters
+    ----------
+    multi_tf_data : dict
+        멀티 TF 캔들/지표 DataFrame.
+    macro_snapshot : dict, optional
+        이미 수집된 거시 스냅샷.
+    progress_cb : callable, optional
+        (phase, detail) -> None. 단계별 진행률 보고.
+    """
+    # 1) 공통 데이터 블록 + 원본 ctx 조립 (모든 에이전트가 이것을 본다)
+    context_blob, raw_ctx = _build_context_blob(
+        multi_tf_data, macro_snapshot, return_raw=True
+    )
+
+    # 1-a) BM25 매칭용 '정규화 태그' 생성 — 원본 blob 대신 이걸로 저장/검색
+    situation_tags = ""
+    if summarize_situation_tags is not None:
+        try:
+            situation_tags = summarize_situation_tags(
+                multi_tf_data=multi_tf_data,
+                macro_snapshot=raw_ctx.get("macro"),
+                market_ctx=raw_ctx.get("market"),
+                account_ctx=raw_ctx.get("account"),
+            )
+        except Exception as exc:
+            _memory_logger.warning("situation_tags 생성 실패 — %s", exc)
+            situation_tags = ""
+
+    # 1-b) 분석 시점 현재가 추출 (reflection baseline)
+    price_at_analysis: Optional[float] = None
+    try:
+        # 가장 짧은 TF 의 마지막 봉 close 를 분석 시점 현재가로 사용
+        for tf in ("5m", "15m", "1h", "4h", "1d"):
+            if tf in multi_tf_data and len(multi_tf_data[tf]) > 0:
+                price_at_analysis = float(multi_tf_data[tf].iloc[-1]["close"])
+                break
+    except Exception as exc:
+        _memory_logger.warning("price_at_analysis 추출 실패 — %s", exc)
+
+    # 2) 메모리 객체 준비 (rank_bm25 미설치 시 None)
+    memory_obj = None
+    if get_memory is not None:
+        try:
+            memory_obj = get_memory("analyst")
+        except Exception:
+            memory_obj = None
+
+    # 쿼리로는 정규화 태그를 쓰고, 태그가 없으면 blob 으로 폴백
+    memory_query = situation_tags or context_blob
+
+    # 3) 파이프라인 실행: Bull/Bear → Risk Triad → Memory
+    pipeline = run_pipeline(
+        context_blob=context_blob,
+        pair_label=PAIR_LABEL,
+        memory=memory_obj,
+        current_situation=memory_query,
+        progress_cb=progress_cb,
+    )
+
+    # 4) 최종 애널리스트 호출
+    if progress_cb:
+        progress_cb("final", "최종 애널리스트 종합 중")
+
+    result = analyze_with_claude(
+        multi_tf_data,
+        macro_snapshot=macro_snapshot,
+        pipeline=pipeline,
+    )
+
+    # 5) 메모리에 이번 상황-조언 페어 기록 (reflection 을 위한 씨앗)
+    if memory_obj is not None and MEMORY_WRITE_ENABLED:
+        try:
+            situation_for_memory = situation_tags if situation_tags else context_blob
+            stored = memory_obj.add_situation(
+                situation=situation_for_memory,
+                advice=result.get("raw_text", ""),
+                outcome="",
+                meta={
+                    "signal": result.get("signal"),
+                    "confidence": result.get("confidence"),
+                    "trade_levels": result.get("trade_levels"),
+                    "pair": PAIR_LABEL,
+                    "price_at_analysis": price_at_analysis,
+                    "situation_tags": situation_tags,
+                },
+            )
+            if stored is None:
+                _memory_logger.info("memory.add_situation: 최근 기록과 유사 — dedup skip")
+        except Exception as exc:
+            # 메모리 쓰기 실패는 조용히 무시 (분석 결과는 이미 나왔다)
+            _memory_logger.warning("memory.add_situation 실패 — %s", exc)
+
+    return result
 
 
 def chat_with_claude(messages: list, context: str) -> str:
