@@ -67,8 +67,8 @@ TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
 # 각 시간봉별 로드할 캔들 수
 CANDLE_LIMIT = 200
 
-# 자동 갱신 기본 간격 (초)
-AUTO_REFRESH_INTERVAL = 60
+# 자동 갱신 기본 간격 (초)  ← 30분
+AUTO_REFRESH_INTERVAL = 1800
 
 # ── 색상 팔레트 ──────────────────────────────
 BG_COLOR      = "#0d0d1a"   # 배경

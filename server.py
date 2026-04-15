@@ -1049,6 +1049,9 @@ class AnalysisManager:
                 import logging as _atlog
                 _atlog.getLogger(__name__).error("[AutoTrader] 실행 오류: %s", _ate)
 
+        # ── 서버 사이드 증분 백테스트 (백그라운드) ────────────
+        asyncio.create_task(_run_backtest_background())
+
     async def _fail(self, job_id: str, message: str, status: str = "error"):
         failed_at = _now_iso()
         async with self._lock:
@@ -1128,7 +1131,7 @@ class ScheduleManager:
 
     def __init__(self):
         self._enabled: bool = False
-        self._interval_min: int = 60        # 기본 1시간
+        self._interval_min: int = 30        # 기본 30분
         self._next_run_at: str | None = None
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
@@ -1141,7 +1144,7 @@ class ScheduleManager:
                 with open(SCHEDULE_STATE_PATH, "r", encoding="utf-8") as f:
                     saved = json.load(f)
                 self._enabled      = bool(saved.get("enabled", False))
-                self._interval_min = int(saved.get("interval_min", 60))
+                self._interval_min = int(saved.get("interval_min", 30))
         except Exception:
             pass
 
@@ -1206,6 +1209,54 @@ _schedule_manager = ScheduleManager()
 
 
 # ══════════════════════════════════════════════
+# 서버 사이드 백테스트 백그라운드 태스크
+# ══════════════════════════════════════════════
+import logging as _bt_log
+_bt_logger = _bt_log.getLogger("backtest_bg")
+
+async def _run_backtest_background():
+    """분석 완료 후 백그라운드에서 증분 백테스트 실행 후 캐시 저장."""
+    try:
+        import backtester as _bt
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _bt.run_backtest_incremental, True)
+        _bt_logger.info("[Backtest] 증분 백테스트 완료 → 캐시 갱신")
+    except Exception as exc:
+        _bt_logger.warning("[Backtest] 백그라운드 실행 실패: %s", exc)
+
+
+async def _position_watcher_loop():
+    """
+    매 분 열린 드라이런 포지션의 SL/TP 도달 여부를 확인.
+    포지션이 없으면 아무것도 안 함 (Binance 호출 0회).
+    포지션이 있을 때만 1분봉 최신 1~5개만 조회.
+    """
+    try:
+        import backtester as _bt
+    except ImportError:
+        _bt_logger.warning("[Watcher] backtester 임포트 실패 — 감시 루프 종료")
+        return
+
+    _bt_logger.info("[Watcher] 포지션 감시 루프 시작")
+    while True:
+        # 다음 분 00초에 맞춰 실행 (예: :01초에 시작하면 다음 :00초까지 대기)
+        now_sec = time.time()
+        next_minute = (int(now_sec // 60) + 1) * 60 + 2  # +2초: 캔들 확정 대기
+        await asyncio.sleep(next_minute - now_sec)
+
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, _bt.tick_open_position)
+            if result:
+                _bt_logger.info(
+                    "[Watcher] 포지션 확정: %s %s  pnl=%+.2f USD",
+                    result.get("symbol"), result.get("outcome"), result.get("pnl_usd", 0)
+                )
+        except Exception as exc:
+            _bt_logger.warning("[Watcher] tick 오류: %s", exc)
+
+
+# ══════════════════════════════════════════════
 # Routes
 # ══════════════════════════════════════════════
 @app.on_event("startup")
@@ -1214,6 +1265,7 @@ async def on_startup():
     await _account_stream.start()
     await _macro_snapshot.start()
     await _schedule_manager.start()
+    asyncio.create_task(_position_watcher_loop(), name="position-watcher")
 
 
 @app.on_event("shutdown")
@@ -1679,6 +1731,75 @@ async def autotrader_close():
     try:
         result = await loop.run_in_executor(None, _trader_mod.close_position, symbol)
         return {"result": result or "포지션 없음"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/autotrader/summary")
+async def autotrader_summary():
+    """
+    캔들 조회 없이 trade_log 만으로 즉시 반환하는 경량 통계.
+    Bot Status 위젯에서 15초마다 폴링용.
+    """
+    try:
+        import backtester as _bt
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, _bt.get_today_summary)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/autotrader/live-position")
+async def autotrader_live_position():
+    """
+    현재 열려있는 드라이런 포지션 조회.
+    포지션 없으면 {"position": null} 반환.
+    """
+    try:
+        import backtester as _bt
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail=f"backtester 모듈 로드 실패: {exc}")
+
+    loop = asyncio.get_event_loop()
+    try:
+        pos = await loop.run_in_executor(None, _bt.get_live_position)
+        return {"position": pos}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/autotrader/backtest")
+async def autotrader_backtest(limit: int = 200, dry_only: bool = False, force: bool = False):
+    """
+    백테스트 결과 조회.
+    - 기본: 서버가 미리 저장해둔 캐시를 즉시 반환 (캔들 조회 없음)
+    - force=true: 강제로 전체 재실행 (느림, 수동 디버그용)
+    """
+    try:
+        import backtester as _bt
+        from dataclasses import asdict
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail=f"backtester 모듈 로드 실패: {exc}")
+
+    loop = asyncio.get_event_loop()
+    try:
+        if force:
+            summary = await loop.run_in_executor(
+                None, lambda: _bt.run_backtest(limit=limit, dry_run_only=dry_only)
+            )
+        else:
+            # 캐시 우선 반환 → 없으면 증분 실행
+            cached = await loop.run_in_executor(None, _bt.get_cached_backtest)
+            if cached is not None:
+                summary = cached
+            else:
+                summary = await loop.run_in_executor(
+                    None, lambda: _bt.run_backtest_incremental(dry_run_only=True)
+                )
+        return asdict(summary)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

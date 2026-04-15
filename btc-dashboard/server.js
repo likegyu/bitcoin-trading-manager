@@ -82,6 +82,11 @@ function binanceFetch(urlPath, queryParams) {
 /* ── Express 앱 ── */
 const app = express();
 
+// 루트 접속 시 대시보드로 바로 이동
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'btc-dashboard.html'));
+});
+
 // 정적 파일 (public/btc-dashboard.html 등)
 app.use(express.static(path.join(__dirname, 'public')));
 
