@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gyu's BTC 단타 전략 v2</title>
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg0: #0d1117; --bg1: #161b22; --bg2: #1c2128; --bg3: #21262d;
+      --border: #30363d; --border2: #21262d;
+      --t1: #e6edf3; --t2: #8b949e; --t3: #656d76;
+      --green: #3fb950; --red: #f85149; --yellow: #d29922;
+      --blue: #58a6ff; --purple: #bc8cff; --orange: #fb8500;
+    }
+    body { font-family:'Inter','Noto Sans KR',sans-serif; background:var(--bg0); color:var(--t1); height:100vh; overflow:hidden; display:flex; flex-direction:column; }
+
+    /* ── TOPBAR ── */
+    #topbar { background:var(--bg1); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:16px; padding:0 18px; height:52px; flex-shrink:0; }
+    .logo { font-size:15px; font-weight:700; color:var(--yellow); white-space:nowrap; }
+    .live-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); animation:pulse 2s infinite; margin-right:5px; }
+    #priceDisplay { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .up{color:var(--green);} .dn{color:var(--red);}
+    #priceBadge { font-size:12px; padding:2px 8px; border-radius:4px; font-weight:600; }
+    .hl-row { font-size:11px; color:var(--t2); display:flex; gap:10px; }
+    .hl-row span { color:var(--t1); font-weight:500; }
+    .topbar-right { margin-left:auto; display:flex; align-items:center; gap:10px; }
+    .kst-time { font-size:13px; color:var(--t2); font-variant-numeric:tabular-nums; }
+    .phase-chip { font-size:11px; font-weight:700; padding:3px 10px; border-radius:12px; border:1px solid; }
+    .phase-asia   { color:var(--blue);   border-color:var(--blue);   background:rgba(88,166,255,.12); }
+    .phase-europe { color:var(--purple); border-color:var(--purple); background:rgba(188,140,255,.12); }
+    .phase-us     { color:var(--red);    border-color:var(--red);    background:rgba(248,81,73,.12); }
+    .phase-closed { color:var(--t2);     border-color:var(--border); background:rgba(48,54,61,.3); }
+    .btn { padding:5px 12px; border-radius:5px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:opacity .15s; }
+    .btn:hover{opacity:.8;} .btn-blue{background:var(--blue);color:#000;}
+    .btn-sm{padding:4px 10px;font-size:11px;} .btn-green{background:var(--green);color:#000;} .btn-ghost{background:var(--bg3);color:var(--t1);border:1px solid var(--border);}
+    .btn-red{background:var(--red);color:#fff;}
+
+    /* ── MAIN ── */
+    #main { display:flex; flex:1; overflow:hidden; }
+
+    /* ── SIDEBAR ── */
+    #sidebar { width:258px; background:var(--bg1); border-right:1px solid var(--border); overflow-y:auto; flex-shrink:0; display:flex; flex-direction:column; }
+    .sb-header { font-size:10px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--t2); padding:12px 14px 6px; }
+    .flow-step { padding:8px 12px 8px 15px; border-left:3px solid transparent; display:flex; align-items:flex-start; gap:8px; transition:all .25s; position:relative; }
+    .flow-step.s-wait  { opacity:.35; }
+    .flow-step.s-active{ border-left-color:var(--yellow); background:rgba(210,153,34,.09); }
+    .flow-step.s-done  { border-left-color:var(--green);  background:rgba(63,185,80,.04); }
+    .flow-step.s-alert { border-left-color:var(--red);    background:rgba(248,81,73,.09); animation:pulse 1.5s infinite; }
+    .flow-step.s-skip  { border-left-color:var(--t3);     background:rgba(101,109,118,.06); opacity:.6; }
+    .step-icon { font-size:15px; flex-shrink:0; margin-top:1px; }
+    .step-body { flex:1; min-width:0; }
+    .step-title { font-size:12px; font-weight:600; line-height:1.3; }
+    .step-desc  { font-size:10px; color:var(--t2); margin-top:1px; line-height:1.4; }
+    .step-badge { position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:12px; }
+    .flow-arrow { text-align:center; color:var(--border); font-size:12px; line-height:1.1; }
+    .flow-branch { display:flex; justify-content:space-between; padding:2px 20px; }
+    .branch-label { font-size:9px; color:var(--t3); }
+    .flow-sep { height:1px; background:var(--border2); margin:6px 12px; }
+    /* daily bar */
+    #dailyBar { margin:auto 12px 12px; border-top:1px solid var(--border); padding-top:10px; }
+    .bar-labels { display:flex; justify-content:space-between; font-size:9px; color:var(--t2); margin-bottom:4px; }
+    .bar-track { height:6px; background:var(--border); border-radius:3px; overflow:hidden; position:relative; }
+    /* zero marker */
+    #barZero { position:absolute; left:40%; top:0; width:1px; height:100%; background:var(--t3); }
+    .bar-fill { height:100%; border-radius:3px; transition:width .5s, margin .5s, background .5s; }
+    #dailyPnlText { text-align:center; font-size:17px; font-weight:700; margin-top:5px; font-variant-numeric:tabular-nums; }
+
+    /* ── RIGHT ── */
+    #rightPanel { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+    #chartWrap { flex:1; position:relative; min-height:0; }
+    #chart { width:100%; height:100%; }
+    #chartOverlay { position:absolute; top:10px; right:12px; display:flex; gap:8px; z-index:10; align-items:center; }
+    .signal-chip { font-size:13px; font-weight:700; padding:5px 14px; border-radius:6px; border:1px solid; white-space:nowrap; }
+    .sc-wait  { color:var(--t2);    border-color:var(--border); background:rgba(48,54,61,.7); }
+    .sc-long  { color:var(--green); border-color:var(--green);  background:rgba(63,185,80,.2); }
+    .sc-short { color:var(--red);   border-color:var(--red);    background:rgba(248,81,73,.2); }
+    .sc-touch { color:var(--blue);  border-color:var(--blue);   background:rgba(88,166,255,.15); }
+    .sc-stop  { color:var(--t2);    border-color:var(--border); background:rgba(48,54,61,.7); font-size:11px; }
+    select.iv-sel { background:var(--bg2); border:1px solid var(--border); color:var(--t1); padding:5px 8px; border-radius:5px; font-size:12px; cursor:pointer; outline:none; }
+
+    /* ── BOTTOM ── */
+    #bottomPanels { display:flex; height:190px; border-top:1px solid var(--border); flex-shrink:0; }
+    .panel { flex:1; padding:10px 12px; border-right:1px solid var(--border); overflow:hidden; display:flex; flex-direction:column; }
+    .panel:last-child { border-right:none; }
+    .panel-title { font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--t2); margin-bottom:7px; flex-shrink:0; }
+    .info-row { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; }
+    .il{font-size:11px;color:var(--t2);} .iv{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;}
+
+    /* Box panel */
+    .box-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+    .box-lbl { font-size:10px; width:28px; flex-shrink:0; font-weight:600; }
+    .box-inp { flex:1; background:var(--bg0); border:1px solid var(--border); color:var(--t1); padding:4px 7px; border-radius:4px; font-size:12px; font-variant-numeric:tabular-nums; outline:none; transition:border-color .15s; }
+    .box-inp:focus { border-color:var(--blue); }
+    .box-btns { display:flex; gap:5px; margin-bottom:5px; }
+    .box-stat { font-size:10px; color:var(--t2); line-height:1.7; }
+
+    /* Volume */
+    .vol-track { height:5px; background:var(--border); border-radius:3px; overflow:hidden; margin:4px 0 3px; }
+    .vol-fill  { height:100%; border-radius:3px; transition:width .4s, background .4s; }
+    .vol-ends  { display:flex; justify-content:space-between; font-size:9px; color:var(--t3); }
+    .vol-status { font-size:12px; font-weight:700; margin-top:5px; }
+
+    /* Position */
+    .pos-card { background:var(--bg0); border:1px solid var(--border); border-radius:6px; padding:8px 10px; margin-top:2px; }
+    .pos-side { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; display:inline-block; margin-bottom:4px; }
+    .ps-long {background:rgba(63,185,80,.2); color:var(--green);} .ps-short{background:rgba(248,81,73,.2);color:var(--red);} .ps-none{background:var(--bg3);color:var(--t2);}
+
+    /* Alert */
+    .alert-log { flex:1; overflow-y:auto; }
+    .a-item { display:flex; gap:5px; font-size:10px; padding:3px 5px; border-radius:3px; background:var(--bg0); margin-bottom:3px; line-height:1.4; align-items:flex-start; }
+    .a-time{color:var(--t3);flex-shrink:0;font-variant-numeric:tabular-nums;}
+    .a-info .a-ico{color:var(--blue);} .a-success .a-ico{color:var(--green);} .a-warn .a-ico{color:var(--yellow);} .a-danger .a-ico{color:var(--red);}
+
+    /* Account */
+    #accountPanel{min-width:165px;max-width:195px;}
+    #dailyBigPnl{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:5px;}
+    #dailyPnlUsd{font-size:10px;color:var(--t2);margin-top:1px;}
+
+    /* Modal */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.78); display:flex; align-items:center; justify-content:center; z-index:200; }
+    .modal { background:var(--bg1); border:1px solid var(--border); border-radius:12px; padding:28px 26px; width:415px; max-width:92vw; }
+    .modal-title{font-size:18px;font-weight:700;margin-bottom:6px;}
+    .modal-sub{font-size:12px;color:var(--t2);margin-bottom:20px;line-height:1.6;}
+    .form-lbl{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--t2);margin-bottom:5px;}
+    .form-inp{width:100%;background:var(--bg0);border:1px solid var(--border);color:var(--t1);padding:9px 11px;border-radius:6px;font-size:12px;font-variant-numeric:tabular-nums;outline:none;transition:border-color .15s;margin-bottom:13px;}
+    .form-inp:focus{border-color:var(--blue);}
+    .form-hint{font-size:10px;color:var(--t3);margin-top:-9px;margin-bottom:13px;line-height:1.5;}
+    .modal-actions{display:flex;gap:10px;margin-top:4px;}
+    .btn-lg{padding:10px 16px;font-size:13px;flex:1;border-radius:6px;}
+
+    ::-webkit-scrollbar{width:3px;height:3px;}
+    ::-webkit-scrollbar-track{background:var(--bg0);}
+    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    @keyframes flash{0%,100%{opacity:1}50%{opacity:.2}}
+    .flash{animation:flash .6s ease 3;}
+  </style>
+</head>
+<body>
+
+<!-- API Modal 제거됨 (Lightsail 버전: 키는 서버 .env에 보관) -->
+
+<!-- Topbar -->
+<div id="topbar">
+  <div class="logo">₿ Gyu's BTC 단타 v2</div>
+  <div>
+    <span class="live-dot"></span>
+    <span id="priceDisplay" class="up">$—</span>
+    <span id="priceBadge" style="background:rgba(63,185,80,.18);color:var(--green);margin-left:8px;">+0.00%</span>
+  </div>
+  <div class="hl-row">고 <span id="hi24">—</span>&nbsp;|&nbsp;저 <span id="lo24">—</span>&nbsp;|&nbsp;거래량 <span id="vol24">—</span></div>
+  <div class="topbar-right">
+    <div class="kst-time">🇰🇷 <span id="kstClock">--:--:--</span></div>
+    <div class="phase-chip phase-closed" id="phaseBadge">로딩 중</div>
+    <span id="apiStatusBadge" title="API 연결 상태" style="font-size:11px;font-weight:600;color:var(--t3);white-space:nowrap;">● API 미연결</span>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sb-header">📋 전략 플로우 v2</div>
+
+    <div class="flow-step s-wait" id="fs0">
+      <div class="step-icon">🕘</div>
+      <div class="step-body"><div class="step-title">아시아장 시작</div><div class="step-desc">오전 09:00 KST</div></div>
+      <div class="step-badge" id="fb0">⬜</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step s-wait" id="fs1">
+      <div class="step-icon">⏱</div>
+      <div class="step-body"><div class="step-title">30분 관찰</div><div class="step-desc">09:00 ~ 09:30 시세 파악</div></div>
+      <div class="step-badge" id="fb1">⬜</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+
+    <!-- Diamond: 박스권? -->
+    <div class="flow-step s-wait" id="fs2">
+      <div class="step-icon">♦️</div>
+      <div class="step-body"><div class="step-title">박스권 형성 확인</div><div class="step-desc">2회 이상 닿은 가격대 체크</div></div>
+      <div class="step-badge" id="fb2">⬜</div>
+    </div>
+    <div class="flow-branch">
+      <span class="branch-label" style="color:var(--red)">NO →매매없음</span>
+      <span class="branch-label" style="color:var(--green)">YES ↓</span>
+    </div>
+    <div class="flow-step s-wait" id="fs3">
+      <div class="step-icon">📝</div>
+      <div class="step-body"><div class="step-title">박스 상단/하단 메모</div><div class="step-desc">아래 박스권 패널에 입력 후 적용</div></div>
+      <div class="step-badge" id="fb3">⬜</div>
+    </div>
+    <div class="flow-sep"></div>
+
+    <!-- Diamond: 진입 신호? -->
+    <div class="flow-step s-wait" id="fs4">
+      <div class="step-icon">🔍</div>
+      <div class="step-body"><div class="step-title">진입 신호 대기</div><div class="step-desc">박스 터치 + 거래량 1.2× 이상</div></div>
+      <div class="step-badge" id="fb4">⬜</div>
+    </div>
+    <div class="flow-branch">
+      <span class="branch-label">거래량 불일치→패스</span>
+      <span class="branch-label" style="color:var(--green)">일치 ↓</span>
+    </div>
+    <div class="flow-step s-wait" id="fs5">
+      <div class="step-icon" id="entryIcon">📈</div>
+      <div class="step-body"><div class="step-title" id="entryTitle">롱 / 숏 진입</div><div class="step-desc">계좌 30% · 레버리지 30×</div></div>
+      <div class="step-badge" id="fb5">⬜</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step s-wait" id="fs6">
+      <div class="step-icon">🛡</div>
+      <div class="step-body"><div class="step-title">손절 주문 즉시 설정</div><div class="step-desc">진입 직후 예약 손절</div></div>
+      <div class="step-badge" id="fb6">⬜</div>
+    </div>
+    <div class="flow-sep"></div>
+
+    <!-- Diamond: 30분 결과 -->
+    <div class="flow-step s-wait" id="fs7">
+      <div class="step-icon">⏳</div>
+      <div class="step-body"><div class="step-title">30분 이내 결과 확인</div><div class="step-desc">익절·시간손절·가격손절(1% 이탈)</div></div>
+      <div class="step-badge" id="fb7">⬜</div>
+    </div>
+
+    <!-- 손절 후 박스 재형성 분기 -->
+    <div class="flow-branch" style="margin-bottom:2px;">
+      <span class="branch-label">손절→박스재형성?</span>
+      <span class="branch-label" style="color:var(--green)">익절 ↓</span>
+    </div>
+    <div class="flow-step s-wait" id="fs7b">
+      <div class="step-icon">♦️</div>
+      <div class="step-body"><div class="step-title">박스 재형성 확인</div><div class="step-desc">재형성→신호 재대기 | 붕괴→매매종료</div></div>
+      <div class="step-badge" id="fb7b">⬜</div>
+    </div>
+    <div class="flow-sep"></div>
+
+    <!-- 익절 후 분기 -->
+    <div class="flow-step s-wait" id="fs8">
+      <div class="step-icon">💸</div>
+      <div class="step-body"><div class="step-title">수익금 1/3 즉시 출금</div><div class="step-desc">익절 후 전량 청산, 즉시 출금</div></div>
+      <div class="step-badge" id="fb8">⬜</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step s-wait" id="fs9">
+      <div class="step-icon">📊</div>
+      <div class="step-body"><div class="step-title">일간 손익 체크</div><div class="step-desc">+30% 목표 달성 or -20% 강제 종료</div></div>
+      <div class="step-badge" id="fb9">⬜</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step s-wait" id="fs10">
+      <div class="step-icon">🕕</div>
+      <div class="step-body"><div class="step-title">시간 체크</div><div class="step-desc">18:00 이전 → 다시 진입 신호 대기</div></div>
+      <div class="step-badge" id="fb10">⬜</div>
+    </div>
+    <div class="flow-branch" style="margin-bottom:2px;">
+      <span class="branch-label">18시↑→신규진입중단</span>
+      <span class="branch-label" style="color:var(--green)">18시↓→재진입</span>
+    </div>
+    <div class="flow-sep"></div>
+
+    <div class="flow-step s-wait" id="fs11">
+      <div class="step-icon">🔚</div>
+      <div class="step-body"><div class="step-title">전체 포지션 정리</div><div class="step-desc">22:30 미국장 전 전량 청산</div></div>
+      <div class="step-badge" id="fb11">⬜</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step s-wait" id="fs12">
+      <div class="step-icon">💰</div>
+      <div class="step-body"><div class="step-title">수익금 출금</div><div class="step-desc">은행 이체 · 재입금 금지</div></div>
+      <div class="step-badge" id="fb12">⬜</div>
+    </div>
+
+    <div id="dailyBar">
+      <div class="bar-labels">
+        <span style="color:var(--red)">-20%</span>
+        <span>일간 손익</span>
+        <span style="color:var(--green)">+30%</span>
+      </div>
+      <div class="bar-track">
+        <div id="barZero"></div>
+        <div class="bar-fill" id="dailyBarFill" style="width:0%;margin-left:40%;background:var(--green)"></div>
+      </div>
+      <div id="dailyPnlText" style="color:var(--t2)">0.00%</div>
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div id="rightPanel">
+    <div id="chartWrap">
+      <div id="chart"></div>
+      <div id="chartOverlay">
+        <div class="signal-chip sc-wait" id="signalChip">⏸ 대기 중</div>
+        <select class="iv-sel" id="ivSel" onchange="changeInterval()">
+          <option value="15m">15분봉</option>
+          <option value="5m">5분봉</option>
+          <option value="30m">30분봉</option>
+          <option value="1h">1시간봉</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="bottomPanels">
+      <!-- 1. Box -->
+      <div class="panel" style="min-width:192px;max-width:210px;">
+        <div class="panel-title">📦 박스권 설정</div>
+        <div class="box-row">
+          <span class="box-lbl" style="color:var(--red)">상단</span>
+          <input type="number" class="box-inp" id="boxTop"    placeholder="예: 95000" step="10"/>
+        </div>
+        <div class="box-row">
+          <span class="box-lbl" style="color:var(--green)">하단</span>
+          <input type="number" class="box-inp" id="boxBottom" placeholder="예: 93000" step="10"/>
+        </div>
+        <div class="box-btns">
+          <button class="btn btn-green btn-sm" onclick="applyBox(false)" style="flex:1">적용</button>
+          <button class="btn btn-ghost btn-sm" onclick="autoBox()"       style="flex:1">자동감지</button>
+          <button class="btn btn-red   btn-sm" onclick="clearBox()"      style="flex:1">초기화</button>
+        </div>
+        <div class="box-stat">
+          크기: <strong id="boxSize">—</strong><br>
+          위치: <strong id="boxPos">—</strong>
+        </div>
+      </div>
+
+      <!-- 2. Volume -->
+      <div class="panel" style="min-width:172px;max-width:190px;">
+        <div class="panel-title">📊 거래량 분석</div>
+        <div class="info-row"><span class="il">현재 거래량</span><span class="iv" id="vCur">—</span></div>
+        <div class="info-row"><span class="il">평균(20봉)</span><span class="iv" id="vAvg">—</span></div>
+        <div class="info-row"><span class="il">비율</span>       <span class="iv" id="vRat">—</span></div>
+        <div class="vol-track"><div class="vol-fill" id="vBar" style="width:0%;background:var(--blue)"></div></div>
+        <div class="vol-ends"><span>낮음</span><span>보통</span><span>높음</span></div>
+        <div class="vol-status" id="vStatus">확인 중…</div>
+      </div>
+
+      <!-- 3. Position -->
+      <div class="panel">
+        <div class="panel-title">💼 포지션 (Binance Futures)</div>
+        <div id="posCont" style="color:var(--t2);font-size:11px;padding:8px 0;text-align:center;">API 연결 후 포지션 확인 가능</div>
+      </div>
+
+      <!-- 4. Alert -->
+      <div class="panel" style="min-width:188px;max-width:218px;">
+        <div class="panel-title">🔔 알림 로그</div>
+        <div class="alert-log" id="alertLog"></div>
+      </div>
+
+      <!-- 5. Account -->
+      <div class="panel" id="accountPanel">
+        <div class="panel-title">💰 계좌</div>
+        <div id="accCont" style="color:var(--t2);font-size:11px;text-align:center;padding:4px 0;">API 미연결</div>
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:7px;">
+          <div class="panel-title" style="margin-bottom:2px;">일간 손익</div>
+          <div id="dailyBigPnl" style="color:var(--t2)">0.00%</div>
+          <div id="dailyPnlUsd">$0.00 USDT</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════
+   STATE
+════════════════════════════════════════ */
+// Lightsail 버전: API 키는 서버(.env)에 보관 — 브라우저 노출 없음
+let IS_CONNECTED = false;
+let initialBalance = null;  // for daily PnL calc
+
+let currentPrice = 0, prevPrice = 0;
+let ws = null, wsClosing = false; // wsClosing prevents auto-reconnect on intentional close
+let chart = null, candleSeries = null;
+let boxTopLine = null, boxBottomLine = null, boxAreaSeries = null;
+let candles = [], volumes = [];
+let currentInterval = '15m';
+let positionPollTimer = null;
+let pollFailCount = 0;        // track consecutive API failures
+let serverTimeOffset = 0;    // ms: Date.now() + serverTimeOffset = Binance server time
+let lastPollTime  = null;     // for stale-data warning
+
+// Flow state — separate from time so tick() doesn't clobber manual changes
+let flowState = {
+  boxSet:       false,
+  noBox:        false,   // user confirmed no box today
+  inPosition:   false,
+  afterStopLoss: false,
+};
+let lastSignal = '';
+let lastAlertKey = '';  // dedup alert within same minute
+
+/* ════════════════════════════════════════
+   UTILS
+════════════════════════════════════════ */
+const fmt  = n => '$' + parseFloat(n).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtV = v => { if(v>=1e9)return(v/1e9).toFixed(2)+'B'; if(v>=1e6)return(v/1e6).toFixed(2)+'M'; if(v>=1e3)return(v/1e3).toFixed(1)+'K'; return v.toFixed(0); };
+
+function kst() {
+  const d = new Date(Date.now() + 9*3600*1000);
+  return { h:d.getUTCHours(), m:d.getUTCMinutes(), s:d.getUTCSeconds(), total:d.getUTCHours()*60+d.getUTCMinutes() };
+}
+function kstStr() {
+  const t = kst();
+  return `${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}:${String(t.s).padStart(2,'0')}`;
+}
+function phaseOf(total) {
+  if (total >= 9*60  && total < 18*60)    return 'asia';
+  if (total >= 18*60 && total < 22*60+30) return 'europe';
+  if (total >= 22*60+30)                  return 'us';
+  return 'closed';
+}
+
+/* ════════════════════════════════════════
+   ALERT LOG  (dedup same minute + same text)
+════════════════════════════════════════ */
+const recentAlerts = new Set();
+function addAlert(type, text, force=false) {
+  const t    = kstStr().slice(0,5);
+  const key  = `${t}|${text}`;
+  if (!force && recentAlerts.has(key)) return;
+  recentAlerts.add(key);
+  setTimeout(()=>recentAlerts.delete(key), 70000); // expire after ~1 min
+
+  const log  = document.getElementById('alertLog');
+  const icons= {info:'ℹ',success:'✅',warn:'⚠️',danger:'🚨'};
+  const el   = document.createElement('div');
+  el.className = `a-item a-${type}`;
+  el.innerHTML = `<span class="a-ico">${icons[type]||'·'}</span><span class="a-time">${t}</span><span>${text}</span>`;
+  log.insertBefore(el, log.firstChild);
+  while (log.children.length > 30) log.removeChild(log.lastChild);
+}
+
+/* ════════════════════════════════════════
+   BINANCE API  (Lightsail 프록시 버전)
+   서명/인증은 서버(server.js)가 처리.
+   브라우저는 /proxy/... 로만 요청.
+════════════════════════════════════════ */
+async function futuresReq(path, params={}) {
+  const qs = new URLSearchParams(params).toString();
+  const url = `/proxy${path}${qs ? '?' + qs : ''}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) {
+      let errBody = {};
+      try { errBody = await r.json(); } catch(_) {}
+      const code = errBody.code || r.status;
+      const msg  = errBody.msg  || r.statusText;
+      console.error(`[proxy] ${path} → ${r.status} | code:${code} | ${msg}`);
+      if (code === -1021) addAlert('danger','⏱ 타임스탬프 오류 — 서버를 재시작하거나 잠시 후 다시 시도하세요.');
+      else if (code === -2015 || code === -2014) addAlert('danger',`🔑 API 키 오류 (${code}): .env 파일을 확인하세요.`);
+      else addAlert('danger', `API 오류 (${code}): ${msg}`);
+      updateApiStatusBadge(false);
+      return null;
+    }
+    return await r.json();
+  } catch(e) {
+    console.error(`[proxy] ${path} → fetch 실패:`, e.message);
+    updateApiStatusBadge(false);
+    return null;
+  }
+}
+
+/* API 모달 함수 제거됨 — Lightsail 버전에서는 서버가 자동 연결 처리 */
+
+/* ════════════════════════════════════════
+   ACCOUNT  + DAILY PNL
+════════════════════════════════════════ */
+function renderAccount(acc) {
+  const bal = parseFloat(acc.totalWalletBalance||0);
+  const unr = parseFloat(acc.totalUnrealizedProfit||0);
+  const avl = parseFloat(acc.availableBalance||0);
+
+  // Daily PnL vs start-of-session balance
+  if (initialBalance === null) initialBalance = bal;
+  const dailyUsdt = bal - initialBalance + unr; // include open P&L
+  const dailyPct  = initialBalance > 0 ? (dailyUsdt / initialBalance * 100) : 0;
+  updateDailyPnl(dailyPct, dailyUsdt);
+
+  document.getElementById('accCont').innerHTML = `
+    <div class="info-row"><span class="il">총 잔액</span><span class="iv" style="color:var(--blue)">${bal.toFixed(2)} USDT</span></div>
+    <div class="info-row"><span class="il">미실현</span><span class="iv" style="color:${unr>=0?'var(--green)':'var(--red)'}">
+      ${unr>=0?'+':''}${unr.toFixed(2)} USDT</span></div>
+    <div class="info-row"><span class="il">사용가능</span><span class="iv">${avl.toFixed(2)} USDT</span></div>`;
+}
+
+function updateDailyPnl(pct, usdt) {
+  const big = document.getElementById('dailyBigPnl');
+  big.textContent = (pct>=0?'+':'')+pct.toFixed(2)+'%';
+  big.className = pct>0?'up':pct<0?'dn':'';
+  big.style.color = pct>0?'var(--green)':pct<0?'var(--red)':'var(--t2)';
+  document.getElementById('dailyPnlUsd').textContent = (usdt>=0?'+':'')+usdt.toFixed(2)+' USDT';
+
+  // sidebar bar  (-20 → 0%, 0 → 40%, +30 → 100%)
+  const norm    = Math.max(0, Math.min(1, (pct+20)/50));
+  const zeroPos = 40; // % where zero sits
+  const txt     = document.getElementById('dailyPnlText');
+  const fill    = document.getElementById('dailyBarFill');
+  if (pct >= 0) {
+    fill.style.marginLeft = zeroPos+'%';
+    fill.style.width      = Math.min(norm*100 - zeroPos, 60)+'%';
+    fill.style.background = 'var(--green)';
+  } else {
+    const w = Math.max(zeroPos - norm*100, 0);
+    fill.style.marginLeft = Math.max(norm*100, 0)+'%';
+    fill.style.width      = w+'%';
+    fill.style.background = 'var(--red)';
+  }
+  txt.textContent = (pct>=0?'+':'')+pct.toFixed(2)+'%';
+  txt.style.color = pct>0?'var(--green)':pct<0?'var(--red)':'var(--t2)';
+
+  if (pct >= 30)  addAlert('success','🎯 일간 +30% 달성! 오늘 매매를 종료하세요.');
+  if (pct <= -20) addAlert('danger', '🚨 일간 -20% 도달! 즉시 매매 종료하세요.');
+}
+
+/* ════════════════════════════════════════
+   POSITION POLL
+════════════════════════════════════════ */
+function startPositionPoll() { fetchPosition(); positionPollTimer = setInterval(fetchPosition,5000); }
+
+function updateApiStatusBadge(ok) {
+  const badge = document.getElementById('apiStatusBadge');
+  if (!badge) return;
+  if (ok) {
+    badge.textContent = '● API 연결됨';
+    badge.style.color = 'var(--green)';
+    pollFailCount = 0;
+  } else {
+    pollFailCount++;
+    badge.textContent = `⚠ API 오류 (${pollFailCount}회)`;
+    badge.style.color  = 'var(--red)';
+    if (pollFailCount >= 3) addAlert('danger','API 응답 없음 — 네트워크/키를 확인하세요');
+  }
+  // Stale data warning
+  if (lastPollTime) {
+    const sec = Math.round((Date.now() - lastPollTime) / 1000);
+    badge.title = `마지막 갱신: ${sec}초 전`;
+  }
+}
+
+async function fetchPosition() {
+  if (!IS_CONNECTED) return;
+  const [positions, acc, orders] = await Promise.all([
+    futuresReq('/fapi/v2/positionRisk', {symbol:'BTCUSDT'}),
+    futuresReq('/fapi/v2/account'),
+    futuresReq('/fapi/v1/openOrders',   {symbol:'BTCUSDT'}),
+  ]);
+
+  // Connection health
+  if (!positions && !acc) { updateApiStatusBadge(false); return; }
+  lastPollTime = Date.now();
+  updateApiStatusBadge(true);
+
+  if (acc) renderAccount(acc);
+  if (!positions) return;
+
+  // Support both one-way and hedge mode
+  const openPos = positions.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
+  const posCont = document.getElementById('posCont');
+
+  // Build stop-loss lookup from open orders
+  const slOrders = {};
+  if (orders && Array.isArray(orders)) {
+    orders.forEach(o => {
+      if (o.type === 'STOP_MARKET' || o.type === 'STOP') {
+        const side = o.positionSide !== 'BOTH'
+          ? o.positionSide  // hedge mode: LONG / SHORT
+          : (o.side === 'SELL' ? 'LONG' : 'SHORT'); // one-way: SELL order closes LONG
+        slOrders[side] = parseFloat(o.stopPrice);
+      }
+    });
+  }
+
+  if (openPos.length > 0) {
+    flowState.inPosition = true;
+    posCont.innerHTML = openPos.map(pos => {
+      const side    = parseFloat(pos.positionAmt) > 0 ? 'LONG' : 'SHORT';
+      const entry   = parseFloat(pos.entryPrice);
+      const amt     = Math.abs(parseFloat(pos.positionAmt));
+      const liq     = parseFloat(pos.liquidationPrice);
+      const unr     = parseFloat(pos.unRealizedProfit);
+      const lev     = parseFloat(pos.leverage);
+      const pnlPct  = ((currentPrice - entry) / entry * 100) * (side==='LONG' ? 1 : -1) * lev;
+      const slPrice = slOrders[side];
+      const slHtml  = slPrice
+        ? `<div class="info-row"><span class="il">손절가</span><span class="iv" style="color:var(--orange)">
+            ${fmt(slPrice)} <span style="font-size:9px;color:var(--green)">✅ 설정됨</span></span></div>`
+        : `<div class="info-row"><span class="il">손절가</span><span class="iv" style="color:var(--red)">
+            미설정 <span style="font-size:9px;">⚠️</span></span></div>`;
+      return `<div class="pos-card">
+        <span class="pos-side ${side==='LONG'?'ps-long':'ps-short'}">${side} ${lev}×</span>
+        <div class="info-row"><span class="il">진입가</span><span class="iv">${fmt(entry)}</span></div>
+        <div class="info-row"><span class="il">수량</span><span class="iv">${amt} BTC</span></div>
+        <div class="info-row"><span class="il">청산가</span><span class="iv" style="color:var(--red)">${fmt(liq)}</span></div>
+        ${slHtml}
+        <div class="info-row"><span class="il">미실현</span><span class="iv" style="color:${unr>=0?'var(--green)':'var(--red)'}">
+          ${unr>=0?'+':''}${unr.toFixed(2)} USDT</span></div>
+        <div class="info-row"><span class="il">수익률</span><span class="iv" style="color:${pnlPct>=0?'var(--green)':'var(--red)'}">
+          ${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%</span></div>
+      </div>`;
+    }).join('');
+
+    // Warn if any position lacks a stop-loss order
+    openPos.forEach(pos => {
+      const side = parseFloat(pos.positionAmt) > 0 ? 'LONG' : 'SHORT';
+      if (!slOrders[side]) addAlert('danger', `🚨 ${side} 포지션 손절 미설정! 즉시 설정하세요.`);
+    });
+
+    renderFlow();
+  } else {
+    if (flowState.inPosition) {
+      flowState.inPosition   = false;
+      flowState.afterStopLoss = true;
+      addAlert('warn', '포지션 종료 감지 — 박스 재형성 여부를 확인하세요.');
+      renderFlow();
+    }
+    posCont.innerHTML = `<div class="pos-card"><span class="pos-side ps-none">포지션 없음</span>
+      <div style="font-size:10px;color:var(--t2);margin-top:4px">현재 BTC 포지션 없음</div></div>`;
+  }
+}
+
+/* ════════════════════════════════════════
+   CHART INIT
+════════════════════════════════════════ */
+function initChart() {
+  const el = document.getElementById('chart');
+  chart = LightweightCharts.createChart(el, {
+    layout:{background:{color:'#0d1117'},textColor:'#8b949e'},
+    grid:{vertLines:{color:'#1c2128'},horzLines:{color:'#1c2128'}},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+    rightPriceScale:{borderColor:'#30363d'},
+    timeScale:{
+      borderColor:'#30363d', timeVisible:true, secondsVisible:false,
+      // Display times in KST (UTC+9)
+      tickMarkFormatter:(time, type) => {
+        const d = new Date((time + 9*3600) * 1000);
+        const p = n => String(n).padStart(2,'0');
+        // type 0=Year, 1=Month, 2=Day, 3=Time, 4=TimeWithSeconds
+        if (type <= 2) return `${p(d.getUTCMonth()+1)}/${p(d.getUTCDate())}`;
+        return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+      },
+    },
+    localization:{
+      timeFormatter:(time) => {
+        const d = new Date((time + 9*3600) * 1000);
+        const p = n => String(n).padStart(2,'0');
+        return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())} `
+             + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())} KST`;
+      },
+    },
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor:'#3fb950',downColor:'#f85149',
+    borderUpColor:'#3fb950',borderDownColor:'#f85149',
+    wickUpColor:'#3fb950',wickDownColor:'#f85149',
+  });
+  const ro = new ResizeObserver(()=>chart.applyOptions({width:el.clientWidth,height:el.clientHeight}));
+  ro.observe(el);
+  chart.applyOptions({width:el.clientWidth,height:el.clientHeight});
+}
+
+async function loadCandles(iv) {
+  try {
+    const r = await fetch(`/proxy/fapi/v1/klines?symbol=BTCUSDT&interval=${iv}&limit=300`);
+    const d = await r.json();
+    candles = d.map(k=>({time:Math.floor(k[0]/1000),open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4]),volume:parseFloat(k[5])}));
+    candleSeries.setData(candles);
+    volumes = candles.map(c=>c.volume);
+    updateVolume();
+    // Redraw box if set
+    if (flowState.boxSet) applyBox(true);
+  } catch(e) { console.error(e); }
+}
+
+function changeInterval() {
+  currentInterval = document.getElementById('ivSel').value;
+  loadCandles(currentInterval);
+  reconnectWS();
+}
+
+/* ════════════════════════════════════════
+   BOX RANGE  (with chart shading)
+════════════════════════════════════════ */
+function applyBox(silent=false) {
+  const top = parseFloat(document.getElementById('boxTop').value);
+  const bot = parseFloat(document.getElementById('boxBottom').value);
+
+  // Clear old lines
+  if (boxTopLine)    { candleSeries.removePriceLine(boxTopLine);    boxTopLine = null; }
+  if (boxBottomLine) { candleSeries.removePriceLine(boxBottomLine); boxBottomLine = null; }
+  // Remove old area shading
+  if (boxAreaSeries) { chart.removeSeries(boxAreaSeries); boxAreaSeries = null; }
+
+  if (!isNaN(top) && top > 0) {
+    boxTopLine = candleSeries.createPriceLine({price:top,color:'#f85149',lineWidth:2,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'▲ 박스 상단'});
+  }
+  if (!isNaN(bot) && bot > 0) {
+    boxBottomLine = candleSeries.createPriceLine({price:bot,color:'#3fb950',lineWidth:2,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'▼ 박스 하단'});
+  }
+
+  if (!isNaN(top) && !isNaN(bot) && top > bot) {
+    // BaselineSeries: fills BETWEEN bot (baseline) and top (data value)
+    // AreaSeries fills down to the axis — BaselineSeries fills between two prices correctly
+    boxAreaSeries = chart.addBaselineSeries({
+      baseValue:         { type: 'price', price: bot },
+      topLineColor:      'rgba(0,0,0,0)',
+      topFillColor1:     'rgba(88,166,255,0.18)',
+      topFillColor2:     'rgba(88,166,255,0.06)',
+      bottomLineColor:   'rgba(0,0,0,0)',
+      bottomFillColor1:  'rgba(0,0,0,0)',
+      bottomFillColor2:  'rgba(0,0,0,0)',
+      lineWidth:         0,
+      priceLineVisible:  false,
+      lastValueVisible:  false,
+      crosshairMarkerVisible: false,
+    });
+    // Constant data at top price across all candle times → fills box area
+    const areaData = candles.map(c=>({time:c.time, value:top}));
+    boxAreaSeries.setData(areaData);
+
+    const sz  = top - bot;
+    const pct = (sz/bot*100).toFixed(2);
+    document.getElementById('boxSize').textContent = `${sz.toFixed(0)} USDT (${pct}%)`;
+
+    // Update flow state
+    flowState.boxSet  = true;
+    flowState.noBox   = false;
+    flowState.afterStopLoss = false;
+    lastSignal = ''; // reset signal on new box
+    if (!silent) addAlert('info',`박스권 설정 → 상단 ${fmt(top)} / 하단 ${fmt(bot)}`);
+    renderFlow();
+  }
+  updateBoxPos();
+}
+
+function clearBox() {
+  document.getElementById('boxTop').value    = '';
+  document.getElementById('boxBottom').value = '';
+  if (boxTopLine)    { candleSeries.removePriceLine(boxTopLine);    boxTopLine = null; }
+  if (boxBottomLine) { candleSeries.removePriceLine(boxBottomLine); boxBottomLine = null; }
+  if (boxAreaSeries) { chart.removeSeries(boxAreaSeries);           boxAreaSeries = null; }
+  flowState.boxSet = false;
+  lastSignal = '';
+  document.getElementById('boxSize').textContent = '—';
+  document.getElementById('boxPos').textContent  = '—';
+  document.getElementById('signalChip').className   = 'signal-chip sc-wait';
+  document.getElementById('signalChip').textContent  = '⏸ 대기 중';
+  renderFlow();
+  addAlert('info','박스권 초기화됨');
+}
+
+/* ════════════════════════════════════════
+   AUTO BOX DETECT  (improved algorithm)
+════════════════════════════════════════ */
+function autoBox() {
+  if (candles.length < 20) { addAlert('warn','캔들 데이터가 부족합니다'); return; }
+
+  // ── 1. Adaptive window size based on interval ──────────────────────────
+  // Target ~10–20 hours of price history regardless of candle interval
+  const intervalMins = { '1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'4h':240 };
+  const mins = intervalMins[currentInterval] || 15;
+  // 600 min (10h) worth of candles, clamped to [30, candles.length]
+  const windowSize = Math.min(candles.length, Math.max(30, Math.round(600 / mins)));
+  const recent = candles.slice(-windowSize);
+
+  // ── 2. Pivot detection with 2-candle window (less noise than 1-candle) ─
+  // Use strict > so flat plateaus don't inflate pivot count
+  const pivotHighs = [], pivotLows = [];
+  const W = 2; // look-back / look-ahead candles each side
+  for (let i = W; i < recent.length - W; i++) {
+    const hi = recent[i].high, lo = recent[i].low;
+    let isHigh = true, isLow = true;
+    for (let d = 1; d <= W; d++) {
+      if (hi <= recent[i-d].high || hi <= recent[i+d].high) isHigh = false;
+      if (lo >= recent[i-d].low  || lo >= recent[i+d].low)  isLow  = false;
+    }
+    if (isHigh) pivotHighs.push(hi);
+    if (isLow)  pivotLows.push(lo);
+  }
+
+  // ── 3. Fallback: if too few pivots use raw highs/lows (correctly split) ─
+  if (pivotHighs.length < 2) recent.forEach(c => pivotHighs.push(c.high));
+  if (pivotLows.length  < 2) recent.forEach(c => pivotLows.push(c.low));
+
+  // ── 4. Cluster function — groups nearby levels by tolerance ────────────
+  function cluster(arr, pct) {
+    arr.sort((a, b) => a - b);
+    const groups = [];
+    let grp = [arr[0]];
+    for (let i = 1; i < arr.length; i++) {
+      if ((arr[i] - arr[i-1]) / arr[i-1] < pct) grp.push(arr[i]);
+      else { groups.push(grp); grp = [arr[i]]; }
+    }
+    groups.push(grp);
+    return groups
+      .map(g => ({ avg: g.reduce((a, b) => a + b, 0) / g.length, count: g.length }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  // Tolerance scales slightly with price volatility (rough ATR proxy)
+  const priceRange = Math.max(...recent.map(c => c.high)) - Math.min(...recent.map(c => c.low));
+  const midPrice   = (Math.max(...recent.map(c => c.high)) + Math.min(...recent.map(c => c.low))) / 2;
+  const atrPct     = priceRange / midPrice;
+  // tolerance = 0.3% baseline, up to 0.7% when range is wide, down to 0.2% when tight
+  const tol = Math.min(0.007, Math.max(0.002, atrPct * 0.15));
+
+  const resistances = cluster(pivotHighs, tol);
+  const supports    = cluster(pivotLows,  tol);
+
+  if (!resistances.length || !supports.length) {
+    addAlert('warn','박스권 자동감지 실패 — 수동으로 설정해주세요'); return;
+  }
+
+  // ── 5. Pick levels that bracket the current price ──────────────────────
+  // Prefer the closest resistance above price and closest support below price.
+  // If price is outside all pivots (breakout), fall back to strongest cluster.
+  const price = currentPrice || recent[recent.length - 1].close;
+
+  // Resistance candidates: all resistance clusters, closest-above first
+  const resAbove = resistances.filter(r => r.avg >= price).sort((a, b) => a.avg - b.avg);
+  const resBelow = resistances.filter(r => r.avg <  price).sort((a, b) => b.avg - a.avg);
+  const supBelow = supports.filter(s => s.avg <= price).sort((a, b) => b.avg - a.avg);
+  const supAbove = supports.filter(s => s.avg >  price).sort((a, b) => a.avg - b.avg);
+
+  let bestTop = (resAbove[0] || resBelow[0] || resistances[0]).avg;
+  let bestBot = (supBelow[0] || supAbove[0] || supports[0]).avg;
+
+  // ── 6. Ensure top > bot ────────────────────────────────────────────────
+  if (bestTop <= bestBot) [bestTop, bestBot] = [bestBot, bestTop];
+
+  // ── 7. Box size validation (0.3% – 8%) ────────────────────────────────
+  const boxPct = (bestTop - bestBot) / bestBot * 100;
+  if (boxPct < 0.3) {
+    addAlert('warn',`자동감지: 박스권이 너무 작음 (${boxPct.toFixed(2)}%) — 수동 조정 필요`); return;
+  }
+  if (boxPct > 8) {
+    addAlert('warn',`자동감지: 박스권이 너무 큼 (${boxPct.toFixed(2)}%) — 수동 조정 필요`); return;
+  }
+
+  // ── 8. Round to nearest $10, then re-validate size after rounding ──────
+  const roundUnit = bestBot > 10000 ? 10 : bestBot > 1000 ? 1 : 0.1;
+  bestTop = Math.round(bestTop / roundUnit) * roundUnit;
+  bestBot = Math.round(bestBot / roundUnit) * roundUnit;
+  if (bestTop <= bestBot) {
+    addAlert('warn','자동감지: 반올림 후 박스권 크기가 0이 됨 — 수동 조정 필요'); return;
+  }
+
+  document.getElementById('boxTop').value    = bestTop;
+  document.getElementById('boxBottom').value = bestBot;
+  applyBox(false); // applyBox will add its own alert — don't add duplicate here
+}
+
+/* ════════════════════════════════════════
+   BOX POSITION + SIGNAL CHECK
+════════════════════════════════════════ */
+function updateBoxPos() {
+  if (!currentPrice) return;
+  const top = parseFloat(document.getElementById('boxTop').value);
+  const bot = parseFloat(document.getElementById('boxBottom').value);
+  if (isNaN(top)||isNaN(bot)||top<=bot) return;
+
+  const range  = top - bot;
+  const relPct = ((currentPrice-bot)/range*100).toFixed(1);
+  let txt, color;
+  if      (currentPrice >= top) { txt=`상단 초과 +${((currentPrice-top)/top*100).toFixed(2)}%`; color='var(--red)'; }
+  else if (currentPrice <= bot) { txt=`하단 이탈 −${((bot-currentPrice)/bot*100).toFixed(2)}%`; color='var(--green)'; }
+  else                          { txt=`박스 내 ${relPct}%`; color='var(--t1)'; }
+  const el = document.getElementById('boxPos');
+  el.textContent = txt; el.style.color = color;
+
+  checkSignal(top, bot);
+
+  // 1% breakout warning
+  const breakout = Math.abs(currentPrice-top) < top*0.01 && currentPrice > top
+                || Math.abs(currentPrice-bot) < bot*0.01 && currentPrice < bot;
+  if (breakout) addAlert('danger',`⚠️ 박스 1% 이탈 감지! 가격손절 확인 — ${fmt(currentPrice)}`);
+}
+
+function checkSignal(top, bot) {
+  if (!flowState.boxSet || flowState.inPosition) return;
+
+  const t = kst();
+  // Signal only valid during Asia session (9:00~18:00)
+  if (t.total < 9*60 || t.total >= 18*60) {
+    const chip = document.getElementById('signalChip');
+    chip.className = 'signal-chip sc-stop';
+    chip.textContent = t.total >= 22*60+30 ? '🔚 매매 종료 시간' : '🕕 신규 진입 중단 시간대';
+    return;
+  }
+
+  const thr    = (top-bot) * 0.012; // 1.2% of box range = "touch zone"
+  const ratTxt = document.getElementById('vRat')?.textContent || '1×';
+  const ratio  = parseFloat(ratTxt) || 1;
+  // Session-aware volume threshold:
+  //   Asia  09:00–18:00 → 0.9× (naturally low volume, don't penalise)
+  //   Europe 18:00–22:30 → 1.1×
+  //   US    22:30+       → 1.2× (strictest — plenty of liquidity expected)
+  let volThresh;
+  if      (t.total >= 22*60+30 || t.total < 9*60) volThresh = 1.2; // US / overnight
+  else if (t.total >= 18*60)                       volThresh = 1.1; // Europe
+  else                                             volThresh = 0.9; // Asia
+  const volOk = ratio >= volThresh;
+  const chip   = document.getElementById('signalChip');
+  let sig = '';
+
+  if (currentPrice <= bot + thr)       sig = volOk ? 'long'  : 'touch-bot';
+  else if (currentPrice >= top - thr)  sig = volOk ? 'short' : 'touch-top';
+
+  if (sig === lastSignal) return;
+  lastSignal = sig;
+
+  switch(sig) {
+    case 'long':
+      chip.className='signal-chip sc-long'; chip.textContent='🟢 롱 진입 신호!';
+      chip.classList.add('flash');
+      addAlert('success',`🟢 롱 신호 — 하단터치+거래량확인 @ ${fmt(currentPrice)}`);
+      renderFlow('signal-long');
+      break;
+    case 'short':
+      chip.className='signal-chip sc-short'; chip.textContent='🔴 숏 진입 신호!';
+      chip.classList.add('flash');
+      addAlert('warn',`🔴 숏 신호 — 상단터치+거래량확인 @ ${fmt(currentPrice)}`);
+      renderFlow('signal-short');
+      break;
+    case 'touch-bot':
+      chip.className='signal-chip sc-touch'; chip.textContent='🔵 하단 터치 (거래량 대기)'; break;
+    case 'touch-top':
+      chip.className='signal-chip sc-touch'; chip.textContent='🔵 상단 터치 (거래량 대기)'; break;
+    default:
+      chip.className='signal-chip sc-wait';  chip.textContent='⏸ 대기 중';
+  }
+}
+
+/* ════════════════════════════════════════
+   VOLUME
+════════════════════════════════════════ */
+function updateVolume() {
+  if (!candles.length) return;
+  const cur   = candles[candles.length-1].volume;
+  const slice = volumes.slice(-21, -1); // exclude current (forming) candle from avg
+  if (!slice.length) return;
+  const avg   = slice.reduce((a,b)=>a+b,0)/slice.length;
+  const ratio = cur/avg;
+
+  document.getElementById('vCur').textContent = fmtV(cur);
+  document.getElementById('vAvg').textContent = fmtV(avg);
+  document.getElementById('vRat').textContent = ratio.toFixed(2)+'×';
+
+  const bar = document.getElementById('vBar');
+  bar.style.width = Math.min(ratio*45, 100)+'%';
+
+  // Determine session for threshold hint
+  const _t = kst();
+  let sessionLabel = '', thresh;
+  if      (_t.total >= 22*60+30 || _t.total < 9*60) { sessionLabel='미국장'; thresh=1.2; }
+  else if (_t.total >= 18*60)                        { sessionLabel='유럽장'; thresh=1.1; }
+  else                                               { sessionLabel='아시아장'; thresh=0.9; }
+
+  let col, txt;
+  if      (ratio > 2)       { col='var(--red)';    txt='🔥 매우 높음 (진입 주목)'; }
+  else if (ratio > 1.5)     { col='var(--yellow)'; txt='📈 높음'; }
+  else if (ratio >= thresh) { col='var(--green)';  txt=`✅ ${sessionLabel} 기준 충족 (${thresh}×)`; }
+  else if (ratio > 0.7)     { col='var(--blue)';   txt=`🔵 ${sessionLabel} 기준 미달 (필요: ${thresh}×)`; }
+  else                      { col='var(--t3)';     txt='💤 낮음 — 진입 주의'; }
+  bar.style.background = col;
+  const vs = document.getElementById('vStatus');
+  vs.textContent = txt; vs.style.color = col;
+}
+
+/* ════════════════════════════════════════
+   WEBSOCKET  (with intentional-close flag)
+════════════════════════════════════════ */
+function reconnectWS() {
+  wsClosing = true;
+  if (ws) { ws.close(); ws = null; }
+  wsClosing = false;
+  connectWS();
+}
+
+function connectWS() {
+  const streams = `btcusdt@kline_${currentInterval}/btcusdt@miniTicker`;
+  // Lightsail 버전: 서버의 WebSocket 릴레이(/ws)를 통해 연결
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket  = new WebSocket(`${wsProto}//${location.host}/ws?streams=${streams}`);
+  ws = socket;
+
+  socket.onopen  = () => addAlert('success','WebSocket 실시간 연결됨',true);
+  socket.onerror = () => {};
+  socket.onclose = () => {
+    if (!wsClosing && ws === socket) { // only auto-reconnect if this is still the active socket
+      setTimeout(connectWS, 3000);
+    }
+  };
+  socket.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (!msg.stream) return;
+    if (msg.stream.includes('@miniTicker')) handleTicker(msg.data);
+    else if (msg.stream.includes('@kline')) handleKline(msg.data);
+  };
+}
+
+function handleTicker(d) {
+  prevPrice    = currentPrice;
+  currentPrice = parseFloat(d.c);
+  const change = ((currentPrice - parseFloat(d.o)) / parseFloat(d.o) * 100);
+  const el     = document.getElementById('priceDisplay');
+  el.textContent = fmt(currentPrice);
+  el.className   = currentPrice >= prevPrice ? 'up' : 'dn';
+  const badge = document.getElementById('priceBadge');
+  badge.textContent  = (change>=0?'+':'')+change.toFixed(2)+'%';
+  badge.style.background = change>=0?'rgba(63,185,80,.18)':'rgba(248,81,73,.18)';
+  badge.style.color      = change>=0?'var(--green)':'var(--red)';
+  document.getElementById('hi24').textContent  = fmt(parseFloat(d.h));
+  document.getElementById('lo24').textContent  = fmt(parseFloat(d.l));
+  document.getElementById('vol24').textContent = fmtV(parseFloat(d.q))+' USDT';
+  updateBoxPos();
+}
+
+function handleKline(d) {
+  const k = d.k;
+  const c = {time:Math.floor(k.t/1000),open:parseFloat(k.o),high:parseFloat(k.h),low:parseFloat(k.l),close:parseFloat(k.c),volume:parseFloat(k.v)};
+  candleSeries.update(c);
+  // Always update box area series — both in-progress and closed candles need to extend the fill
+  if (boxAreaSeries) {
+    const top = parseFloat(document.getElementById('boxTop').value);
+    if (!isNaN(top)) {
+      try { boxAreaSeries.update({time:c.time, value:top}); } catch(e){}
+    }
+  }
+  const isNewCandle = !(candles.length && candles[candles.length-1].time === c.time);
+  if (!isNewCandle) {
+    candles[candles.length-1] = c; volumes[volumes.length-1] = c.volume;
+  } else {
+    candles.push(c); volumes.push(c.volume);
+  }
+  updateVolume();
+
+  // ── Auto-detect box when a candle closes and box is not yet set ────────
+  // k.x (isFinal) is true only on confirmed candle close — not every tick
+  if (k.x && !flowState.boxSet && !flowState.noBox) {
+    autoBox(); // autoBox → applyBox already fires its own alert on success/failure
+  }
+}
+
+/* ════════════════════════════════════════
+   FLOW RENDER  — driven by time + flowState
+   Never overwrites user-set box state
+════════════════════════════════════════ */
+const FLOW_IDS   = ['fs0','fs1','fs2','fs3','fs4','fs5','fs6','fs7','fs7b','fs8','fs9','fs10','fs11','fs12'];
+const BADGE_IDS  = ['fb0','fb1','fb2','fb3','fb4','fb5','fb6','fb7','fb7b','fb8','fb9','fb10','fb11','fb12'];
+
+function setSteps(activeIdx, skipIds=[]) {
+  FLOW_IDS.forEach((id,i) => {
+    const el = document.getElementById(id);
+    const bd = document.getElementById(BADGE_IDS[i]);
+    if (!el||!bd) return;
+    if (skipIds.includes(id)) {
+      el.className = 'flow-step s-skip'; bd.textContent = '—';
+    } else if (i < activeIdx)  {
+      el.className = 'flow-step s-done';   bd.textContent = '✅';
+    } else if (i === activeIdx) {
+      el.className = 'flow-step s-active'; bd.textContent = '▶';
+    } else {
+      el.className = 'flow-step s-wait';   bd.textContent = '⬜';
+    }
+  });
+}
+
+function renderFlow(hint='') {
+  const t = kst();
+
+  // Closed (before 9:00)
+  if (t.total < 9*60) { setSteps(0); return; }
+
+  // 9:00~9:30 — observe
+  if (t.total < 9*60+30) { setSteps(1); return; }
+
+  // 9:30+ — check box state
+  if (!flowState.boxSet) {
+    // Waiting for box — step 2 active
+    setSteps(2); return;
+  }
+
+  // Box is set — proceed based on hints / position state
+  if (flowState.inPosition || hint==='position') {
+    setSteps(7); return; // 포지션 관리
+  }
+  if (flowState.afterStopLoss) {
+    setSteps(8, ['fs5','fs6','fs7']); // 박스 재형성 확인 active (fs7b idx=8)
+    return;
+  }
+  if (hint==='signal-long' || hint==='signal-short') {
+    // Highlight entry step
+    setSteps(5); // 진입 단계
+    const icon  = document.getElementById('entryIcon');
+    const title = document.getElementById('entryTitle');
+    if (hint==='signal-long')  { icon.textContent='📈'; title.textContent='롱 진입'; }
+    if (hint==='signal-short') { icon.textContent='📉'; title.textContent='숏 진입'; }
+    return;
+  }
+
+  // 18:00 ~ 22:30 — Europe session, no new entries
+  if (t.total >= 18*60 && t.total < 22*60+30) { setSteps(10); return; }
+  // 22:30+ — close all
+  if (t.total >= 22*60+30) { setSteps(11); return; }
+
+  // Default: waiting for signal (step 4)
+  setSteps(4);
+}
+
+/* ════════════════════════════════════════
+   CLOCK TICK
+════════════════════════════════════════ */
+let prevTotal = -1;
+function tick() {
+  const t = kst();
+  document.getElementById('kstClock').textContent = kstStr();
+
+  // Phase badge
+  const ph = phaseOf(t.total);
+  const badge = document.getElementById('phaseBadge');
+  const phaseMap = {
+    asia:  {text:'🇰🇷 아시아장',cls:'phase-chip phase-asia'},
+    europe:{text:'🇪🇺 유럽장',  cls:'phase-chip phase-europe'},
+    us:    {text:'🇺🇸 미국장',  cls:'phase-chip phase-us'},
+    closed:{text:'😴 장 마감',  cls:'phase-chip phase-closed'},
+  };
+  badge.textContent = phaseMap[ph].text;
+  badge.className   = phaseMap[ph].cls;
+
+  // Once-per-minute transition alerts (check on minute boundary)
+  if (t.total !== prevTotal) {
+    prevTotal = t.total;
+    if (t.h===9  && t.m===0)  addAlert('info', '🕘 아시아장 시작! 30분 관찰을 시작하세요.');
+    if (t.h===9  && t.m===30) addAlert('info', '⏱ 관찰 완료 — 박스권을 설정하세요.');
+    if (t.h===18 && t.m===0)  addAlert('warn', '🕕 오후 6시 — 신규 진입 중단, 기존 포지션만 관리.');
+    if (t.h===22 && t.m===30) addAlert('danger','🚨 22:30 — 전체 포지션 정리! 미국장 개장 전 청산.');
+  }
+
+  renderFlow(); // re-render every second but respects flowState
+}
+
+/* ════════════════════════════════════════
+   INIT
+════════════════════════════════════════ */
+async function init() {
+  // Lightsail 버전: 모달 없음, 서버가 API 키 보관
+  addAlert('info','대시보드 초기화 중…',true);
+  initChart();
+  await loadCandles('15m');
+  connectWS();
+
+  // Initial ticker
+  try {
+    const r = await fetch('/proxy/fapi/v1/ticker/24hr?symbol=BTCUSDT');
+    const d = await r.json();
+    currentPrice = parseFloat(d.lastPrice);
+    handleTicker({c:d.lastPrice,o:d.openPrice,h:d.highPrice,l:d.lowPrice,q:d.quoteVolume});
+  } catch(e) {}
+
+  setInterval(tick, 1000);
+  tick();
+
+  // Auto-connect (서버 프록시를 통해 — 서버가 서명/인증 처리)
+  const acc = await futuresReq('/fapi/v2/account');
+  if (acc && acc.totalWalletBalance !== undefined) {
+    IS_CONNECTED   = true;
+    initialBalance = parseFloat(acc.totalWalletBalance);
+    addAlert('success','✅ Binance Futures 자동 연결 성공!',true);
+    renderAccount(acc);
+    startPositionPoll();
+  } else {
+    addAlert('warn','⚠️ API 연결 실패 — 서버 .env 파일과 Binance 권한을 확인하세요',true);
+  }
+}
+
+window.addEventListener('load', init);
+</script>
+</body>
+</html>

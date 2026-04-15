@@ -28,5 +28,9 @@ env/
 # 로그
 *.log
 
+# Node.js
+node_modules/
+btc-dashboard/node_modules/
+
 # 로컬 데이터
 data/
