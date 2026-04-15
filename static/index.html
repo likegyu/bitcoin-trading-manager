@@ -1605,6 +1605,9 @@ const state = {
   showHistoryArrows: localStorage.getItem("showHistoryArrows") !== "false",
   // 히스토리 행 클릭 오버레이 선택 상태
   selectedHistoryTs: null,
+  // 수동 분석 쿨다운 (서버 기준, 브라우저 UI 표시용)
+  cooldownUntilMs: 0,
+  cooldownTimerId: null,
 };
 
 function persistAnalysisCache(data) {
@@ -1700,7 +1703,7 @@ function setAnalysisRunning(job) {
   showLoadingOverlay(overlayStep, state.analysisPhase, state.analysisPhaseDetail);
 }
 
-function finishAnalysisRun() {
+function finishAnalysisRun({ startCooldown = false } = {}) {
   clearAnalysisPollTimer();
   hideLoadingOverlay();
   state.analyzing = false;
@@ -1708,6 +1711,7 @@ function finishAnalysisRun() {
   state.analysisStep = 0;
   state.analysisPhase = null;
   state.analysisPhaseDetail = null;
+  if (startCooldown) applyCooldown(10 * 60);
   setAnalyzeBtn(true);
   updateAnalysisStatus();
 }
@@ -1742,6 +1746,12 @@ function handleAnalysisStatusResponse(statusPayload = {}) {
   const latestResult = statusPayload.latest_result || null;
   const result = statusPayload.result || null;
 
+  // 서버 쿨다운 동기화 — 다른 브라우저/기기에서 분석했을 때도 반영
+  const serverCooldown = statusPayload.cooldown_remaining_secs ?? 0;
+  if (serverCooldown > 0 && !state.analyzing) {
+    applyCooldown(serverCooldown);
+  }
+
   if (latestResult && shouldApplyAnalysisPayload(latestResult)) {
     applyResult(latestResult);
   }
@@ -1755,7 +1765,7 @@ function handleAnalysisStatusResponse(statusPayload = {}) {
   clearAnalysisPollTimer();
 
   if (job && job.status === "completed" && result) {
-    finishAnalysisRun();
+    finishAnalysisRun({ startCooldown: true });
     if (shouldApplyAnalysisPayload(result)) {
       applyResult(result);
     }
@@ -1787,10 +1797,27 @@ async function syncAnalysisStatus(options = {}) {
 
 async function runAnalysis() {
   if (state.analyzing) return;
+  // 클라이언트 쿨다운 체크 (서버 응답을 미리 막아 UX 개선)
+  const remaining = state.cooldownUntilMs - Date.now();
+  if (remaining > 0) {
+    const m = Math.floor(remaining / 60000);
+    const s = Math.ceil((remaining % 60000) / 1000);
+    showError(`마지막 분석으로부터 10분이 지나야 수동 분석을 실행할 수 있습니다. (${m}분 ${s}초 남음)`);
+    return;
+  }
   setAnalysisRunning({ step: 0 });
 
   try {
     const res = await fetch("/api/analyze", { method: "POST", keepalive: true });
+    if (res.status === 429) {
+      const errData = await res.json().catch(() => ({}));
+      const secs = errData?.detail?.cooldown_remaining_secs ?? 0;
+      finishAnalysisRun();
+      applyCooldown(secs);
+      const m = Math.floor(secs / 60), s = secs % 60;
+      showError(`10분 쿨다운 중입니다. ${m}분 ${s}초 후에 다시 시도하세요.`);
+      return;
+    }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
@@ -1806,7 +1833,45 @@ async function runAnalysis() {
   }
 }
 
+function applyCooldown(remainingSecs) {
+  if (remainingSecs <= 0) return;
+  state.cooldownUntilMs = Date.now() + remainingSecs * 1000;
+  if (state.cooldownTimerId) clearInterval(state.cooldownTimerId);
+  _updateCooldownBtn();
+  state.cooldownTimerId = setInterval(() => {
+    const left = state.cooldownUntilMs - Date.now();
+    if (left <= 0) {
+      clearInterval(state.cooldownTimerId);
+      state.cooldownTimerId = null;
+      state.cooldownUntilMs = 0;
+      if (!state.analyzing) setAnalyzeBtn(true);
+    } else {
+      _updateCooldownBtn();
+    }
+  }, 1000);
+}
+
+function _updateCooldownBtn() {
+  const btn = document.getElementById("btn-analyze");
+  if (!btn) return;
+  const left = Math.max(0, state.cooldownUntilMs - Date.now());
+  const m = Math.floor(left / 60000);
+  const s = Math.ceil((left % 60000) / 1000);
+  btn.disabled = true;
+  btn.setAttribute("aria-busy", "false");
+  btn.textContent = `⏳ ${m}분 ${s}초 후 가능`;
+}
+
 function setAnalyzeBtn(enabled) {
+  // 쿨다운 중이면 카운트다운 버튼으로 유지
+  if (enabled && state.cooldownUntilMs > Date.now()) {
+    _updateCooldownBtn();
+    return;
+  }
+  if (state.cooldownTimerId && enabled) {
+    clearInterval(state.cooldownTimerId);
+    state.cooldownTimerId = null;
+  }
   const btn = document.getElementById("btn-analyze");
   if (!btn) return;
   btn.disabled = !enabled;

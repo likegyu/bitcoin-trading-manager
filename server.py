@@ -879,12 +879,37 @@ class MacroSnapshotManager:
 _macro_snapshot = MacroSnapshotManager()
 
 
+# 수동 분석 버튼 쿨다운: 10분
+MANUAL_COOLDOWN_SECS = 10 * 60
+MANUAL_COOLDOWN_STATE_PATH = os.path.join(BASE_DIR, "data", "manual_cooldown.json")
+
+
+def _load_manual_cooldown_time() -> float:
+    """서버 재시작 후 수동 클릭 시각을 복원. 없으면 0.0 반환."""
+    try:
+        with open(MANUAL_COOLDOWN_STATE_PATH, "r", encoding="utf-8") as f:
+            return float(json.load(f).get("last_manual_started_at", 0.0))
+    except Exception:
+        return 0.0
+
+
+def _save_manual_cooldown_time(ts: float) -> None:
+    try:
+        os.makedirs(os.path.dirname(MANUAL_COOLDOWN_STATE_PATH), exist_ok=True)
+        with open(MANUAL_COOLDOWN_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"last_manual_started_at": ts}, f)
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).warning("manual cooldown 저장 실패 — %s", exc)
+
+
 class AnalysisManager:
     def __init__(self):
         self._lock = asyncio.Lock()
         self._job: dict | None = None
         self._task: asyncio.Task | None = None
         self._latest_result: dict | None = _load_latest_analysis()
+        self._last_manual_started_at: float = _load_manual_cooldown_time()
 
     async def stop(self):
         task = None
@@ -899,6 +924,20 @@ class AnalysisManager:
         async with self._lock:
             if self._job and self._job["status"] in {"pending", "running"}:
                 return self._serialize_job(self._job), False
+
+            # 쿨다운 체크 (스케줄러는 bypass)
+            if not bypass_cooldown:
+                remaining = max(0.0, MANUAL_COOLDOWN_SECS - (time.time() - self._last_manual_started_at))
+                if remaining > 0:
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "reason": "cooldown",
+                            "cooldown_remaining_secs": int(remaining),
+                        },
+                    )
+                self._last_manual_started_at = time.time()
+                _save_manual_cooldown_time(self._last_manual_started_at)
 
             started_at = _now_iso()
             job = {
@@ -926,7 +965,7 @@ class AnalysisManager:
         async with self._lock:
             response = {
                 "job": self._serialize_job(self._job),
-                "cooldown_remaining_secs": 0,
+                "cooldown_remaining_secs": int(max(0.0, MANUAL_COOLDOWN_SECS - (time.time() - self._last_manual_started_at))),
             }
             if (
                 self._job
