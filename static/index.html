@@ -1378,7 +1378,7 @@ body {
               </span>
             </div>
             <div id="aa-controls" style="display:none;">
-              <span style="font-size:11px;color:#A8978A;font-weight:600;">30분마다</span>
+              <span style="font-size:11px;color:#A8978A;font-weight:600;">4시간마다</span>
               <div id="aa-countdown" class="countdown-badge">—</div>
             </div>
           </div>
@@ -1711,7 +1711,7 @@ function finishAnalysisRun({ startCooldown = false } = {}) {
   state.analysisStep = 0;
   state.analysisPhase = null;
   state.analysisPhaseDetail = null;
-  if (startCooldown) applyCooldown(10 * 60);
+  if (startCooldown) applyCooldown(15 * 60);
   setAnalyzeBtn(true);
   updateAnalysisStatus();
 }
@@ -1765,7 +1765,8 @@ function handleAnalysisStatusResponse(statusPayload = {}) {
   clearAnalysisPollTimer();
 
   if (job && job.status === "completed" && result) {
-    finishAnalysisRun({ startCooldown: true });
+    // 이 세션에서 직접 분석을 돌린 경우에만 startCooldown — 새로고침 시엔 서버 쿨다운만 적용
+    finishAnalysisRun({ startCooldown: state.analyzing });
     if (shouldApplyAnalysisPayload(result)) {
       applyResult(result);
     }
@@ -1802,7 +1803,7 @@ async function runAnalysis() {
   if (remaining > 0) {
     const m = Math.floor(remaining / 60000);
     const s = Math.ceil((remaining % 60000) / 1000);
-    showError(`마지막 분석으로부터 10분이 지나야 수동 분석을 실행할 수 있습니다. (${m}분 ${s}초 남음)`);
+    showError(`마지막 분석으로부터 15분이 지나야 수동 분석을 실행할 수 있습니다. (${m}분 ${s}초 남음)`);
     return;
   }
   setAnalysisRunning({ step: 0 });
@@ -1815,7 +1816,7 @@ async function runAnalysis() {
       finishAnalysisRun();
       applyCooldown(secs);
       const m = Math.floor(secs / 60), s = secs % 60;
-      showError(`10분 쿨다운 중입니다. ${m}분 ${s}초 후에 다시 시도하세요.`);
+      showError(`15분 쿨다운 중입니다. ${m}분 ${s}초 후에 다시 시도하세요.`);
       return;
     }
     if (!res.ok) {
@@ -4424,7 +4425,7 @@ updateNotifBtn();
 // ══════════════════════════════════════════════
 const autoAnalyze = {
   on:           false,
-  intervalMin:  30,
+  intervalMin:  240,
   nextRunAt:    null,   // ISO string from server
   _pollTimer:   null,   // 서버 상태 polling 타이머
   _cdTimer:     null,   // 카운트다운 tick 타이머
