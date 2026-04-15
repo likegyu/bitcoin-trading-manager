@@ -1735,6 +1735,27 @@ async def autotrader_close():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/api/autotrader/balance")
+async def autotrader_balance():
+    """드라이런 복리 가상 잔고 조회."""
+    try:
+        import backtester as _bt
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return _bt.load_dry_balance()
+
+
+@app.post("/api/autotrader/balance/reset")
+async def autotrader_balance_reset(initial: float = 10000):
+    """드라이런 가상 잔고 초기화 (initial: 초기 잔고 금액)."""
+    try:
+        import backtester as _bt
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    _bt.reset_dry_balance(initial)
+    return {"ok": True, "balance": initial}
+
+
 @app.get("/api/autotrader/summary")
 async def autotrader_summary():
     """

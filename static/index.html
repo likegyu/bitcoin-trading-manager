@@ -1237,6 +1237,27 @@ body {
               <div id="bot-stat-shorts" style="font-size:16px;font-weight:800;color:#DC2626;">—</div>
             </div>
           </div>
+          <!-- 가상 잔고 복리 현황 -->
+          <div id="bot-balance-row" style="margin-top:10px;padding:10px 12px;background:#F5F0EB;border-radius:10px;display:none;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <span style="font-size:10px;font-weight:700;color:#A8978A;">💰 드라이런 가상 잔고</span>
+              <button onclick="resetDryBalance()" style="font-size:10px;font-weight:700;color:#FFF;background:#EA580C;border:none;border-radius:5px;cursor:pointer;padding:3px 8px;">$10,000 초기화</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+              <div style="text-align:center;">
+                <div style="font-size:9px;color:#A8978A;margin-bottom:2px;">현재 잔고</div>
+                <div id="bot-bal-current" style="font-size:14px;font-weight:800;color:#1C1917;">—</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-size:9px;color:#A8978A;margin-bottom:2px;">총 손익</div>
+                <div id="bot-bal-pnl" style="font-size:14px;font-weight:800;">—</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-size:9px;color:#A8978A;margin-bottom:2px;">수익률</div>
+                <div id="bot-bal-pct" style="font-size:14px;font-weight:800;">—</div>
+              </div>
+            </div>
+          </div>
           <!-- 마지막 신호 -->
           <div id="bot-last-signal" style="margin-top:8px;font-size:11px;color:#78716C;text-align:center;"></div>
         </div>
@@ -4877,6 +4898,34 @@ function renderBotStatus(d, currentPrice) {
     const conf= d.last_confidence != null ? ` · ${d.last_confidence}%` : "";
     sigEl.textContent = `마지막 신호: ${sig}${conf}  (${ts})`;
   }
+
+  // 가상 잔고 복리 현황
+  const bal = d.balance;
+  const balRow = document.getElementById("bot-balance-row");
+  if (bal && balRow) {
+    balRow.style.display = "block";
+    const current  = bal.balance         ?? 0;
+    const initial  = bal.initial_balance ?? current;
+    const totalPnl = bal.total_pnl       ?? 0;
+    const pct      = initial > 0 ? ((current - initial) / initial * 100) : 0;
+    const pnlColor = totalPnl >= 0 ? "#16A34A" : "#DC2626";
+    const pctColor = pct      >= 0 ? "#16A34A" : "#DC2626";
+
+    const curEl = document.getElementById("bot-bal-current");
+    const pnlEl = document.getElementById("bot-bal-pnl");
+    const pctEl = document.getElementById("bot-bal-pct");
+    if (curEl) curEl.textContent = "$" + current.toLocaleString("en-US", {minimumFractionDigits:0, maximumFractionDigits:0});
+    if (pnlEl) { pnlEl.textContent = fmtPnl(totalPnl); pnlEl.style.color = pnlColor; }
+    if (pctEl) { pctEl.textContent = fmtPct(pct);      pctEl.style.color = pctColor; }
+  }
+}
+
+async function resetDryBalance() {
+  if (!confirm("가상 잔고를 $10,000으로 초기화할까요?")) return;
+  try {
+    await fetch(`/api/autotrader/balance/reset?initial=10000`, { method: "POST" });
+    fetchBotSummary();
+  } catch(e) { alert("실패: " + e.message); }
 }
 
 // 가격 업데이트 시 봇 위젯 P&L도 즉시 갱신

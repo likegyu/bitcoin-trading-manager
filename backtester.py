@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 _BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
 TRADE_LOG_PATH   = os.path.join(_BASE_DIR, "data", "trade_log.jsonl")
 CACHE_PATH       = os.path.join(_BASE_DIR, "data", "backtest_cache.json")
+DRY_BALANCE_PATH = os.path.join(_BASE_DIR, "data", "dry_run_balance.json")
 FUTURES_URL      = _cfg.BINANCE_FUTURES_URL  # https://fapi.binance.com
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "REVERSAL_LONG", "REVERSAL_SHORT"}
@@ -260,6 +261,7 @@ def get_today_summary() -> dict:
         pass
 
     live_pos = get_live_position()
+    balance_data = load_dry_balance()
 
     return {
         "entries_today":   entries_today,
@@ -271,6 +273,7 @@ def get_today_summary() -> dict:
         "last_signal":     last_rec.get("signal_en")     if last_rec else None,
         "last_confidence": last_rec.get("confidence")    if last_rec else None,
         "live_position":   live_pos,
+        "balance":         balance_data,
     }
 
 
@@ -352,6 +355,90 @@ def get_live_position() -> Optional[dict]:
         "held_min":     round(held_min, 1),
         "dry_run":      last_entry.get("dry_run", True),
     }
+
+
+# ══════════════════════════════════════════════
+# 드라이런 가상 잔고 관리
+# ══════════════════════════════════════════════
+
+def _default_balance() -> float:
+    return float(os.getenv("AUTO_TRADE_DRY_RUN_BALANCE",
+                           str(getattr(_cfg, "AUTO_TRADE_DRY_RUN_BALANCE", 10000))))
+
+
+def load_dry_balance() -> dict:
+    """가상 잔고 파일 로드. 없으면 초기값으로 생성."""
+    try:
+        with open(DRY_BALANCE_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        # 필드 무결성 보장
+        data.setdefault("initial_balance", data.get("balance", _default_balance()))
+        data.setdefault("peak_balance",    data.get("balance", _default_balance()))
+        data.setdefault("total_pnl",       0.0)
+        data.setdefault("trade_count",     0)
+        data.setdefault("wins",            0)
+        data.setdefault("losses",          0)
+        return data
+    except (FileNotFoundError, json.JSONDecodeError):
+        initial = _default_balance()
+        return {
+            "balance":         initial,
+            "initial_balance": initial,
+            "peak_balance":    initial,
+            "total_pnl":       0.0,
+            "trade_count":     0,
+            "wins":            0,
+            "losses":          0,
+            "updated_at":      datetime.now(timezone.utc).isoformat(),
+        }
+
+
+def _save_dry_balance(data: dict):
+    try:
+        os.makedirs(os.path.dirname(DRY_BALANCE_PATH), exist_ok=True)
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        with open(DRY_BALANCE_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning("가상 잔고 저장 실패: %s", exc)
+
+
+def get_dry_balance() -> float:
+    """현재 가상 잔고만 빠르게 반환."""
+    return load_dry_balance()["balance"]
+
+
+def _apply_pnl_to_balance(pnl_usd: float, outcome: str):
+    """트레이드 확정 시 가상 잔고에 손익 반영."""
+    data = load_dry_balance()
+    data["balance"]     = round(data["balance"] + pnl_usd, 4)
+    data["peak_balance"] = max(data["peak_balance"], data["balance"])
+    data["total_pnl"]   = round(data["total_pnl"] + pnl_usd, 4)
+    data["trade_count"] = data.get("trade_count", 0) + 1
+    if outcome == "WIN":
+        data["wins"]   = data.get("wins", 0) + 1
+    elif outcome == "LOSS":
+        data["losses"] = data.get("losses", 0) + 1
+    _save_dry_balance(data)
+    logger.info(
+        "[DryBalance] %s pnl=%+.2f  잔고 %.2f → %.2f",
+        outcome, pnl_usd,
+        data["balance"] - pnl_usd, data["balance"],
+    )
+
+
+def reset_dry_balance(initial: Optional[float] = None):
+    """가상 잔고 초기화 (디버그/재시작용)."""
+    amt = initial if initial is not None else _default_balance()
+    _save_dry_balance({
+        "balance":         amt,
+        "initial_balance": amt,
+        "peak_balance":    amt,
+        "total_pnl":       0.0,
+        "trade_count":     0,
+        "wins":            0,
+        "losses":          0,
+    })
 
 
 # ══════════════════════════════════════════════
@@ -623,6 +710,10 @@ def tick_open_position() -> Optional[dict]:
     cache[ts] = result
     _save_cache(cache)
     _watcher_state.pop(ts, None)  # 감시 상태 정리
+
+    # 가상 잔고 복리 반영 (드라이런 전용)
+    if pos.get("dry_run", True):
+        _apply_pnl_to_balance(pnl_usd, outcome)
 
     logger.info(
         "[Watcher] %s %s → %s  exit=%.1f  pnl=%+.2f USD  hold=%.0f분",

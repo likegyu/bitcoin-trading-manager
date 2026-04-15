@@ -394,23 +394,36 @@ def _calc_position(
     leverage  = _resolve_leverage(claude_leverage) # ← Claude 권장 레버리지
 
     # 가용 잔고 조회
-    # 드라이런이면 실패 시 가상 잔고(DRY_RUN_BALANCE) 사용
-    DRY_RUN_BALANCE = float(os.getenv("AUTO_TRADE_DRY_RUN_BALANCE", "10000"))
+    is_dry = _cfg_bool("AUTO_TRADE_DRY_RUN", True)
     balance = 0.0
-    try:
-        balance = _trader.get_account_balance("USDT")
-    except Exception:
-        pass
-    if balance <= 0:
+
+    if is_dry:
+        # ── 드라이런: 항상 가상 잔고만 사용, 실계좌 조회 안 함 ──
         try:
-            balance = _trader.get_account_balance("USDC")
+            import backtester as _bt
+            balance = _bt.get_dry_balance()
         except Exception:
             pass
-    if balance <= 0:
-        if _cfg_bool("AUTO_TRADE_DRY_RUN", True):
-            balance = DRY_RUN_BALANCE
-            logger.info("드라이런 가상 잔고 사용: $%.2f", balance)
-        else:
+        if balance <= 0:
+            # 파일 없으면 env 초기값으로 생성
+            balance = float(os.getenv("AUTO_TRADE_DRY_RUN_BALANCE", "10000"))
+            try:
+                _bt.reset_dry_balance(balance)
+            except Exception:
+                pass
+        logger.info("드라이런 가상 잔고: $%.2f", balance)
+    else:
+        # ── 실매매: 실계좌 잔고 조회 ──
+        try:
+            balance = _trader.get_account_balance("USDT")
+        except Exception:
+            pass
+        if balance <= 0:
+            try:
+                balance = _trader.get_account_balance("USDC")
+            except Exception:
+                pass
+        if balance <= 0:
             raise ValueError("계좌 잔고를 조회할 수 없습니다 (balance=0)")
 
     # 손절/익절 거리 계산
