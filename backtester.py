@@ -30,9 +30,12 @@ CACHE_PATH       = os.path.join(_BASE_DIR, "data", "backtest_cache.json")
 DRY_BALANCE_PATH = os.path.join(_BASE_DIR, "data", "dry_run_balance.json")
 FUTURES_URL      = _cfg.BINANCE_FUTURES_URL  # https://fapi.binance.com
 
-ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "REVERSAL_LONG", "REVERSAL_SHORT"}
-MAX_CANDLES   = 500   # 1분봉 500개 = 약 8시간 시뮬레이션
-MAX_WAIT_MIN  = 480   # 최대 대기 시간 (분) — 미결 처리 기준
+ENTRY_ACTIONS   = {"OPEN_LONG", "OPEN_SHORT", "REVERSAL_LONG", "REVERSAL_SHORT"}
+PENDING_ACTIONS = {"PENDING_LONG", "PENDING_SHORT"}
+CANCEL_ACTIONS  = {"CLOSE", "CANCEL_PENDING"}
+MAX_CANDLES     = 500   # 1분봉 500개 = 약 8시간 시뮬레이션
+MAX_WAIT_MIN    = 480   # 최대 대기 시간 (분) — 미결 처리 기준
+PENDING_EXPIRY_MIN = 120  # 지정가 대기 최대 시간 (분) — 미체결 시 자동 취소
 
 
 # ══════════════════════════════════════════════
@@ -283,15 +286,14 @@ def get_today_summary() -> dict:
 
 def get_live_position() -> Optional[dict]:
     """
-    trade_log.jsonl 에서 현재 오픈 중인 드라이런 포지션을 반환.
-    마지막 진입 액션 이후 CLOSE / 반대 방향 REVERSAL 이 없으면 "open"으로 판단.
+    trade_log.jsonl 에서 현재 상태(진입 대기 또는 오픈)인 드라이런 포지션을 반환.
 
     반환 dict:
+      status       : "pending" | "open"
       action, symbol, direction, entry_price, sl_price, tp_price,
       quantity, leverage, confidence, ts, held_min, dry_run
     """
-    ALL_ACTIONS  = ENTRY_ACTIONS | {"CLOSE", "SKIP", "ERROR"}
-    CLOSE_ACTS   = {"CLOSE"}
+    ALL_ACTIONS = ENTRY_ACTIONS | PENDING_ACTIONS | CANCEL_ACTIONS | {"SKIP", "ERROR"}
 
     all_records: list[dict] = []
     try:
@@ -312,49 +314,79 @@ def get_live_position() -> Optional[dict]:
     if not all_records:
         return None
 
-    # 시간 오름차순 정렬
     all_records.sort(key=lambda r: r.get("ts", ""))
 
-    # 마지막 진입 액션 찾기
-    last_entry: Optional[dict] = None
+    # 상태 추적: last_entry(open) 또는 last_pending 중 하나만 유효
+    last_entry:   Optional[dict] = None
+    last_pending: Optional[dict] = None
+
     for rec in all_records:
         action = rec.get("action", "")
         if action in ENTRY_ACTIONS:
-            last_entry = rec
-        elif action in CLOSE_ACTS:
-            last_entry = None   # 명시적 청산 → 포지션 없음
+            last_entry   = rec
+            last_pending = None   # PENDING이 체결돼 OPEN이 됨
+        elif action in PENDING_ACTIONS:
+            last_pending = rec
+            last_entry   = None   # 새 PENDING 대기 시작
+        elif action in CANCEL_ACTIONS:
+            last_entry   = None
+            last_pending = None   # 청산 또는 취소
 
-    if last_entry is None:
-        return None
+    now_ms = time.time() * 1000
 
-    # REVERSAL 은 새 포지션이므로 유효 — 단 entry_price / sl / tp 유효성 체크
-    if last_entry.get("entry_price", 0) <= 0:
-        return None
+    # ── 오픈 포지션 ──────────────────────────────
+    if last_entry is not None:
+        if last_entry.get("entry_price", 0) <= 0:
+            return None
+        entry_ms = _ts_to_ms(last_entry.get("ts", ""))
+        held_min = (now_ms - entry_ms) / 60_000
+        if held_min > MAX_WAIT_MIN:
+            return None
+        direction = "LONG" if "LONG" in last_entry.get("action", "") else "SHORT"
+        return {
+            "status":       "open",
+            "action":       last_entry.get("action"),
+            "symbol":       last_entry.get("symbol", ""),
+            "direction":    direction,
+            "entry_price":  last_entry.get("entry_price", 0),
+            "sl_price":     last_entry.get("sl_price", 0),
+            "tp_price":     last_entry.get("tp_price", 0),
+            "quantity":     last_entry.get("quantity", 0),
+            "leverage":     last_entry.get("leverage", 1),
+            "confidence":   last_entry.get("confidence", 0),
+            "signal_en":    last_entry.get("signal_en", ""),
+            "ts":           last_entry.get("ts", ""),
+            "held_min":     round(held_min, 1),
+            "dry_run":      last_entry.get("dry_run", True),
+        }
 
-    # 최대 시뮬레이션 범위(8시간) 초과 시 타임아웃 처리 → 열린 포지션 아님
-    entry_ms    = _ts_to_ms(last_entry.get("ts", ""))
-    now_ms      = time.time() * 1000
-    held_min    = (now_ms - entry_ms) / 60_000
-    if held_min > MAX_WAIT_MIN:
-        return None
+    # ── 진입 대기 (PENDING) ───────────────────────
+    if last_pending is not None:
+        if last_pending.get("entry_price", 0) <= 0:
+            return None
+        pending_ms = _ts_to_ms(last_pending.get("ts", ""))
+        held_min   = (now_ms - pending_ms) / 60_000
+        if held_min > PENDING_EXPIRY_MIN:
+            return None   # 만료 — tick에서 CANCEL 처리
+        direction = "LONG" if "LONG" in last_pending.get("action", "") else "SHORT"
+        return {
+            "status":       "pending",
+            "action":       last_pending.get("action"),
+            "symbol":       last_pending.get("symbol", ""),
+            "direction":    direction,
+            "entry_price":  last_pending.get("entry_price", 0),
+            "sl_price":     last_pending.get("sl_price", 0),
+            "tp_price":     last_pending.get("tp_price", 0),
+            "quantity":     last_pending.get("quantity", 0),
+            "leverage":     last_pending.get("leverage", 1),
+            "confidence":   last_pending.get("confidence", 0),
+            "signal_en":    last_pending.get("signal_en", ""),
+            "ts":           last_pending.get("ts", ""),
+            "held_min":     round(held_min, 1),
+            "dry_run":      last_pending.get("dry_run", True),
+        }
 
-    direction = "LONG" if "LONG" in last_entry.get("action", "") else "SHORT"
-
-    return {
-        "action":       last_entry.get("action"),
-        "symbol":       last_entry.get("symbol", ""),
-        "direction":    direction,
-        "entry_price":  last_entry.get("entry_price", 0),
-        "sl_price":     last_entry.get("sl_price", 0),
-        "tp_price":     last_entry.get("tp_price", 0),
-        "quantity":     last_entry.get("quantity", 0),
-        "leverage":     last_entry.get("leverage", 1),
-        "confidence":   last_entry.get("confidence", 0),
-        "signal_en":    last_entry.get("signal_en", ""),
-        "ts":           last_entry.get("ts", ""),
-        "held_min":     round(held_min, 1),
-        "dry_run":      last_entry.get("dry_run", True),
-    }
+    return None
 
 
 # ══════════════════════════════════════════════
@@ -623,18 +655,165 @@ def get_cached_backtest() -> Optional[BacktestSummary]:
 # 실시간 1분봉 감시 (서버 백그라운드용)
 # ══════════════════════════════════════════════
 
+def _check_pending_expiry() -> None:
+    """
+    PENDING 포지션이 만료 시간(PENDING_EXPIRY_MIN)을 초과했으면 CANCEL_PENDING 기록.
+    get_live_position()이 None을 반환한 경우에도 만료 처리가 필요할 수 있으므로 별도 호출.
+    """
+    # 원시 로그에서 마지막 PENDING 찾기
+    last_pending: Optional[dict] = None
+    last_cancel_ts = ""
+    try:
+        with open(TRADE_LOG_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                action = rec.get("action", "")
+                if action in PENDING_ACTIONS:
+                    last_pending = rec
+                elif action in CANCEL_ACTIONS or action in ENTRY_ACTIONS:
+                    last_pending = None
+    except FileNotFoundError:
+        return
+
+    if last_pending is None:
+        return
+
+    pending_ms = _ts_to_ms(last_pending.get("ts", ""))
+    elapsed_min = (time.time() * 1000 - pending_ms) / 60_000
+    if elapsed_min > PENDING_EXPIRY_MIN:
+        cancel_rec = {
+            "ts":        datetime.now(timezone.utc).isoformat(),
+            "symbol":    last_pending.get("symbol", ""),
+            "action":    "CANCEL_PENDING",
+            "signal_en": last_pending.get("signal_en", ""),
+            "strength":  last_pending.get("strength", 0),
+            "confidence":last_pending.get("confidence", 0),
+            "entry_price": last_pending.get("entry_price", 0),
+            "sl_price":  0, "tp_price": 0,
+            "quantity":  0, "leverage": 0,
+            "dry_run":   True,
+            "reason":    f"[만료] {PENDING_EXPIRY_MIN}분 내 미체결 → 자동 취소",
+        }
+        _append_trade_log_raw(cancel_rec)
+        logger.info(
+            "[Pending] CANCEL_PENDING — %s %.2f (%.0f분 미체결)",
+            last_pending.get("action"), last_pending.get("entry_price", 0), elapsed_min,
+        )
+
+
+def _tick_pending_entry(pos: dict) -> Optional[dict]:
+    """
+    PENDING 포지션: 신규 1분봉이 진입가에 닿으면 OPEN으로 전환.
+    만료 시 CANCEL_PENDING 기록.
+    """
+    ts        = pos["ts"]
+    symbol    = pos["symbol"]
+    entry     = pos["entry_price"]
+    isLong    = pos["direction"] == "LONG"
+    pending_ms = _ts_to_ms(ts)
+
+    # 만료 체크
+    elapsed_min = (time.time() * 1000 - pending_ms) / 60_000
+    if elapsed_min > PENDING_EXPIRY_MIN:
+        cancel_rec = {
+            "ts":        datetime.now(timezone.utc).isoformat(),
+            "symbol":    symbol,
+            "action":    "CANCEL_PENDING",
+            "signal_en": pos.get("signal_en", ""),
+            "strength":  0,
+            "confidence":pos.get("confidence", 0),
+            "entry_price": entry,
+            "sl_price":  0, "tp_price": 0,
+            "quantity":  0, "leverage": 0,
+            "dry_run":   True,
+            "reason":    f"[만료] {PENDING_EXPIRY_MIN}분 내 미체결 → 자동 취소",
+        }
+        _append_trade_log_raw(cancel_rec)
+        logger.info("[Pending] 만료 취소 — %s entry=%.2f (%.0f분)", symbol, entry, elapsed_min)
+        _watcher_state.pop(ts, None)
+        return None
+
+    last_checked_ms = _watcher_state.get(ts, pending_ms)
+    candles = _fetch_klines(symbol, start_ms=last_checked_ms + 1, limit=5)
+    if not candles:
+        return None
+
+    filled = False
+    fill_candle = None
+    for c in candles:
+        high = c["high"]
+        low  = c["low"]
+        # LONG: 캔들 LOW가 진입가 이하 → 지정가 매수 체결
+        # SHORT: 캔들 HIGH가 진입가 이상 → 지정가 매도 체결
+        if isLong and low <= entry:
+            filled = True; fill_candle = c; break
+        if not isLong and high >= entry:
+            filled = True; fill_candle = c; break
+        _watcher_state[ts] = c["close_time"]
+
+    if not filled:
+        return None
+
+    # ── 체결: OPEN 레코드 기록 ────────────────────
+    open_action = "OPEN_LONG" if isLong else "OPEN_SHORT"
+    open_rec = {
+        "ts":          datetime.now(timezone.utc).isoformat(),
+        "symbol":      symbol,
+        "action":      open_action,
+        "signal_en":   pos.get("signal_en", ""),
+        "strength":    pos.get("strength", 0),
+        "confidence":  pos.get("confidence", 0),
+        "entry_price": entry,
+        "sl_price":    pos.get("sl_price", 0),
+        "tp_price":    pos.get("tp_price", 0),
+        "quantity":    pos.get("quantity", 0),
+        "leverage":    pos.get("leverage", 1),
+        "dry_run":     True,
+        "reason":      f"[지정가 체결] pending_ts={ts}",
+    }
+    _append_trade_log_raw(open_rec)
+    _watcher_state.pop(ts, None)
+
+    fill_price = fill_candle["low"] if isLong else fill_candle["high"]
+    logger.info(
+        "[Pending] 체결 → %s  entry=%.2f  fill=%.2f  (%.0f분 대기)",
+        open_action, entry, fill_price, elapsed_min,
+    )
+    return {"status": "filled", "action": open_action, "symbol": symbol, "entry_price": entry}
+
+
+def _append_trade_log_raw(record: dict) -> None:
+    """trade_log.jsonl 에 dict 를 직접 append (backtester 내부 전용)."""
+    try:
+        os.makedirs(os.path.dirname(TRADE_LOG_PATH), exist_ok=True)
+        with open(TRADE_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        logger.error("trade_log append 실패: %s", exc)
+
+
 def tick_open_position() -> Optional[dict]:
     """
-    현재 열린 드라이런 포지션이 있으면 **신규 1분봉만** 조회해 SL/TP 체크.
-    매 분 서버에서 호출. 결과가 확정되면 캐시에 저장하고 결과 dict 반환.
+    1분마다 서버에서 호출.
+    - PENDING 상태: 캔들이 진입가에 닿으면 OPEN으로 전환, 만료 시 CANCEL_PENDING 기록
+    - OPEN 상태: SL/TP 체크 → 확정 시 캐시에 저장하고 결과 dict 반환
     포지션 없거나 아직 미확정이면 None 반환.
-
-    반환 dict (확정 시):
-        outcome, exit_price, pnl_usd, pnl_pct, hold_min, ts, symbol
     """
     pos = get_live_position()
     if pos is None:
+        # PENDING 만료 체크: get_live_position이 None을 반환했지만 만료된 PENDING이 있을 수 있음
+        _check_pending_expiry()
         return None
+
+    # ── PENDING 체결 대기 ──────────────────────────
+    if pos.get("status") == "pending":
+        return _tick_pending_entry(pos)
 
     ts      = pos["ts"]
     symbol  = pos["symbol"]

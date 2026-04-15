@@ -527,16 +527,66 @@ def execute_trade(payload: dict) -> TradeRecord:
     if not ok:
         return _skip(f"[조건 미충족] {signal_reason}")
 
-    # ── 2. 현재 포지션 조회 ──────────────────────────
-    try:
-        existing = _trader.get_position(symbol)
-    except Exception as exc:
-        existing = None
-        logger.warning("포지션 조회 실패 (신규 진입으로 계속): %s", exc)
+    # ── 2. 현재 포지션 / 대기 조회 ──────────────────────
+    is_dry = _cfg_bool("AUTO_TRADE_DRY_RUN", True) or _at_state.dry_run
+    existing = None          # 실매매 포지션 (Binance 형식)
+    dry_live = None          # 드라이런 포지션/PENDING (backtester 형식)
+
+    if is_dry:
+        try:
+            import backtester as _bt
+            dry_live = _bt.get_live_position()
+        except Exception as exc:
+            logger.warning("드라이런 포지션 조회 실패: %s", exc)
+    else:
+        try:
+            existing = _trader.get_position(symbol)
+        except Exception as exc:
+            logger.warning("포지션 조회 실패 (신규 진입으로 계속): %s", exc)
 
     bypass_cooldown = False   # 반전 재진입 시 쿨다운 우회 플래그
+    current_price = float(payload.get("current_price") or payload.get("price") or 0)
 
     # ── 3. 기존 포지션 처리 ──────────────────────────
+    if is_dry and dry_live:
+        live_status = dry_live.get("status")       # "open" | "pending"
+        live_dir    = dry_live.get("direction")     # "LONG" | "SHORT"
+
+        if live_status == "pending":
+            # PENDING 중 → 같은 방향이면 SKIP, 반대 방향이면 기존 PENDING 취소 후 새 PENDING
+            if live_dir == direction:
+                return _skip(f"이미 {live_dir} 진입 대기(PENDING) 중 — 중복 건너뜀")
+            else:
+                # 반대 방향 신호 → 기존 PENDING 취소
+                import backtester as _bt
+                cancel_rec = TradeRecord(
+                    ts=ts, symbol=symbol, action="CANCEL_PENDING",
+                    signal_en=trading_signal.get("signal_en", ""),
+                    strength=trading_signal.get("strength", 0),
+                    confidence=confidence,
+                    entry_price=0, sl_price=0, tp_price=0,
+                    quantity=0, leverage=0,
+                    dry_run=True,
+                    reason=f"[반대 신호로 취소] {live_dir}→{direction}",
+                )
+                _append_trade_log(cancel_rec)
+                logger.info("[DRY-RUN] 기존 %s PENDING 취소 → 새 %s PENDING 생성", live_dir, direction)
+                bypass_cooldown = True   # 취소-재진입은 쿨다운 면제
+
+        elif live_status == "open":
+            # OPEN 포지션 → 기존 반전 로직 적용
+            try:
+                from datetime import datetime as _dt2, timezone as _tz2
+                _ts_dt = _dt2.fromisoformat(dry_live["ts"].replace("Z", "+00:00"))
+                _update_ms = int(_ts_dt.timestamp() * 1000)
+            except Exception:
+                _update_ms = 0
+            existing = {
+                "positionAmt": dry_live["quantity"] if live_dir == "LONG" else -dry_live["quantity"],
+                "entryPrice":  dry_live["entry_price"],
+                "updateTime":  _update_ms,
+            }
+
     if existing:
         amt          = float(existing.get("positionAmt", 0))
         existing_dir = "LONG" if amt > 0 else "SHORT"
@@ -544,36 +594,48 @@ def execute_trade(payload: dict) -> TradeRecord:
         if existing_dir == direction:
             return _skip(f"이미 {existing_dir} 포지션 보유 중 — 중복 진입 건너뜀")
 
-        # 반대 방향 신호 → 반전 판단
         can_reverse, rev_reason = _should_reverse(existing, direction, trading_signal)
-
         if not can_reverse:
             return _skip(f"[반전 차단] {rev_reason}")
 
-        # 반전 실행: 미결 주문 취소 → 포지션 청산
         logger.info("반전 실행: %s → %s / %s", existing_dir, direction, rev_reason)
-        try:
-            _trader.cancel_all_open_orders(symbol)
-        except Exception as exc:
-            logger.warning("미결 주문 취소 실패 (계속 진행): %s", exc)
-        try:
-            _trader.close_position(symbol)
-        except Exception as exc:
-            return _error(f"반전 청산 실패 — 재진입 중단: {exc}")
+        if is_dry:
+            close_rec = TradeRecord(
+                ts=ts, symbol=symbol, action="CLOSE",
+                signal_en=trading_signal.get("signal_en", ""),
+                strength=trading_signal.get("strength", 0),
+                confidence=confidence,
+                entry_price=current_price, sl_price=0, tp_price=0,
+                quantity=0, leverage=0,
+                dry_run=True,
+                reason=f"[드라이런 반전 청산] {rev_reason}",
+            )
+            _append_trade_log(close_rec)
+            logger.info("[DRY-RUN] 반전 청산 기록 완료")
+        else:
+            try:
+                _trader.cancel_all_open_orders(symbol)
+            except Exception as exc:
+                logger.warning("미결 주문 취소 실패 (계속 진행): %s", exc)
+            try:
+                _trader.close_position(symbol)
+            except Exception as exc:
+                return _error(f"반전 청산 실패 — 재진입 중단: {exc}")
 
         _at_state.increment_reversal()
-        bypass_cooldown = True  # 반전 후 재진입은 쿨다운 면제
+        bypass_cooldown = True
 
-    # ── 4. 쿨다운 확인 (반전 후 재진입은 면제) ──────
+    # ── 4. 쿨다운 확인 ──────────────────────────────
     if not bypass_cooldown:
         cd_ok, cd_reason = _is_cooldown_ok()
         if not cd_ok:
             return _skip(f"[쿨다운] {cd_reason}")
 
     # ── 5. 진입가 결정 ───────────────────────────────
-    current_price = float(payload.get("current_price") or payload.get("price") or 0)
-    entry_hint    = float(trade_levels.get("entry") or 0)
-    entry_price   = entry_hint if entry_hint > 0 else current_price
+    entry_hint  = float(trade_levels.get("entry") or 0)
+    # 드라이런: Claude 제안 진입가 우선 (지정가 시뮬레이션), 없으면 현재가 (즉시 체결)
+    # 실매매:  Claude 제안 진입가 우선, 없으면 현재가
+    entry_price = entry_hint if entry_hint > 0 else current_price
     if entry_price <= 0:
         return _error("진입가를 결정할 수 없음 (price=0)")
 
@@ -588,13 +650,35 @@ def execute_trade(payload: dict) -> TradeRecord:
     except Exception as exc:
         return _error(f"포지션 사이징 실패: {exc}")
 
-    # ── 7. 레버리지 설정 ─────────────────────────────
+    # ── 7. 드라이런: PENDING 기록 후 종료 ────────────
+    if is_dry:
+        pending_action = f"PENDING_{direction}"
+        _update_cooldown()
+        rec = TradeRecord(
+            ts=ts, symbol=symbol, action=pending_action,
+            signal_en=trading_signal.get("signal_en", ""),
+            strength=trading_signal.get("strength", 0),
+            confidence=confidence,
+            entry_price=entry_price,
+            sl_price=round(sl_price, 2),
+            tp_price=round(tp_price, 2),
+            quantity=qty, leverage=leverage,
+            dry_run=True,
+            reason=f"[지정가 대기] {signal_reason} / entry={entry_price:.2f}",
+        )
+        _append_trade_log(rec)
+        logger.info(
+            "⏳ [%s] %s entry=%.2f sl=%.2f tp=%.2f lev=x%d — 체결 대기 중",
+            pending_action, symbol, entry_price, sl_price, tp_price, leverage,
+        )
+        return rec
+
+    # ── 8. 실매매: 레버리지 설정 + 시장가 진입 ────────
     try:
         _trader.set_leverage(symbol, leverage)
     except Exception as exc:
         logger.warning("레버리지 설정 실패 (계속 진행): %s", exc)
 
-    # ── 8. 시장가 진입 ───────────────────────────────
     entry_side = "BUY" if direction == "LONG" else "SELL"
     order_ids: list[int] = []
 
@@ -634,10 +718,10 @@ def execute_trade(payload: dict) -> TradeRecord:
     _update_cooldown()
 
     action = (
-        f"REVERSAL_{direction}" if bypass_cooldown
+        f"REVERSAL_{direction}" if (bypass_cooldown and existing)
         else f"OPEN_{direction}"
     )
-    dry = _at_state.dry_run or _trader._dry_run()
+    dry = False  # 실매매 경로 (드라이런은 step 7에서 이미 반환됨)
 
     rec = TradeRecord(
         ts=ts, symbol=symbol, action=action,

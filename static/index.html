@@ -4631,14 +4631,63 @@ function renderLivePosition(pos, currentPrice) {
     return;
   }
 
-  const isLong   = pos.direction === "LONG";
-  const cls      = isLong ? "long" : "short";
-  const cp       = currentPrice || 0;
-  const entry    = pos.entry_price || 0;
-  const qty      = pos.quantity    || 0;
-  const lev      = pos.leverage    || 1;
-  const sl       = pos.sl_price    || 0;
-  const tp       = pos.tp_price    || 0;
+  const isPending = pos.status === "pending";
+  const isLong    = pos.direction === "LONG";
+  const cls       = isLong ? "long" : "short";
+  const cp        = currentPrice || 0;
+  const entry     = pos.entry_price || 0;
+  const qty       = pos.quantity    || 0;
+  const lev       = pos.leverage    || 1;
+  const sl        = pos.sl_price    || 0;
+  const tp        = pos.tp_price    || 0;
+
+  // PENDING 상태: 체결 대기 표시
+  if (isPending) {
+    const distPct = cp > 0 && entry > 0
+      ? ((entry - cp) / cp * 100 * (isLong ? 1 : -1))
+      : null;
+    const distStr = distPct != null
+      ? (distPct > 0 ? `▼ ${Math.abs(distPct).toFixed(2)}% 하락 시 체결` : `▲ ${Math.abs(distPct).toFixed(2)}% 상승 시 체결`)
+      : "";
+    card.className = `live-pos-card ${cls}`;
+    card.style.opacity = "0.75";
+    card.innerHTML = `
+      <div class="live-pos-pulse" style="background:#F59E0B;"></div>
+      <div style="flex:0 0 auto;">
+        <span class="live-pos-badge" style="background:#F59E0B;color:#fff;">⏳ ${isLong ? "LONG" : "SHORT"} 대기</span>
+        <div style="font-size:11px;color:#78716C;">${pos.symbol} · ${pos.confidence}% 확신 · ${pos.held_min?.toFixed(0) ?? 0}분 경과</div>
+      </div>
+      <div class="live-pos-group">
+        <div class="live-pos-label">지정 진입가</div>
+        <div class="live-pos-value">${fmtPrice(entry)}</div>
+      </div>
+      <div class="live-pos-group">
+        <div class="live-pos-label">현재가</div>
+        <div class="live-pos-value">${cp ? fmtPrice(cp) : "—"}</div>
+      </div>
+      <div class="live-pos-group">
+        <div class="live-pos-label">체결까지</div>
+        <div style="font-size:12px;font-weight:700;color:#92400E;">${distStr || "—"}</div>
+      </div>
+      <div class="live-pos-group">
+        <div class="live-pos-label">손절 / 목표</div>
+        <div style="font-size:13px;font-weight:700;">
+          <span style="color:#DC2626;">${fmtPrice(sl)}</span>
+          <span style="color:#A8978A;"> / </span>
+          <span style="color:#16A34A;">${fmtPrice(tp)}</span>
+        </div>
+      </div>
+      <div class="live-pos-group">
+        <div class="live-pos-label">레버리지 / 증거금</div>
+        <div style="font-size:13px;font-weight:700;">${lev}x / $${((entry * qty) / lev).toFixed(2)}</div>
+      </div>
+      <div style="font-size:10px;background:#FEF9C3;color:#92400E;padding:3px 8px;border-radius:6px;font-weight:700;">DR</div>
+    `;
+    return;
+  }
+
+  // OPEN 포지션
+  card.style.opacity = "1";
   const pnlUsd   = cp > 0 && entry > 0 && qty > 0
     ? (isLong ? (cp - entry) * qty : (entry - cp) * qty)
     : null;
@@ -4647,7 +4696,6 @@ function renderLivePosition(pos, currentPrice) {
     ? (pnlUsd / margin * 100) : null;
   const pnlCls   = pnlUsd == null ? "" : pnlUsd >= 0 ? "live-pnl-pos" : "live-pnl-neg";
 
-  // SL/TP 도달률 계산
   const totalRange = Math.abs(tp - sl);
   const progress   = (cp > 0 && totalRange > 0)
     ? Math.min(100, Math.max(0, Math.abs(cp - entry) / (Math.abs(tp - entry) || 1) * 100))
@@ -4669,7 +4717,7 @@ function renderLivePosition(pos, currentPrice) {
     </div>
     <div class="live-pos-group">
       <div class="live-pos-label">현재가</div>
-      <div class="live-pos-value" style="color:${isLong?"#1C1917":"#1C1917"};">${cp ? fmtPrice(cp) : "—"}</div>
+      <div class="live-pos-value">${cp ? fmtPrice(cp) : "—"}</div>
     </div>
     <div class="live-pos-group">
       <div class="live-pos-label">미실현 손익</div>
@@ -4813,38 +4861,53 @@ function renderBotStatus(d, currentPrice) {
   if (mode) mode.textContent = d.dry_run ? "LIVE DR" : "LIVE";
 
   if (pos) {
+    const isPending = pos.status === "pending";
     const isLong = pos.direction === "LONG";
     const cp     = currentPrice || 0;
     const entry  = pos.entry_price || 0;
     const qty    = pos.quantity    || 0;
     const lev    = pos.leverage    || 1;
-    const pnlUsd = cp > 0 && entry > 0 && qty > 0
-      ? (isLong ? (cp - entry) * qty : (entry - cp) * qty)
-      : null;
-    const margin  = entry > 0 && qty > 0 ? (entry * qty) / lev : 0;
-    const pnlPct  = pnlUsd != null && margin > 0 ? (pnlUsd / margin * 100) : null;
-    const isPosP  = pnlUsd == null || pnlUsd >= 0;
 
-    // 점 색상 + 애니메이션
-    if (dot)   { dot.style.background = isLong ? "#16A34A" : "#DC2626"; }
-    if (pulse) {
-      pulse.style.background = isLong ? "#16A34A" : "#DC2626";
-      pulse.style.animation  = "lp-pulse 1.4s infinite";
-    }
-    if (row) row.style.background = isLong ? "#F0FDF4" : "#FFF1F2";
+    if (isPending) {
+      // 대기 중 — 주황색
+      if (dot)   { dot.style.background = "#F59E0B"; }
+      if (pulse) { pulse.style.background = "#F59E0B"; pulse.style.animation = "lp-pulse 1.4s infinite"; }
+      if (row)   row.style.background = "#FFFBEB";
+      if (label) { label.style.color = "#92400E"; label.textContent = `⏳ ${isLong ? "LONG" : "SHORT"} 대기 중`; }
+      if (detail) {
+        const distPct = cp > 0 && entry > 0
+          ? Math.abs((entry - cp) / cp * 100).toFixed(2)
+          : null;
+        detail.textContent = `목표가 ${fmtPrice(entry)} · ${distPct ? distPct + "% 거리" : ""}`;
+      }
+      if (pnlEl) { pnlEl.style.color = "#92400E"; pnlEl.textContent = "미체결"; }
+    } else {
+      const pnlUsd = cp > 0 && entry > 0 && qty > 0
+        ? (isLong ? (cp - entry) * qty : (entry - cp) * qty)
+        : null;
+      const margin  = entry > 0 && qty > 0 ? (entry * qty) / lev : 0;
+      const pnlPct  = pnlUsd != null && margin > 0 ? (pnlUsd / margin * 100) : null;
+      const isPosP  = pnlUsd == null || pnlUsd >= 0;
 
-    if (label) {
-      label.style.color = isLong ? "#15803D" : "#B91C1C";
-      label.textContent = (isLong ? "▲ LONG " : "▼ SHORT ") + pos.symbol;
-    }
-    if (detail) {
-      detail.textContent = `진입 ${fmtPrice(entry)} · ${lev}x · ${pos.held_min}분 보유`;
-    }
-    if (pnlEl) {
-      pnlEl.style.color = isPosP ? "#16A34A" : "#DC2626";
-      pnlEl.innerHTML = pnlUsd != null
-        ? `${fmtPnl(pnlUsd)}<br><span style="font-size:11px;">${fmtPct(pnlPct)}</span>`
-        : "—";
+      if (dot)   { dot.style.background = isLong ? "#16A34A" : "#DC2626"; }
+      if (pulse) {
+        pulse.style.background = isLong ? "#16A34A" : "#DC2626";
+        pulse.style.animation  = "lp-pulse 1.4s infinite";
+      }
+      if (row) row.style.background = isLong ? "#F0FDF4" : "#FFF1F2";
+      if (label) {
+        label.style.color = isLong ? "#15803D" : "#B91C1C";
+        label.textContent = (isLong ? "▲ LONG " : "▼ SHORT ") + pos.symbol;
+      }
+      if (detail) {
+        detail.textContent = `진입 ${fmtPrice(entry)} · ${lev}x · ${pos.held_min}분 보유`;
+      }
+      if (pnlEl) {
+        pnlEl.style.color = isPosP ? "#16A34A" : "#DC2626";
+        pnlEl.innerHTML = pnlUsd != null
+          ? `${fmtPnl(pnlUsd)}<br><span style="font-size:11px;">${fmtPct(pnlPct)}</span>`
+          : "—";
+      }
     }
   } else {
     // 포지션 없음
