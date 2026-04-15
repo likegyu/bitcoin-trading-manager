@@ -35,6 +35,18 @@ from analyzer import analyze_with_claude, chat_with_claude, run_full_analysis
 from macro_fetcher import fetch_macro_context
 from time_utils import format_kst, now_kst
 
+# ── 자동매매 (선택적 임포트 — 모듈 없어도 서버 동작) ──
+try:
+    import auto_trader as _auto_trader
+    _AUTO_TRADER_AVAILABLE = True
+except Exception as _at_exc:
+    _auto_trader = None  # type: ignore
+    _AUTO_TRADER_AVAILABLE = False
+    import logging as _at_log
+    _at_log.getLogger(__name__).warning(
+        "auto_trader 로드 실패 — %s: %s", type(_at_exc).__name__, _at_exc
+    )
+
 # ── Reflection / Memory (optional: rank_bm25 미설치 시 None) ──
 try:
     from agents import get_memory as _get_memory
@@ -1020,6 +1032,22 @@ class AnalysisManager:
             self._job["completed_at"] = completed_at
             self._latest_result = copy.deepcopy(payload)
 
+        # ── 자동매매 훅 ─────────────────────────────────
+        if _AUTO_TRADER_AVAILABLE and _auto_trader is not None:
+            loop = asyncio.get_event_loop()
+            try:
+                trade_rec = await loop.run_in_executor(
+                    None, _auto_trader.execute_trade, copy.deepcopy(payload)
+                )
+                import logging as _atlog
+                _atlog.getLogger(__name__).info(
+                    "[AutoTrader] action=%s reason=%s",
+                    trade_rec.action, trade_rec.reason,
+                )
+            except Exception as _ate:
+                import logging as _atlog
+                _atlog.getLogger(__name__).error("[AutoTrader] 실행 오류: %s", _ate)
+
     async def _fail(self, job_id: str, message: str, status: str = "error"):
         failed_at = _now_iso()
         async with self._lock:
@@ -1603,6 +1631,55 @@ async def root():
     html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     with open(html_path, encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+
+# ══════════════════════════════════════════════
+# 자동매매 API
+# ══════════════════════════════════════════════
+
+class AutoTraderConfig(BaseModel):
+    enabled: bool
+    dry_run: bool = True
+
+
+@app.get("/api/autotrader")
+async def autotrader_status():
+    """자동매매 현재 설정 + 최근 10건 매매 기록."""
+    if not _AUTO_TRADER_AVAILABLE or _auto_trader is None:
+        raise HTTPException(status_code=503, detail="auto_trader 모듈을 로드할 수 없습니다.")
+    return _auto_trader.get_status()
+
+
+@app.post("/api/autotrader")
+async def autotrader_config(body: AutoTraderConfig):
+    """자동매매 ON/OFF 및 드라이런 설정."""
+    if not _AUTO_TRADER_AVAILABLE or _auto_trader is None:
+        raise HTTPException(status_code=503, detail="auto_trader 모듈을 로드할 수 없습니다.")
+    result = _auto_trader.set_config(enabled=body.enabled, dry_run=body.dry_run)
+    return result
+
+
+@app.get("/api/autotrader/trades")
+async def autotrader_trades(limit: int = 50):
+    """매매 로그 조회 (최근 N건)."""
+    if not _AUTO_TRADER_AVAILABLE or _auto_trader is None:
+        raise HTTPException(status_code=503, detail="auto_trader 모듈을 로드할 수 없습니다.")
+    return {"trades": _auto_trader.load_trade_log(limit=limit)}
+
+
+@app.post("/api/autotrader/close")
+async def autotrader_close():
+    """현재 포지션 즉시 청산 (긴급 청산용)."""
+    if not _AUTO_TRADER_AVAILABLE or _auto_trader is None:
+        raise HTTPException(status_code=503, detail="auto_trader 모듈을 로드할 수 없습니다.")
+    import trader as _trader_mod
+    symbol = DEFAULT_SYMBOL
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(None, _trader_mod.close_position, symbol)
+        return {"result": result or "포지션 없음"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 if __name__ == "__main__":

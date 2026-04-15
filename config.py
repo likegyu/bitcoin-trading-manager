@@ -35,6 +35,19 @@ def symbol_to_pair(symbol: str) -> str:
 # ── 매매 설정 (복리 전략 파라미터) ──────────────
 DEFAULT_LEVERAGE      = 3       # 희망 레버리지 배수
 
+# ── 자동매매 설정 ──────────────────────────────
+# 모든 값은 .env 에서 환경변수로 오버라이드 가능
+AUTO_TRADE_ENABLED        = os.getenv("AUTO_TRADE_ENABLED", "0") not in ("0", "false", "no")
+AUTO_TRADE_DRY_RUN        = os.getenv("AUTO_TRADE_DRY_RUN", "1") not in ("0", "false", "no")
+AUTO_TRADE_MIN_CONFIDENCE = int(os.getenv("AUTO_TRADE_MIN_CONFIDENCE", "65"))   # 최소 확신도
+AUTO_TRADE_MIN_STRENGTH   = int(os.getenv("AUTO_TRADE_MIN_STRENGTH",   "2"))    # 최소 강도 (BUY=2, STRONG_BUY=3)
+AUTO_TRADE_RISK_PCT       = float(os.getenv("AUTO_TRADE_RISK_PCT",     "0.02")) # 진입당 리스크 비율 (2%)
+AUTO_TRADE_SL_ATR_MULT    = float(os.getenv("AUTO_TRADE_SL_ATR_MULT",  "1.5")) # 손절 = ATR × 배수
+AUTO_TRADE_TP_RR          = float(os.getenv("AUTO_TRADE_TP_RR",        "2.0")) # 익절 = 손절폭 × R:R
+AUTO_TRADE_MAX_LEVERAGE   = int(os.getenv("AUTO_TRADE_MAX_LEVERAGE",   "5"))    # 레버리지 상한
+AUTO_TRADE_COOLDOWN_MIN   = int(os.getenv("AUTO_TRADE_COOLDOWN_MIN",   "30"))   # 연속 거래 쿨다운(분)
+AUTO_TRADE_FLIP_GUARD     = os.getenv("AUTO_TRADE_FLIP_GUARD", "1") not in ("0", "false", "no")  # 즉시 반전 방지
+
 # 분석할 시간봉 목록
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
 
