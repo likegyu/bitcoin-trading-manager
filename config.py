@@ -42,7 +42,7 @@ AUTO_TRADE_DRY_RUN        = os.getenv("AUTO_TRADE_DRY_RUN", "1") not in ("0", "f
 AUTO_TRADE_MIN_CONFIDENCE = int(os.getenv("AUTO_TRADE_MIN_CONFIDENCE", "65"))   # 최소 확신도
 AUTO_TRADE_MIN_STRENGTH   = int(os.getenv("AUTO_TRADE_MIN_STRENGTH",   "2"))    # 최소 강도 (BUY=2, STRONG_BUY=3)
 AUTO_TRADE_RISK_PCT       = float(os.getenv("AUTO_TRADE_RISK_PCT",     "0.02")) # 진입당 리스크 비율 (2%)
-AUTO_TRADE_SL_ATR_MULT    = float(os.getenv("AUTO_TRADE_SL_ATR_MULT",  "1.5")) # 손절 = ATR × 배수
+AUTO_TRADE_SL_ATR_MULT    = float(os.getenv("AUTO_TRADE_SL_ATR_MULT",  "1.0")) # 손절 = Claude 제안가 그대로
 AUTO_TRADE_TP_RR          = float(os.getenv("AUTO_TRADE_TP_RR",        "2.0")) # 익절 = 손절폭 × R:R
 AUTO_TRADE_MAX_LEVERAGE   = int(os.getenv("AUTO_TRADE_MAX_LEVERAGE",   "5"))    # 레버리지 상한
 AUTO_TRADE_COOLDOWN_MIN   = int(os.getenv("AUTO_TRADE_COOLDOWN_MIN",   "30"))   # 연속 거래 쿨다운(분)
