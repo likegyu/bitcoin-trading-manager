@@ -295,8 +295,10 @@
       <div id="chartOverlay">
         <div class="signal-chip sc-wait" id="signalChip">⏸ 대기 중</div>
         <select class="iv-sel" id="ivSel" onchange="changeInterval()">
+          <option value="1m">1분봉</option>
+          <option value="3m">3분봉</option>
+          <option value="5m" selected>5분봉</option>
           <option value="15m">15분봉</option>
-          <option value="5m">5분봉</option>
           <option value="30m">30분봉</option>
           <option value="1h">1시간봉</option>
         </select>
@@ -408,7 +410,7 @@ let ws = null, wsClosing = false; // wsClosing prevents auto-reconnect on intent
 let chart = null, candleSeries = null;
 let boxTopLine = null, boxBottomLine = null, boxAreaSeries = null;
 let candles = [], volumes = [];
-let currentInterval = '15m';
+let currentInterval = '5m';
 let positionPollTimer = null;
 let pollFailCount = 0;        // track consecutive API failures
 let serverTimeOffset = 0;    // ms: Date.now() + serverTimeOffset = Binance server time
@@ -427,6 +429,7 @@ const STRATEGY = {
 };
 let positionEntryTime = null;   // 포지션 진입 시각 (ms)
 let dailyStopTriggered = false; // 일일 손실 한도 도달 여부
+let autoBoxCooldown = 0;        // 자동감지 실패 후 재시도 대기 캔들 수
 
 // Flow state — separate from time so tick() doesn't clobber manual changes
 let flowState = {
@@ -892,34 +895,38 @@ function clearBox() {
 function autoBox() {
   if (candles.length < 20) { addAlert('warn','캔들 데이터가 부족합니다'); return; }
 
-  // ── 1. Adaptive window size based on interval ──────────────────────────
-  // Target ~10–20 hours of price history regardless of candle interval
+  // ── 1. Adaptive window — 1m/5m 스캘핑 기준 최근 3~4시간치만 사용 ──────
+  // 200분치(≈3.3h) 목표, 최소 50캔들 (너무 오래된 피벗은 단기에 무관)
   const intervalMins = { '1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'4h':240 };
-  const mins = intervalMins[currentInterval] || 15;
-  // 600 min (10h) worth of candles, clamped to [30, candles.length]
-  const windowSize = Math.min(candles.length, Math.max(30, Math.round(600 / mins)));
+  const mins = intervalMins[currentInterval] || 5;
+  const windowSize = Math.min(candles.length, Math.max(50, Math.round(200 / mins)));
   const recent = candles.slice(-windowSize);
 
-  // ── 2. Pivot detection with 2-candle window (less noise than 1-candle) ─
-  // Use strict > so flat plateaus don't inflate pivot count
-  const pivotHighs = [], pivotLows = [];
-  const W = 2; // look-back / look-ahead candles each side
-  for (let i = W; i < recent.length - W; i++) {
-    const hi = recent[i].high, lo = recent[i].low;
-    let isHigh = true, isLow = true;
-    for (let d = 1; d <= W; d++) {
-      if (hi <= recent[i-d].high || hi <= recent[i+d].high) isHigh = false;
-      if (lo >= recent[i-d].low  || lo >= recent[i+d].low)  isLow  = false;
+  // ── 2. Pivot 감지 — W=2 우선, 부족 시 W=1로 재시도 ───────────────────
+  function detectPivots(w) {
+    const highs = [], lows = [];
+    for (let i = w; i < recent.length - w; i++) {
+      const hi = recent[i].high, lo = recent[i].low;
+      let isHigh = true, isLow = true;
+      for (let d = 1; d <= w; d++) {
+        if (hi <= recent[i-d].high || hi <= recent[i+d].high) isHigh = false;
+        if (lo >= recent[i-d].low  || lo >= recent[i+d].low)  isLow  = false;
+      }
+      if (isHigh) highs.push(hi);
+      if (isLow)  lows.push(lo);
     }
-    if (isHigh) pivotHighs.push(hi);
-    if (isLow)  pivotLows.push(lo);
+    return { highs, lows };
   }
-
-  // ── 3. Fallback: if too few pivots use raw highs/lows (correctly split) ─
+  let { highs: pivotHighs, lows: pivotLows } = detectPivots(2);
+  // W=2가 너무 엄격해 피벗 부족 시 W=1로 재시도
+  if (pivotHighs.length < 3 || pivotLows.length < 3) {
+    ({ highs: pivotHighs, lows: pivotLows } = detectPivots(1));
+  }
+  // 마지막 수단: 여전히 부족하면 raw 고/저가 사용
   if (pivotHighs.length < 2) recent.forEach(c => pivotHighs.push(c.high));
   if (pivotLows.length  < 2) recent.forEach(c => pivotLows.push(c.low));
 
-  // ── 4. Cluster function — groups nearby levels by tolerance ────────────
+  // ── 3. 클러스터 함수 — 인접 레벨 묶기 ────────────────────────────────
   function cluster(arr, pct) {
     arr.sort((a, b) => a - b);
     const groups = [];
@@ -934,57 +941,77 @@ function autoBox() {
       .sort((a, b) => b.count - a.count);
   }
 
-  // Tolerance scales slightly with price volatility (rough ATR proxy)
+  // ATR 기반 클러스터 허용 오차 (0.2% ~ 0.7%)
   const priceRange = Math.max(...recent.map(c => c.high)) - Math.min(...recent.map(c => c.low));
   const midPrice   = (Math.max(...recent.map(c => c.high)) + Math.min(...recent.map(c => c.low))) / 2;
   const atrPct     = priceRange / midPrice;
-  // tolerance = 0.3% baseline, up to 0.7% when range is wide, down to 0.2% when tight
   const tol = Math.min(0.007, Math.max(0.002, atrPct * 0.15));
 
   const resistances = cluster(pivotHighs, tol);
   const supports    = cluster(pivotLows,  tol);
 
   if (!resistances.length || !supports.length) {
-    addAlert('warn','박스권 자동감지 실패 — 수동으로 설정해주세요'); return;
+    addAlert('warn','박스권 자동감지 실패 — 수동으로 설정해주세요');
+    autoBoxCooldown = 3;
+    return;
   }
 
-  // ── 5. Pick levels that bracket the current price ──────────────────────
-  // Prefer the closest resistance above price and closest support below price.
-  // If price is outside all pivots (breakout), fall back to strongest cluster.
+  // ── 4. 현재가를 감싸는 레벨 선택 ─────────────────────────────────────
   const price = currentPrice || recent[recent.length - 1].close;
 
-  // Resistance candidates: all resistance clusters, closest-above first
   const resAbove = resistances.filter(r => r.avg >= price).sort((a, b) => a.avg - b.avg);
-  const resBelow = resistances.filter(r => r.avg <  price).sort((a, b) => b.avg - a.avg);
   const supBelow = supports.filter(s => s.avg <= price).sort((a, b) => b.avg - a.avg);
-  const supAbove = supports.filter(s => s.avg >  price).sort((a, b) => a.avg - b.avg);
 
-  let bestTop = (resAbove[0] || resBelow[0] || resistances[0]).avg;
-  let bestBot = (supBelow[0] || supAbove[0] || supports[0]).avg;
+  // 브레이크아웃/다운 — 잘못된 박스 생성 대신 명확하게 중단
+  if (resAbove.length === 0) {
+    addAlert('warn','자동감지: 상단 저항선 돌파 구간 — 수동으로 박스 설정 필요');
+    autoBoxCooldown = 5;
+    return;
+  }
+  if (supBelow.length === 0) {
+    addAlert('warn','자동감지: 하단 지지선 이탈 구간 — 수동으로 박스 설정 필요');
+    autoBoxCooldown = 5;
+    return;
+  }
 
-  // ── 6. Ensure top > bot ────────────────────────────────────────────────
-  if (bestTop <= bestBot) [bestTop, bestBot] = [bestBot, bestTop];
+  let bestTop = resAbove[0].avg;
+  let bestBot = supBelow[0].avg;
 
-  // ── 7. Box size validation (0.3% – 8%) ────────────────────────────────
+  // 저항/지지 역전 오류 방어 코드 (정상적으로는 발생 안 함)
+  if (bestTop <= bestBot) {
+    addAlert('warn','자동감지: 저항/지지 역전 오류 — 수동 설정 필요');
+    autoBoxCooldown = 3;
+    return;
+  }
+
+  // ── 5. 스캘핑 박스 크기 검증: 0.4% ~ 3% ──────────────────────────────
+  // 0.4% 미만: 노이즈에 휩쓸릴 만큼 좁음
+  // 3% 초과: 30배 레버리지 기준 스캘핑 범위 초과
   const boxPct = (bestTop - bestBot) / bestBot * 100;
-  if (boxPct < 0.3) {
-    addAlert('warn',`자동감지: 박스권이 너무 작음 (${boxPct.toFixed(2)}%) — 수동 조정 필요`); return;
+  if (boxPct < 0.4) {
+    addAlert('warn',`자동감지: 박스권이 너무 좁음 (${boxPct.toFixed(2)}%) — 수동 조정 필요`);
+    autoBoxCooldown = 3;
+    return;
   }
-  if (boxPct > 8) {
-    addAlert('warn',`자동감지: 박스권이 너무 큼 (${boxPct.toFixed(2)}%) — 수동 조정 필요`); return;
+  if (boxPct > 3) {
+    addAlert('warn',`자동감지: 박스권이 너무 넓음 (${boxPct.toFixed(2)}%) — 수동 조정 필요`);
+    autoBoxCooldown = 3;
+    return;
   }
 
-  // ── 8. Round to nearest $10, then re-validate size after rounding ──────
+  // ── 6. $10 단위 반올림 후 재검증 ─────────────────────────────────────
   const roundUnit = bestBot > 10000 ? 10 : bestBot > 1000 ? 1 : 0.1;
   bestTop = Math.round(bestTop / roundUnit) * roundUnit;
   bestBot = Math.round(bestBot / roundUnit) * roundUnit;
   if (bestTop <= bestBot) {
-    addAlert('warn','자동감지: 반올림 후 박스권 크기가 0이 됨 — 수동 조정 필요'); return;
+    addAlert('warn','자동감지: 반올림 후 박스권 크기 0 — 수동 조정 필요');
+    autoBoxCooldown = 3;
+    return;
   }
 
   document.getElementById('boxTop').value    = bestTop;
   document.getElementById('boxBottom').value = bestBot;
-  applyBox(false); // applyBox will add its own alert — don't add duplicate here
+  applyBox(false);
 }
 
 /* ════════════════════════════════════════
@@ -1274,8 +1301,13 @@ function handleKline(d) {
 
   // ── Auto-detect box when a candle closes and box is not yet set ────────
   // k.x (isFinal) is true only on confirmed candle close — not every tick
+  // autoBoxCooldown: 실패 시 N캔들 대기 후 재시도 (경고 알럿 스팸 방지)
   if (k.x && !flowState.boxSet && !flowState.noBox) {
-    autoBox(); // autoBox → applyBox already fires its own alert on success/failure
+    if (autoBoxCooldown > 0) {
+      autoBoxCooldown--;
+    } else {
+      autoBox();
+    }
   }
 }
 
