@@ -879,41 +879,12 @@ class MacroSnapshotManager:
 _macro_snapshot = MacroSnapshotManager()
 
 
-# 수동 분석 버튼 쿨다운: 15분
-MANUAL_COOLDOWN_SECS = 15 * 60
-# 수동 실행 시각만 별도 파일로 저장 (스케줄러 실행과 구분하기 위해)
-MANUAL_COOLDOWN_STATE_PATH = os.path.join(BASE_DIR, "data", "manual_cooldown.json")
-
-
-def _load_manual_cooldown_time() -> float:
-    """서버 재시작 후 수동 클릭 시각을 복원. 없으면 0.0 반환."""
-    try:
-        with open(MANUAL_COOLDOWN_STATE_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return float(data.get("last_manual_started_at", 0.0))
-    except Exception:
-        return 0.0
-
-
-def _save_manual_cooldown_time(ts: float) -> None:
-    """수동 클릭 시각을 파일에 저장."""
-    try:
-        os.makedirs(os.path.dirname(MANUAL_COOLDOWN_STATE_PATH), exist_ok=True)
-        with open(MANUAL_COOLDOWN_STATE_PATH, "w", encoding="utf-8") as f:
-            json.dump({"last_manual_started_at": ts}, f)
-    except Exception as exc:
-        import logging as _log
-        _log.getLogger(__name__).warning("manual cooldown 저장 실패 — %s", exc)
-
-
 class AnalysisManager:
     def __init__(self):
         self._lock = asyncio.Lock()
         self._job: dict | None = None
         self._task: asyncio.Task | None = None
         self._latest_result: dict | None = _load_latest_analysis()
-        # 마지막 수동 클릭 시각만 별도 파일에서 복원 (스케줄러 실행은 영향 없음)
-        self._last_manual_started_at: float = _load_manual_cooldown_time()
 
     async def stop(self):
         task = None
@@ -924,30 +895,10 @@ class AnalysisManager:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    def cooldown_remaining(self) -> float:
-        """수동 클릭 쿨다운 잔여 시간(초). 0 이면 분석 가능."""
-        elapsed = time.time() - self._last_manual_started_at
-        return max(0.0, MANUAL_COOLDOWN_SECS - elapsed)
-
     async def start_job(self, bypass_cooldown: bool = False) -> tuple[dict, bool]:
         async with self._lock:
             if self._job and self._job["status"] in {"pending", "running"}:
                 return self._serialize_job(self._job), False
-
-            # 쿨다운 체크 (스케줄러는 bypass)
-            if not bypass_cooldown:
-                remaining = max(0.0, MANUAL_COOLDOWN_SECS - (time.time() - self._last_manual_started_at))
-                if remaining > 0:
-                    raise HTTPException(
-                        status_code=429,
-                        detail={
-                            "reason": "cooldown",
-                            "cooldown_remaining_secs": int(remaining),
-                        },
-                    )
-                # 수동 클릭일 때만 타이머 갱신 (스케줄러 실행은 수동 쿨다운에 영향 없음)
-                self._last_manual_started_at = time.time()
-                _save_manual_cooldown_time(self._last_manual_started_at)
 
             started_at = _now_iso()
             job = {
@@ -975,7 +926,7 @@ class AnalysisManager:
         async with self._lock:
             response = {
                 "job": self._serialize_job(self._job),
-                "cooldown_remaining_secs": int(max(0.0, MANUAL_COOLDOWN_SECS - (time.time() - self._last_manual_started_at))),
+                "cooldown_remaining_secs": 0,
             }
             if (
                 self._job
@@ -1127,11 +1078,12 @@ import datetime as _dt
 SCHEDULE_STATE_PATH = os.path.join(BASE_DIR, "data", "schedule_state.json")
 
 class ScheduleManager:
-    """서버에서 주기적으로 분석을 실행하는 백그라운드 스케줄러."""
+    """서버에서 30분마다 분석을 실행하는 백그라운드 스케줄러."""
+
+    INTERVAL_MIN = 30  # 고정 30분
 
     def __init__(self):
         self._enabled: bool = False
-        self._interval_min: int = 30        # 기본 30분
         self._next_run_at: str | None = None
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
@@ -1143,8 +1095,7 @@ class ScheduleManager:
             if os.path.exists(SCHEDULE_STATE_PATH):
                 with open(SCHEDULE_STATE_PATH, "r", encoding="utf-8") as f:
                     saved = json.load(f)
-                self._enabled      = bool(saved.get("enabled", False))
-                self._interval_min = int(saved.get("interval_min", 30))
+                self._enabled = bool(saved.get("enabled", False))
         except Exception:
             pass
 
@@ -1152,21 +1103,20 @@ class ScheduleManager:
         try:
             os.makedirs(os.path.dirname(SCHEDULE_STATE_PATH), exist_ok=True)
             with open(SCHEDULE_STATE_PATH, "w", encoding="utf-8") as f:
-                json.dump({"enabled": self._enabled, "interval_min": self._interval_min}, f)
+                json.dump({"enabled": self._enabled, "interval_min": self.INTERVAL_MIN}, f)
         except Exception:
             pass
 
     def status(self) -> dict:
         return {
             "enabled":      self._enabled,
-            "interval_min": self._interval_min,
+            "interval_min": self.INTERVAL_MIN,
             "next_run_at":  self._next_run_at,
         }
 
-    async def set_schedule(self, enabled: bool, interval_min: int):
+    async def set_schedule(self, enabled: bool, interval_min: int = INTERVAL_MIN):
         async with self._lock:
-            self._enabled      = enabled
-            self._interval_min = max(5, interval_min)   # 최소 5분
+            self._enabled = enabled
             self._save_state()
             await self._restart_task()
 
@@ -1191,7 +1141,7 @@ class ScheduleManager:
 
     async def _loop(self):
         while True:
-            wait_sec = self._interval_min * 60
+            wait_sec = self.INTERVAL_MIN * 60
             next_dt  = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(seconds=wait_sec)
             self._next_run_at = next_dt.isoformat()
             try:
@@ -1334,14 +1284,13 @@ async def schedule_get():
 
 
 class ScheduleSetRequest(BaseModel):
-    enabled:      bool
-    interval_min: int = 60
+    enabled: bool
 
 
 @app.post("/api/schedule")
 async def schedule_set(body: ScheduleSetRequest):
-    """자동분석 스케줄 설정. enabled=true + interval_min(분) 으로 서버 측 타이머를 제어."""
-    await _schedule_manager.set_schedule(body.enabled, body.interval_min)
+    """자동분석 스케줄 설정. enabled=true/false 로 30분 타이머를 제어."""
+    await _schedule_manager.set_schedule(body.enabled)
     return _schedule_manager.status()
 
 
