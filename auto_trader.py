@@ -221,12 +221,16 @@ def _check_signal(trading_signal: dict) -> tuple[bool, str, str]:
 
 def _calc_atr(trade_levels: dict, tf_preference: list[str] | None = None) -> float:
     """
-    trade_levels 에 ATR 정보가 없을 경우 손절폭 fallback 사용.
-    trade_levels 예: {"entry": 95000, "stop_loss": 94000, "take_profit": 97000}
+    Claude 분석 결과의 trade_levels 에서 손절 거리(ATR 대용)를 계산.
+
+    parse_trade_levels() 반환 키:
+      "entry"  → 진입가
+      "stop"   → 손절가  (주의: "stop_loss" 아님)
+      "target" → 목표가
     """
-    # trade_levels 에서 직접 손절폭 계산
     entry = float(trade_levels.get("entry") or 0)
-    sl    = float(trade_levels.get("stop_loss") or 0)
+    # analyzer.parse_trade_levels 는 "stop" 키를 사용함 ("stop_loss" 아님)
+    sl = float(trade_levels.get("stop") or trade_levels.get("stop_loss") or 0)
     if entry and sl:
         return abs(entry - sl)
     return 0.0
