@@ -48,6 +48,19 @@ AUTO_TRADE_MAX_LEVERAGE   = int(os.getenv("AUTO_TRADE_MAX_LEVERAGE",   "5"))    
 AUTO_TRADE_COOLDOWN_MIN   = int(os.getenv("AUTO_TRADE_COOLDOWN_MIN",   "30"))   # 연속 거래 쿨다운(분)
 AUTO_TRADE_FLIP_GUARD     = os.getenv("AUTO_TRADE_FLIP_GUARD", "1") not in ("0", "false", "no")  # 즉시 반전 방지
 
+# ── 동적 포지션 사이징 ──────────────────────
+AUTO_TRADE_DYNAMIC_SIZING = os.getenv("AUTO_TRADE_DYNAMIC_SIZING", "1") not in ("0", "false", "no")
+AUTO_TRADE_RISK_MIN_PCT   = float(os.getenv("AUTO_TRADE_RISK_MIN_PCT", "0.02"))  # 확신도 최저 시 리스크 (2%)
+
+# ── Claude 권장 레버리지 ────────────────────
+AUTO_TRADE_CLAUDE_LEVERAGE = os.getenv("AUTO_TRADE_CLAUDE_LEVERAGE", "1") not in ("0", "false", "no")
+
+# ── 반전 매매 (신호 방향 전환 시 청산 후 재진입) ──
+AUTO_TRADE_REVERSAL_ENABLED     = os.getenv("AUTO_TRADE_REVERSAL_ENABLED", "1") not in ("0", "false", "no")
+AUTO_TRADE_REVERSAL_MIN_HOLD    = int(os.getenv("AUTO_TRADE_REVERSAL_MIN_HOLD",    "30"))  # 최소 보유 시간(분) — 휩소 방지
+AUTO_TRADE_REVERSAL_MIN_CONF    = int(os.getenv("AUTO_TRADE_REVERSAL_MIN_CONF",    "67"))  # 반전 최소 확신도 (진입보다 높게)
+AUTO_TRADE_REVERSAL_MAX_PER_DAY = int(os.getenv("AUTO_TRADE_REVERSAL_MAX_PER_DAY", "2"))   # 하루 최대 반전 횟수
+
 # 분석할 시간봉 목록
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
 

@@ -115,6 +115,12 @@ USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_kst} (KST)
 • 상방 돌파 트리거: $[숫자 또는 N/A]
 • 하방 이탈 트리거: $[숫자 또는 N/A]
 
+🤖 자동매매 파라미터
+• 진입가: $[숫자 또는 N/A]  ← 현재 관점에서 진입하기 좋은 가격
+• 손절가: $[숫자]            ← 관점이 틀렸을 때 청산할 가격 (필수)
+• 목표가: $[숫자 또는 N/A]  ← 1차 익절 목표
+• 권장 레버리지: [숫자]배    ← 현재 변동성·리스크를 고려한 최적 레버리지 (1~10 범위)
+
 📝 대응
 • 공격적: [지금 즉시 취할 구체적 행동 — 진입 방향·레벨·조건]
 • 보수적: [관망이 필요하다면 그 조건, 불필요한 관망은 쓰지 마세요]
@@ -125,8 +131,9 @@ USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_kst} (KST)
 
 중요:
 - [시장 레짐]은 반드시 위 6개 중 정확히 1개만 쓰고, 괄호 설명이나 복수 선택을 하지 마세요.
-- [관심 레벨]의 4개 항목은 각 줄마다 가격 숫자 또는 N/A만 적으세요. 이유, 조건, 괄호 설명을 붙이지 마세요.
+- [관심 레벨]의 4개 항목과 [자동매매 파라미터]의 4개 항목은 각 줄마다 숫자 또는 N/A만 적으세요. 이유·조건·괄호 설명 금지.
 - 2차 저항/지지 같은 추가 항목을 만들지 마세요.
+- [권장 레버리지]는 반드시 정수(예: 3배, 5배)로만 적고 범위·슬래시 표기 금지.
 """
 
 
@@ -465,6 +472,34 @@ def parse_signal(text: str) -> tuple[str, int]:
     return signal, confidence
 
 
+def parse_leverage(text: str) -> Optional[int]:
+    """
+    Claude 분석 텍스트에서 권장 레버리지를 파싱.
+    '권장 레버리지' 필드 우선, 없으면 자유 텍스트에서 탐색.
+    반환: 1~20 범위 정수 or None
+    """
+    # 구조화 필드 우선 (자동매매 파라미터 섹션)
+    m = re.search(r'권장\s*레버리지\s*[:：]\s*(\d+)\s*배', text)
+    if m:
+        val = int(m.group(1))
+        if 1 <= val <= 20:
+            return val
+
+    # 자유 텍스트 폴백 패턴들
+    patterns = [
+        r'레버리지\s*[:：]\s*(\d+)\s*배',
+        r'(\d+)\s*배\s*레버리지',
+        r'leverage\s*[:：]?\s*(\d+)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            val = int(m.group(1))
+            if 1 <= val <= 20:
+                return val
+    return None
+
+
 def parse_trade_levels(text: str) -> dict:
     """관심 레벨 파싱. 구 포맷(진입/손절/목표/손익비)도 폴백 지원."""
     def _price_from_line(label: str):
@@ -600,6 +635,7 @@ def analyze_with_claude(
     signal, confidence = parse_signal(raw_text)
     trade_levels = parse_trade_levels(raw_text)
     report_meta = parse_report_sections(raw_text)
+    claude_leverage = parse_leverage(raw_text)
 
     # Judge 결과 추출 (signal processing 에 활용)
     judge_result = (
@@ -625,6 +661,7 @@ def analyze_with_claude(
         "report_format_ok": report_meta["format_ok"],
         "report_missing_sections": report_meta["missing_sections"],
         "trading_signal": trading_signal_dict,
+        "claude_leverage": claude_leverage,
         "debate":       (
             pipeline.debate.to_payload() if pipeline is not None and pipeline.debate
             else (debate.to_payload() if debate is not None else None)

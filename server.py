@@ -420,6 +420,7 @@ def _build_payload(tf_data: dict, price: float, analysis: dict) -> dict:
         "report_missing_sections": analysis.get("report_missing_sections", []),
         # 구조화 트레이딩 시그널 (signal_processing.TradingSignal.to_dict())
         "trading_signal": analysis.get("trading_signal"),
+        "claude_leverage": analysis.get("claude_leverage"),
         # Bull/Bear 사전 토론 결과
         "debate": analysis.get("debate"),
         # 투자 심판 결론
