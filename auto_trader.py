@@ -394,15 +394,24 @@ def _calc_position(
     leverage  = _resolve_leverage(claude_leverage) # ← Claude 권장 레버리지
 
     # 가용 잔고 조회
+    # 드라이런이면 실패 시 가상 잔고(DRY_RUN_BALANCE) 사용
+    DRY_RUN_BALANCE = float(os.getenv("AUTO_TRADE_DRY_RUN_BALANCE", "10000"))
+    balance = 0.0
     try:
         balance = _trader.get_account_balance("USDT")
     except Exception:
+        pass
+    if balance <= 0:
         try:
             balance = _trader.get_account_balance("USDC")
         except Exception:
-            balance = 0.0
+            pass
     if balance <= 0:
-        raise ValueError("계좌 잔고를 조회할 수 없습니다 (balance=0)")
+        if _cfg_bool("AUTO_TRADE_DRY_RUN", True):
+            balance = DRY_RUN_BALANCE
+            logger.info("드라이런 가상 잔고 사용: $%.2f", balance)
+        else:
+            raise ValueError("계좌 잔고를 조회할 수 없습니다 (balance=0)")
 
     # 손절/익절 거리 계산
     sl_dist = atr * sl_mult if atr > 0 else entry_price * 0.01  # fallback: 1%

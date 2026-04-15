@@ -49,8 +49,9 @@ AUTO_TRADE_COOLDOWN_MIN   = int(os.getenv("AUTO_TRADE_COOLDOWN_MIN",   "30"))   
 AUTO_TRADE_FLIP_GUARD     = os.getenv("AUTO_TRADE_FLIP_GUARD", "1") not in ("0", "false", "no")  # 즉시 반전 방지
 
 # ── 동적 포지션 사이징 ──────────────────────
-AUTO_TRADE_DYNAMIC_SIZING = os.getenv("AUTO_TRADE_DYNAMIC_SIZING", "1") not in ("0", "false", "no")
-AUTO_TRADE_RISK_MIN_PCT   = float(os.getenv("AUTO_TRADE_RISK_MIN_PCT", "0.02"))  # 확신도 최저 시 리스크 (2%)
+AUTO_TRADE_DYNAMIC_SIZING  = os.getenv("AUTO_TRADE_DYNAMIC_SIZING", "1") not in ("0", "false", "no")
+AUTO_TRADE_RISK_MIN_PCT    = float(os.getenv("AUTO_TRADE_RISK_MIN_PCT", "0.02"))  # 확신도 최저 시 리스크 (2%)
+AUTO_TRADE_DRY_RUN_BALANCE = float(os.getenv("AUTO_TRADE_DRY_RUN_BALANCE", "10000"))  # 드라이런 가상 잔고 ($)
 
 # ── Claude 권장 레버리지 ────────────────────
 AUTO_TRADE_CLAUDE_LEVERAGE = os.getenv("AUTO_TRADE_CLAUDE_LEVERAGE", "1") not in ("0", "false", "no")
