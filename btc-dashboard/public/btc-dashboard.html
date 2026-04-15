@@ -1217,7 +1217,7 @@ function reconnectWS() {
 
 function connectWS() {
   const streams = `btcusdt@kline_${currentInterval}/btcusdt@miniTicker`;
-  const socket  = const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket  = new WebSocket(`${wsProto}//${location.host}/ws?streams=${streams}`);
   ws = socket;
 
