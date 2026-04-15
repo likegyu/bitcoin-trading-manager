@@ -328,16 +328,48 @@
 
       <!-- 2. Volume -->
       <div class="panel" style="min-width:172px;max-width:190px;">
-        <div class="panel-title">📊 거래량 분석</div>
-        <div class="info-row"><span class="il">현재 거래량</span><span class="iv" id="vCur">—</span></div>
+        <div class="panel-title">📊 거래량 + OI</div>
+        <div class="info-row"><span class="il">확정봉 거래량</span><span class="iv" id="vCur">—</span></div>
         <div class="info-row"><span class="il">평균(20봉)</span><span class="iv" id="vAvg">—</span></div>
         <div class="info-row"><span class="il">비율</span>       <span class="iv" id="vRat">—</span></div>
         <div class="vol-track"><div class="vol-fill" id="vBar" style="width:0%;background:var(--blue)"></div></div>
         <div class="vol-ends"><span>낮음</span><span>보통</span><span>높음</span></div>
         <div class="vol-status" id="vStatus">확인 중…</div>
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:7px;">
+          <div class="info-row"><span class="il">미결제약정</span><span class="iv" id="oiVal">—</span></div>
+          <div class="info-row"><span class="il">OI 변화</span>   <span class="iv" id="oiChange">—</span></div>
+          <div class="vol-status" id="oiStatus">OI 로딩 중…</div>
+        </div>
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:7px;">
+          <div class="il" style="font-size:10px;color:var(--t3);">진입 신호 강도</div>
+          <div style="display:flex;gap:4px;margin-top:5px;">
+            <div id="sc1" style="flex:1;height:6px;border-radius:3px;background:var(--border)"></div>
+            <div id="sc2" style="flex:1;height:6px;border-radius:3px;background:var(--border)"></div>
+            <div id="sc3" style="flex:1;height:6px;border-radius:3px;background:var(--border)"></div>
+          </div>
+          <div id="scLabel" style="font-size:10px;color:var(--t3);margin-top:4px;text-align:center;">대기 중</div>
+        </div>
       </div>
 
-      <!-- 3. Position -->
+      <!-- 3. Risk Settings -->
+      <div class="panel" style="min-width:160px;max-width:180px;">
+        <div class="panel-title">⚙️ 리스크 설정</div>
+        <div class="info-row"><span class="il">최대 레버리지</span>
+          <span class="iv" style="color:var(--yellow);font-weight:700">30배</span></div>
+        <div class="info-row"><span class="il">일일 손실 한도</span>
+          <span class="iv" style="color:var(--red);font-weight:700">-10%</span></div>
+        <div class="info-row"><span class="il">목표 보유 시간</span>
+          <span class="iv" style="color:var(--blue);font-weight:700">30분 이내</span></div>
+        <div class="info-row"><span class="il">주요 세션</span>
+          <span class="iv" style="color:var(--green)">아시아장</span></div>
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:7px;">
+          <div class="il" style="font-size:10px;color:var(--t3);">오늘 상태</div>
+          <div class="info-row" style="margin-top:4px;"><span class="il">손실 한도</span>
+            <span class="iv" id="riskStatusBadge" style="font-size:10px;color:var(--green)">✅ 정상</span></div>
+        </div>
+      </div>
+
+      <!-- 4. Position -->
       <div class="panel">
         <div class="panel-title">💼 포지션 (Binance Futures)</div>
         <div id="posCont" style="color:var(--t2);font-size:11px;padding:8px 0;text-align:center;">API 연결 후 포지션 확인 가능</div>
@@ -381,6 +413,20 @@ let positionPollTimer = null;
 let pollFailCount = 0;        // track consecutive API failures
 let serverTimeOffset = 0;    // ms: Date.now() + serverTimeOffset = Binance server time
 let lastPollTime  = null;     // for stale-data warning
+
+// OI (미결제약정) 추적
+let lastOI = null, prevOI = null;  // BTC 단위
+let oiPollTimer = null;
+
+// ── 전략 리스크 설정 ─────────────────────────────────────
+const STRATEGY = {
+  maxLeverage:    30,   // 최대 레버리지 (배)
+  dailyStopPct:  -10,   // 일일 손실 한도 (%)
+  targetHoldMin:  30,   // 목표 최대 보유 시간 (분)
+  warnHoldMin:    25,   // 청산 경고 시점 (분)
+};
+let positionEntryTime = null;   // 포지션 진입 시각 (ms)
+let dailyStopTriggered = false; // 일일 손실 한도 도달 여부
 
 // Flow state — separate from time so tick() doesn't clobber manual changes
 let flowState = {
@@ -434,9 +480,18 @@ function addAlert(type, text, force=false) {
 }
 
 /* ════════════════════════════════════════
+   HMAC / BINANCE API
+════════════════════════════════════════ */
+async function hmac(secret, msg) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const sig  = await crypto.subtle.sign('HMAC',key,enc.encode(msg));
+  return Array.from(new Uint8Array(sig)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+/* ════════════════════════════════════════
    BINANCE API  (Lightsail 프록시 버전)
    서명/인증은 서버(server.js)가 처리.
-   브라우저는 /proxy/... 로만 요청.
 ════════════════════════════════════════ */
 async function futuresReq(path, params={}) {
   const qs = new URLSearchParams(params).toString();
@@ -462,7 +517,6 @@ async function futuresReq(path, params={}) {
     return null;
   }
 }
-
 /* API 모달 함수 제거됨 — Lightsail 버전에서는 서버가 자동 연결 처리 */
 
 /* ════════════════════════════════════════
@@ -493,32 +547,89 @@ function updateDailyPnl(pct, usdt) {
   big.style.color = pct>0?'var(--green)':pct<0?'var(--red)':'var(--t2)';
   document.getElementById('dailyPnlUsd').textContent = (usdt>=0?'+':'')+usdt.toFixed(2)+' USDT';
 
-  // sidebar bar  (-20 → 0%, 0 → 40%, +30 → 100%)
-  const norm    = Math.max(0, Math.min(1, (pct+20)/50));
-  const zeroPos = 40; // % where zero sits
+  // 바 스케일: -10% → 0%, 0 → 33%, +20% → 100%
+  const norm    = Math.max(0, Math.min(1, (pct + 10) / 30));
+  const zeroPos = 33;
   const txt     = document.getElementById('dailyPnlText');
   const fill    = document.getElementById('dailyBarFill');
   if (pct >= 0) {
     fill.style.marginLeft = zeroPos+'%';
-    fill.style.width      = Math.min(norm*100 - zeroPos, 60)+'%';
+    fill.style.width      = Math.min(norm*100 - zeroPos, 67)+'%';
     fill.style.background = 'var(--green)';
   } else {
     const w = Math.max(zeroPos - norm*100, 0);
     fill.style.marginLeft = Math.max(norm*100, 0)+'%';
     fill.style.width      = w+'%';
-    fill.style.background = 'var(--red)';
+    fill.style.background = pct <= STRATEGY.dailyStopPct ? 'var(--red)' : 'var(--orange,#f0883e)';
   }
   txt.textContent = (pct>=0?'+':'')+pct.toFixed(2)+'%';
   txt.style.color = pct>0?'var(--green)':pct<0?'var(--red)':'var(--t2)';
 
-  if (pct >= 30)  addAlert('success','🎯 일간 +30% 달성! 오늘 매매를 종료하세요.');
-  if (pct <= -20) addAlert('danger', '🚨 일간 -20% 도달! 즉시 매매 종료하세요.');
+  // 리스크 상태 배지 업데이트
+  const rsb = document.getElementById('riskStatusBadge');
+  if (rsb) {
+    if (dailyStopTriggered || pct <= STRATEGY.dailyStopPct) {
+      rsb.textContent='🛑 한도 도달'; rsb.style.color='var(--red)';
+    } else if (pct <= -7) {
+      rsb.textContent='⚠️ 경고 구간'; rsb.style.color='var(--yellow)';
+    } else {
+      rsb.textContent='✅ 정상'; rsb.style.color='var(--green)';
+    }
+  }
+
+  // ── 리스크 임계치 알림 ──────────────────────────────────
+  if (pct >= 20 && !dailyStopTriggered) {
+    addAlert('success','🎯 일간 +20% 달성! 오늘 매매 마무리를 권장합니다.');
+  }
+  // 경고 단계: -7% (한도의 70%)
+  if (pct <= -7 && pct > STRATEGY.dailyStopPct) {
+    addAlert('warn', `⚠️ 일간 손실 ${pct.toFixed(1)}% — 한도(${STRATEGY.dailyStopPct}%) 근접. 포지션 규모를 줄이세요.`);
+  }
+  // 하드 스탑: -10%
+  if (pct <= STRATEGY.dailyStopPct && !dailyStopTriggered) {
+    dailyStopTriggered = true;
+    addAlert('danger', `🚨 일일 손실 한도 ${STRATEGY.dailyStopPct}% 도달! 오늘 매매를 즉시 종료하세요.`);
+    // 플로우 강제 중단 표시
+    const chip = document.getElementById('signalChip');
+    if (chip) { chip.className='signal-chip sc-stop'; chip.textContent='🛑 일일 손실 한도 — 매매 중단'; }
+  }
 }
 
 /* ════════════════════════════════════════
    POSITION POLL
 ════════════════════════════════════════ */
-function startPositionPoll() { fetchPosition(); positionPollTimer = setInterval(fetchPosition,5000); }
+function startPositionPoll() {
+  fetchPosition();
+  fetchOI();
+  positionPollTimer = setInterval(fetchPosition, 5000);
+  oiPollTimer = setInterval(fetchOI, 30000); // OI는 30초마다
+}
+
+async function fetchOI() {
+  const data = await futuresReq('/fapi/v1/openInterest', { symbol: 'BTCUSDT' });
+  if (!data || !data.openInterest) return;
+  prevOI = lastOI;
+  lastOI = parseFloat(data.openInterest);
+  updateOIDisplay();
+}
+
+function updateOIDisplay() {
+  if (lastOI === null) return;
+  const oiVal = document.getElementById('oiVal');
+  const oiChg = document.getElementById('oiChange');
+  const oiSt  = document.getElementById('oiStatus');
+  if (oiVal) oiVal.textContent = lastOI.toFixed(0) + ' BTC';
+  if (prevOI === null || !oiChg || !oiSt) return;
+  const chgPct = (lastOI - prevOI) / prevOI * 100;
+  const rising = chgPct > 0.05;
+  const falling = chgPct < -0.05;
+  const col = rising ? 'var(--green)' : falling ? 'var(--red)' : 'var(--t2)';
+  oiChg.textContent = (chgPct >= 0 ? '+' : '') + chgPct.toFixed(3) + '%';
+  oiChg.style.color = col;
+  if      (rising)  { oiSt.textContent = '📈 신규 포지션 진입 중'; oiSt.style.color = 'var(--green)'; }
+  else if (falling) { oiSt.textContent = '📉 포지션 청산 중';       oiSt.style.color = 'var(--red)'; }
+  else              { oiSt.textContent = '➡ OI 변화 미미';          oiSt.style.color = 'var(--t3)'; }
+}
 
 function updateApiStatusBadge(ok) {
   const badge = document.getElementById('apiStatusBadge');
@@ -574,7 +685,9 @@ async function fetchPosition() {
   }
 
   if (openPos.length > 0) {
+    if (!flowState.inPosition) positionEntryTime = Date.now(); // 진입 시각 기록
     flowState.inPosition = true;
+
     posCont.innerHTML = openPos.map(pos => {
       const side    = parseFloat(pos.positionAmt) > 0 ? 'LONG' : 'SHORT';
       const entry   = parseFloat(pos.entryPrice);
@@ -584,13 +697,30 @@ async function fetchPosition() {
       const lev     = parseFloat(pos.leverage);
       const pnlPct  = ((currentPrice - entry) / entry * 100) * (side==='LONG' ? 1 : -1) * lev;
       const slPrice = slOrders[side];
-      const slHtml  = slPrice
+
+      // 레버리지 경고
+      const levColor = lev > STRATEGY.maxLeverage ? 'var(--red)' : lev > 20 ? 'var(--yellow)' : 'var(--green)';
+      const levWarn  = lev > STRATEGY.maxLeverage
+        ? `<span style="font-size:9px;color:var(--red)">⚠️ 권장 초과(최대 ${STRATEGY.maxLeverage}배)</span>` : '';
+
+      // 보유 시간
+      const holdMs  = positionEntryTime ? Date.now() - positionEntryTime : 0;
+      const holdMin = Math.floor(holdMs / 60000);
+      const holdSec = Math.floor((holdMs % 60000) / 1000);
+      const holdColor = holdMin >= STRATEGY.warnHoldMin ? 'var(--red)' :
+                        holdMin >= 20 ? 'var(--yellow)' : 'var(--t2)';
+
+      const slHtml = slPrice
         ? `<div class="info-row"><span class="il">손절가</span><span class="iv" style="color:var(--orange)">
-            ${fmt(slPrice)} <span style="font-size:9px;color:var(--green)">✅ 설정됨</span></span></div>`
+            ${fmt(slPrice)} <span style="font-size:9px;color:var(--green)">✅</span></span></div>`
         : `<div class="info-row"><span class="il">손절가</span><span class="iv" style="color:var(--red)">
-            미설정 <span style="font-size:9px;">⚠️</span></span></div>`;
+            미설정 ⚠️</span></div>`;
+
       return `<div class="pos-card">
-        <span class="pos-side ${side==='LONG'?'ps-long':'ps-short'}">${side} ${lev}×</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span class="pos-side ${side==='LONG'?'ps-long':'ps-short'}">${side}</span>
+          <span style="font-size:11px;font-weight:700;color:${levColor}">${lev}× ${levWarn}</span>
+        </div>
         <div class="info-row"><span class="il">진입가</span><span class="iv">${fmt(entry)}</span></div>
         <div class="info-row"><span class="il">수량</span><span class="iv">${amt} BTC</span></div>
         <div class="info-row"><span class="il">청산가</span><span class="iv" style="color:var(--red)">${fmt(liq)}</span></div>
@@ -599,6 +729,11 @@ async function fetchPosition() {
           ${unr>=0?'+':''}${unr.toFixed(2)} USDT</span></div>
         <div class="info-row"><span class="il">수익률</span><span class="iv" style="color:${pnlPct>=0?'var(--green)':'var(--red)'}">
           ${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%</span></div>
+        <div class="info-row"><span class="il">보유시간</span>
+          <span class="iv" style="color:${holdColor};font-weight:600">
+            ${holdMin}분 ${String(holdSec).padStart(2,'0')}초
+            ${holdMin >= STRATEGY.warnHoldMin ? '⚡ 청산 검토' : ''}
+          </span></div>
       </div>`;
     }).join('');
 
@@ -882,54 +1017,133 @@ function checkSignal(top, bot) {
   if (!flowState.boxSet || flowState.inPosition) return;
 
   const t = kst();
-  // Signal only valid during Asia session (9:00~18:00)
   if (t.total < 9*60 || t.total >= 18*60) {
     const chip = document.getElementById('signalChip');
     chip.className = 'signal-chip sc-stop';
     chip.textContent = t.total >= 22*60+30 ? '🔚 매매 종료 시간' : '🕕 신규 진입 중단 시간대';
+    updateScoreBar(0, '');
     return;
   }
 
-  const thr    = (top-bot) * 0.012; // 1.2% of box range = "touch zone"
-  const ratTxt = document.getElementById('vRat')?.textContent || '1×';
-  const ratio  = parseFloat(ratTxt) || 1;
-  // Session-aware volume threshold:
-  //   Asia  09:00–18:00 → 0.9× (naturally low volume, don't penalise)
-  //   Europe 18:00–22:30 → 1.1×
-  //   US    22:30+       → 1.2× (strictest — plenty of liquidity expected)
-  let volThresh;
-  if      (t.total >= 22*60+30 || t.total < 9*60) volThresh = 1.2; // US / overnight
-  else if (t.total >= 18*60)                       volThresh = 1.1; // Europe
-  else                                             volThresh = 0.9; // Asia
-  const volOk = ratio >= volThresh;
-  const chip   = document.getElementById('signalChip');
-  let sig = '';
+  const thr = (top - bot) * 0.012; // 터치존: 박스 크기의 1.2%
 
-  if (currentPrice <= bot + thr)       sig = volOk ? 'long'  : 'touch-bot';
-  else if (currentPrice >= top - thr)  sig = volOk ? 'short' : 'touch-top';
+  // ── 1. 거래량 점수 (스캘핑 최적화) ───────────────────────────────────
+  const closed = candles.slice(0, -1);          // 확정 캔들만
+  const forming = candles[candles.length - 1];  // 현재 형성 중
+  if (closed.length < 5) return;
+  const lastC = closed[closed.length - 1];
+
+  // 20봉 평균 (확정 봉 기준)
+  const volSlice = closed.slice(-21).map(c => c.volume);
+  const volAvg   = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+
+  // 직전 확정 봉 비율
+  const lastClosedRatio = lastC.volume / volAvg;
+
+  // 형성 중 봉 예상 거래량 (경과 시간으로 환산)
+  const intervalMins = { '1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'4h':240 }[currentInterval] || 15;
+  const elapsed  = (Date.now() / 1000 - forming.time);            // 경과 초
+  const progress = Math.min(Math.max(elapsed / (intervalMins * 60), 0.05), 0.95);
+  const projectedRatio = (forming.volume / progress) / volAvg;   // 현재 속도로 끝까지 가면
+
+  // 거래량 모멘텀: 직전 3봉이 연속 증가 중인지
+  const last3vol  = closed.slice(-3).map(c => c.volume);
+  const volMomentum = last3vol.length === 3 &&
+                      last3vol[1] > last3vol[0] && last3vol[2] > last3vol[1];
+
+  // 판정: 1.3× 기준, 모멘텀 있으면 1.1×로 완화
+  const volThreshold = volMomentum ? 1.1 : 1.3;
+  const volOk = lastClosedRatio >= volThreshold || projectedRatio >= volThreshold;
+  const volScore = volOk ? 1 : 0;
+
+  // ── 2. 캔들 방향 점수 ─────────────────────────────────────────────────
+  // 롱 후보 → 마지막 캔들이 양봉(매수세), 숏 후보 → 음봉(매도세)이어야 함
+  const bullish = lastC.close > lastC.open;
+  const bearish = lastC.close < lastC.open;
+
+  // ── 3. OI 점수 ─────────────────────────────────────────────────────────
+  // OI 증가 = 신규 포지션 진입 = 방향 불문 강한 움직임
+  // OI 감소 = 청산(반대 방향 포지션이 빠짐) = 힘이 약함
+  const oiIncreasing = lastOI !== null && prevOI !== null && lastOI > prevOI * 1.001;
+
+  // ── 신호 판단 ──────────────────────────────────────────────────────────
+  const chip = document.getElementById('signalChip');
+  let sig = '', score = 0;
+
+  if (currentPrice <= bot + thr) {
+    // 롱 후보: 거래량(2점) + 양봉방향(1점) + OI증가(1점) → 최대 3점
+    score = volScore + (bullish ? 1 : 0) + (oiIncreasing ? 1 : 0);
+    if      (score >= 3) sig = 'long-strong';
+    else if (score >= 2) sig = 'long';
+    else if (score >= 1) sig = 'long-weak';
+    else                 sig = 'touch-bot';
+  } else if (currentPrice >= top - thr) {
+    // 숏 후보
+    score = volScore + (bearish ? 1 : 0) + (oiIncreasing ? 1 : 0);
+    if      (score >= 3) sig = 'short-strong';
+    else if (score >= 2) sig = 'short';
+    else if (score >= 1) sig = 'short-weak';
+    else                 sig = 'touch-top';
+  } else {
+    score = 0; sig = '';
+  }
+
+  updateScoreBar(score, sig);
 
   if (sig === lastSignal) return;
   lastSignal = sig;
 
   switch(sig) {
+    case 'long-strong':
+      chip.className='signal-chip sc-long'; chip.textContent='🟢 강한 롱 신호! (3/3)';
+      chip.classList.add('flash');
+      addAlert('success',`🟢🟢 강한 롱 신호 — 거래량+양봉+OI증가 @ ${fmt(currentPrice)}`);
+      renderFlow('signal-long'); break;
     case 'long':
-      chip.className='signal-chip sc-long'; chip.textContent='🟢 롱 진입 신호!';
+      chip.className='signal-chip sc-long'; chip.textContent='🟢 롱 신호 (2/3)';
       chip.classList.add('flash');
-      addAlert('success',`🟢 롱 신호 — 하단터치+거래량확인 @ ${fmt(currentPrice)}`);
-      renderFlow('signal-long');
-      break;
+      addAlert('success',`🟢 롱 신호 (2/3 조건충족) @ ${fmt(currentPrice)}`);
+      renderFlow('signal-long'); break;
+    case 'long-weak':
+      chip.className='signal-chip sc-touch'; chip.textContent='🔵 롱 후보 (1/3 — 추가확인)'; break;
+    case 'short-strong':
+      chip.className='signal-chip sc-short'; chip.textContent='🔴 강한 숏 신호! (3/3)';
+      chip.classList.add('flash');
+      addAlert('warn',`🔴🔴 강한 숏 신호 — 거래량+음봉+OI증가 @ ${fmt(currentPrice)}`);
+      renderFlow('signal-short'); break;
     case 'short':
-      chip.className='signal-chip sc-short'; chip.textContent='🔴 숏 진입 신호!';
+      chip.className='signal-chip sc-short'; chip.textContent='🔴 숏 신호 (2/3)';
       chip.classList.add('flash');
-      addAlert('warn',`🔴 숏 신호 — 상단터치+거래량확인 @ ${fmt(currentPrice)}`);
-      renderFlow('signal-short');
-      break;
+      addAlert('warn',`🔴 숏 신호 (2/3 조건충족) @ ${fmt(currentPrice)}`);
+      renderFlow('signal-short'); break;
+    case 'short-weak':
+      chip.className='signal-chip sc-touch'; chip.textContent='🔵 숏 후보 (1/3 — 추가확인)'; break;
     case 'touch-bot':
-      chip.className='signal-chip sc-touch'; chip.textContent='🔵 하단 터치 (거래량 대기)'; break;
+      chip.className='signal-chip sc-touch'; chip.textContent='🔵 하단 터치 (조건 대기)'; break;
     case 'touch-top':
-      chip.className='signal-chip sc-touch'; chip.textContent='🔵 상단 터치 (거래량 대기)'; break;
+      chip.className='signal-chip sc-touch'; chip.textContent='🔵 상단 터치 (조건 대기)'; break;
     default:
-      chip.className='signal-chip sc-wait';  chip.textContent='⏸ 대기 중';
+      chip.className='signal-chip sc-wait'; chip.textContent='⏸ 대기 중';
+  }
+}
+
+// 신호 강도 바 업데이트 (0~3점)
+function updateScoreBar(score, sig) {
+  const isLong  = sig.startsWith('long');
+  const isShort = sig.startsWith('short');
+  const color   = isLong ? 'var(--green)' : isShort ? 'var(--red)' : 'var(--blue)';
+  const labels  = ['거래량(2×)', '캔들방향', 'OI증가'];
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById(`sc${i}`);
+    if (el) el.style.background = i <= score ? color : 'var(--border)';
+  }
+  const lbl = document.getElementById('scLabel');
+  if (lbl) {
+    if      (score === 0) lbl.textContent = '조건 없음';
+    else if (score === 1) lbl.textContent = `약한 신호 (1/3)`;
+    else if (score === 2) lbl.textContent = `신호 (2/3)`;
+    else                  lbl.textContent = `강한 신호 (3/3) ✅`;
+    lbl.style.color = score >= 2 ? color : 'var(--t3)';
   }
 }
 
@@ -937,33 +1151,55 @@ function checkSignal(top, bot) {
    VOLUME
 ════════════════════════════════════════ */
 function updateVolume() {
-  if (!candles.length) return;
-  const cur   = candles[candles.length-1].volume;
-  const slice = volumes.slice(-21, -1); // exclude current (forming) candle from avg
-  if (!slice.length) return;
-  const avg   = slice.reduce((a,b)=>a+b,0)/slice.length;
-  const ratio = cur/avg;
+  if (candles.length < 2) return;
 
-  document.getElementById('vCur').textContent = fmtV(cur);
+  // 확정 봉 기준 평균 (형성 중 봉 제외)
+  const closed  = candles.slice(0, -1);
+  const forming = candles[candles.length - 1];
+  const slice   = closed.slice(-21).map(c => c.volume);
+  if (!slice.length) return;
+  const avg   = slice.reduce((a, b) => a + b, 0) / slice.length;
+  const lastC = closed[closed.length - 1];
+  const ratio = lastC.volume / avg;  // 직전 확정 봉 기준
+
+  // 형성 중 봉 예상 비율
+  const intervalMins = { '1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'4h':240 }[currentInterval] || 15;
+  const elapsed  = (Date.now() / 1000 - forming.time);
+  const progress = Math.min(Math.max(elapsed / (intervalMins * 60), 0.05), 0.95);
+  const projRatio = (forming.volume / progress) / avg;
+
+  // 거래량 모멘텀
+  const last3 = closed.slice(-3).map(c => c.volume);
+  const momentum = last3.length === 3 && last3[1] > last3[0] && last3[2] > last3[1];
+
+  document.getElementById('vCur').textContent = fmtV(lastC.volume) + (momentum ? ' 📈' : '');
   document.getElementById('vAvg').textContent = fmtV(avg);
-  document.getElementById('vRat').textContent = ratio.toFixed(2)+'×';
+  document.getElementById('vRat').textContent = ratio.toFixed(2) + '×';
 
   const bar = document.getElementById('vBar');
-  bar.style.width = Math.min(ratio*45, 100)+'%';
+  bar.style.width = Math.min(ratio * 55, 100) + '%';
 
-  // Determine session for threshold hint
-  const _t = kst();
-  let sessionLabel = '', thresh;
-  if      (_t.total >= 22*60+30 || _t.total < 9*60) { sessionLabel='미국장'; thresh=1.2; }
-  else if (_t.total >= 18*60)                        { sessionLabel='유럽장'; thresh=1.1; }
-  else                                               { sessionLabel='아시아장'; thresh=0.9; }
-
+  // 스캘핑 기준: 1.3× (모멘텀 있으면 1.1×)
+  const thresh = momentum ? 1.1 : 1.3;
+  const projOk = projRatio >= thresh;
   let col, txt;
-  if      (ratio > 2)       { col='var(--red)';    txt='🔥 매우 높음 (진입 주목)'; }
-  else if (ratio > 1.5)     { col='var(--yellow)'; txt='📈 높음'; }
-  else if (ratio >= thresh) { col='var(--green)';  txt=`✅ ${sessionLabel} 기준 충족 (${thresh}×)`; }
-  else if (ratio > 0.7)     { col='var(--blue)';   txt=`🔵 ${sessionLabel} 기준 미달 (필요: ${thresh}×)`; }
-  else                      { col='var(--t3)';     txt='💤 낮음 — 진입 주의'; }
+
+  if (ratio >= 2.0) {
+    col = 'var(--red)';
+    txt = '🔥 과열 — 돌파 가능성 주의';
+  } else if (ratio >= thresh) {
+    col = 'var(--green)';
+    txt = `✅ 진입 기준 충족 (${ratio.toFixed(2)}× ≥ ${thresh}×)`;
+  } else if (projOk) {
+    col = 'var(--yellow)';
+    txt = `📊 예상 ${projRatio.toFixed(2)}× — 봉 완성 시 기준 충족 가능`;
+  } else if (momentum) {
+    col = 'var(--blue)';
+    txt = `📈 모멘텀 증가 중 (아직 ${ratio.toFixed(2)}×)`;
+  } else {
+    col = 'var(--t3)';
+    txt = `💤 낮음 (${ratio.toFixed(2)}×) — 기준 미달`;
+  }
   bar.style.background = col;
   const vs = document.getElementById('vStatus');
   vs.textContent = txt; vs.style.color = col;
@@ -981,8 +1217,7 @@ function reconnectWS() {
 
 function connectWS() {
   const streams = `btcusdt@kline_${currentInterval}/btcusdt@miniTicker`;
-  // Lightsail 버전: 서버의 WebSocket 릴레이(/ws)를 통해 연결
-  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket  = const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket  = new WebSocket(`${wsProto}//${location.host}/ws?streams=${streams}`);
   ws = socket;
 
@@ -1139,6 +1374,25 @@ function tick() {
     if (t.h===22 && t.m===30) addAlert('danger','🚨 22:30 — 전체 포지션 정리! 미국장 개장 전 청산.');
   }
 
+// ── 포지션 보유 시간 경고 ──────────────────────────────
+  if (positionEntryTime && flowState.inPosition) {
+    const holdMin = (Date.now() - positionEntryTime) / 60000;
+    if (holdMin >= STRATEGY.targetHoldMin && Math.floor(holdMin) % 5 === 0 && Math.floor((Date.now()/1000)) % 60 === 0) {
+      addAlert('danger', `⏰ 포지션 보유 ${Math.floor(holdMin)}분 경과 — 목표 시간(${STRATEGY.targetHoldMin}분) 초과! 즉시 청산을 검토하세요.`);
+    } else if (holdMin >= STRATEGY.warnHoldMin && holdMin < STRATEGY.targetHoldMin && Math.floor(holdMin) !== Math.floor(holdMin - 1/60)) {
+      addAlert('warn', `⏱ 포지션 보유 ${Math.floor(holdMin)}분 — ${STRATEGY.targetHoldMin}분 한도 임박. 청산 준비하세요.`);
+    }
+  }
+
+  // 일일 손실 한도 도달 시 신호 차단
+  if (dailyStopTriggered) {
+    const chip = document.getElementById('signalChip');
+    if (chip && !chip.textContent.includes('손실 한도')) {
+      chip.className='signal-chip sc-stop'; chip.textContent='🛑 일일 손실 한도 — 매매 중단';
+    }
+  }
+
+
   renderFlow(); // re-render every second but respects flowState
 }
 
@@ -1163,7 +1417,7 @@ async function init() {
   setInterval(tick, 1000);
   tick();
 
-  // Auto-connect (서버 프록시를 통해 — 서버가 서명/인증 처리)
+  // Auto-connect (서버 프록시를 통해)
   const acc = await futuresReq('/fapi/v2/account');
   if (acc && acc.totalWalletBalance !== undefined) {
     IS_CONNECTED   = true;
