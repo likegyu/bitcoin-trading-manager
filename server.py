@@ -880,7 +880,7 @@ _macro_snapshot = MacroSnapshotManager()
 
 
 # 수동 분석 버튼 쿨다운: 10분
-MANUAL_COOLDOWN_SECS = 15 * 60
+MANUAL_COOLDOWN_SECS = 60 * 60
 MANUAL_COOLDOWN_STATE_PATH = os.path.join(BASE_DIR, "data", "manual_cooldown.json")
 
 

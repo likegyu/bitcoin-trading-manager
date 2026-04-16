@@ -1711,7 +1711,7 @@ function finishAnalysisRun({ startCooldown = false } = {}) {
   state.analysisStep = 0;
   state.analysisPhase = null;
   state.analysisPhaseDetail = null;
-  if (startCooldown) applyCooldown(15 * 60);
+  if (startCooldown) applyCooldown(60 * 60);
   setAnalyzeBtn(true);
   updateAnalysisStatus();
 }
@@ -1803,7 +1803,7 @@ async function runAnalysis() {
   if (remaining > 0) {
     const m = Math.floor(remaining / 60000);
     const s = Math.ceil((remaining % 60000) / 1000);
-    showError(`마지막 분석으로부터 15분이 지나야 수동 분석을 실행할 수 있습니다. (${m}분 ${s}초 남음)`);
+    showError(`마지막 분석으로부터 1시간이 지나야 수동 분석을 실행할 수 있습니다. (${m}분 ${s}초 남음)`);
     return;
   }
   setAnalysisRunning({ step: 0 });
@@ -1816,7 +1816,7 @@ async function runAnalysis() {
       finishAnalysisRun();
       applyCooldown(secs);
       const m = Math.floor(secs / 60), s = secs % 60;
-      showError(`15분 쿨다운 중입니다. ${m}분 ${s}초 후에 다시 시도하세요.`);
+      showError(`1시간 쿨다운 중입니다. ${m}분 ${s}초 후에 다시 시도하세요.`);
       return;
     }
     if (!res.ok) {
