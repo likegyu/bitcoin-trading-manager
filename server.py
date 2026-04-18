@@ -1334,6 +1334,14 @@ async def account_stream():
     )
 
 
+@app.get("/api/connections")
+async def connections():
+    """현재 market-stream 에 연결된 SSE 클라이언트 수 반환."""
+    async with _market_stream._lock:
+        count = len(_market_stream._listeners)
+    return {"count": count}
+
+
 @app.get("/api/schedule")
 async def schedule_get():
     """현재 자동분석 스케줄 상태 반환."""

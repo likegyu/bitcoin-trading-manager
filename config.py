@@ -21,7 +21,7 @@ BINANCE_BASE_URL    = "https://api.binance.com"
 BINANCE_FUTURES_URL = "https://fapi.binance.com"
 BINANCE_API_KEY     = os.getenv("BINANCE_API_KEY", "")
 BINANCE_SECRET_KEY  = os.getenv("BINANCE_SECRET_KEY", "")
-DEFAULT_SYMBOL      = os.getenv("DEFAULT_SYMBOL", "BTCUSDC").upper()
+DEFAULT_SYMBOL      = os.getenv("DEFAULT_SYMBOL", "BTCUSDT").upper()
 
 
 def symbol_to_pair(symbol: str) -> str:

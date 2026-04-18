@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>₿ BTC Signal Analyzer</title>
+<title>RE:제로부터 시작하는 5000불 챌린지</title>
 <!-- ECharts for multi-pane trading chart rendering -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -169,7 +169,7 @@ body {
 }
 
 /* ══ 메인 그리드 (차트 | 패널) ════════════════ */
-.main-grid { display: grid; grid-template-columns: 69fr 31fr; gap: 16px; align-items: start; }
+.main-grid { display: grid; grid-template-columns: 69fr 31fr; gap: 16px; align-items: stretch; }
 
 /* ══ 차트 영역 ════════════════════════════════ */
 .chart-area {
@@ -186,13 +186,6 @@ body {
   border-radius: 8px; cursor: pointer; transition: all .15s;
 }
 .tab-btn.active { background: #FFFFFF; color: #C2410C; }
-.arrow-toggle-btn {
-  flex: none; padding: 5px 8px; font-size: 14px;
-  background: transparent; border: none; border-radius: 8px;
-  cursor: pointer; transition: all .15s; opacity: 0.45;
-  margin-left: auto;
-}
-.arrow-toggle-btn.active { background: #FFFFFF; opacity: 1; }
 .chart-container {
   padding: 8px 8px 6px;
   background:
@@ -688,7 +681,6 @@ body {
   .sig-badge { flex: 1 1 100%; }
   .metric-card { flex: 1 1 calc(33.333% - 7px); min-width: 170px; }
   .macro-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .main-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {
@@ -748,10 +740,6 @@ body {
   .macro-row { grid-template-columns: 1fr; }
   .chart-container { padding: 2px 1px 0; }
 
-  /* ── 봇 위젯 통계 그리드 2열 ── */
-  #bot-status-card .panel-card-body > div[style*="grid-template-columns:repeat(3"] {
-    grid-template-columns: repeat(2, 1fr);
-  }
   /* ── 라이브 포지션 카드 폰트 축소 ── */
   .live-pos-value { font-size: 14px; }
   .live-pos-label { font-size: 9px; }
@@ -786,9 +774,6 @@ body {
 }
 
 /* ══ 하단 탭 섹션 ════════════════════════ */
-.bottom-section {
-  margin-top: 22px; background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px; overflow: hidden;
-}
 .bottom-tab-bar {
   display: flex; align-items: stretch; border-bottom: 1px solid #E8DDD4; background: #F5F0EB; padding: 0 8px;
 }
@@ -805,7 +790,13 @@ body {
   align-self: center;
 }
 .bottom-tab-refresh:hover { color: #EA580C; transform: rotate(180deg); }
-.bottom-tab-content { padding: 16px; }
+.bottom-tab-content {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+#bottom-tab-history { padding: 0; }
+#bottom-tab-performance { padding: 16px; }
 
 /* ══ 라이브 포지션 카드 ══════════════════ */
 .live-pos-card {
@@ -854,30 +845,57 @@ body {
 }
 
 /* ══ 히스토리 테이블 ════════════════════ */
-.history-empty { color: #A8978A; font-size: 13px; text-align: center; padding: 28px 0; }
-.history-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.history-table th {
-  text-align: left; padding: 7px 10px; color: #A8978A; font-weight: 700;
-  border-bottom: 1px solid #E8DDD4; white-space: nowrap; font-size: 10px;
-  letter-spacing: .05em; text-transform: uppercase;
+.history-empty { color: #A8978A; font-size: 13px; text-align: center; padding: 40px 0; }
+
+/* 히스토리 카드 리스트 */
+.hist-list { display: flex; flex-direction: column; }
+.hist-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px; row-gap: 2px;
+  align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px solid #F5F0EB;
 }
-.history-table td { padding: 8px 10px; border-bottom: 1px solid #F5F0EB; vertical-align: middle; }
-.history-table tr:last-child td { border-bottom: none; }
-.history-table tbody tr { cursor: pointer; transition: background .12s; }
-.history-table tr:hover td { background: #FAF8F5; }
-.history-table tr.hist-selected td { background: #FFF7ED !important; box-shadow: inset 3px 0 0 #F97316; }
-.history-table tr.hist-selected:hover td { background: #FFEDD5 !important; }
+.hist-item:last-child { border-bottom: none; }
+
+/* 신호 배지 — 그리드 row 1, col 1 */
 .hist-signal {
   display: inline-flex; align-items: center; gap: 3px; font-weight: 700;
-  font-size: 11px; padding: 3px 7px; border-radius: 5px; white-space: nowrap;
+  font-size: 11px; padding: 3px 8px; border-radius: 5px; white-space: nowrap;
+  grid-row: 1; grid-column: 1;
 }
 .hist-signal.buy  { background: #DCFCE7; color: #16A34A; }
 .hist-signal.sell { background: #FEE2E2; color: #DC2626; }
 .hist-signal.hold { background: #FEF3C7; color: #D97706; }
-.hist-conf  { color: #78716C; font-size: 11px; }
-.hist-price { color: #1C1917; font-weight: 600; }
-.hist-regime { font-size: 11px; color: #57534E; }
-.hist-summary { color: #57534E; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 확신도 — row 2, col 1 */
+.hist-conf {
+  font-size: 10px; font-weight: 600; color: #A8978A;
+  grid-row: 2; grid-column: 1;
+  padding-left: 2px;
+}
+
+/* 가격 — row 1, col 2 */
+.hist-price {
+  font-size: 12px; font-weight: 700; color: #1C1917;
+  grid-row: 1; grid-column: 2;
+}
+
+/* 레짐 — row 2, col 2 */
+.hist-regime {
+  font-size: 10px; color: #78716C;
+  grid-row: 2; grid-column: 2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 시간 — row 1-2, col 3 */
+.hist-time {
+  font-size: 10px; color: #A8978A; white-space: nowrap;
+  grid-row: 1 / 3; grid-column: 3;
+  text-align: right; align-self: center;
+}
 
 /* ══ 성과 대시보드 ═════════════════════ */
 .perf-summary-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 16px; }
@@ -898,16 +916,214 @@ body {
   .hist-summary { display: none; }
   .bottom-tab-btn { padding: 10px 12px; font-size: 12px; }
 }
+
+/* ══ 히어로 섹션 ═══════════════════════════════ */
+.hero-section {
+  background: linear-gradient(135deg, #1C0800 0%, #0A0A0F 55%, #000D1A 100%);
+  border-radius: 16px;
+  padding: 52px 32px 44px;
+  text-align: center;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(234,88,12,0.25);
+}
+.hero-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    -55deg,
+    transparent,
+    transparent 60px,
+    rgba(234,88,12,0.04) 60px,
+    rgba(234,88,12,0.04) 61px
+  );
+  pointer-events: none;
+}
+.hero-badge {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: rgba(255,215,0,0.75);
+  border: 1px solid rgba(255,215,0,0.25);
+  padding: 4px 18px;
+  border-radius: 2px;
+  margin-bottom: 18px;
+}
+.hero-title-re {
+  display: block;
+  font-size: clamp(2rem, 6vw, 4.5rem);
+  font-weight: 800;
+  color: #EA580C;
+  text-shadow: 0 0 28px rgba(234,88,12,0.55);
+  line-height: 1;
+  position: relative; z-index: 1;
+}
+.hero-title-sub {
+  display: block;
+  font-size: clamp(1rem, 2.5vw, 1.7rem);
+  font-weight: 700;
+  color: rgba(255,255,255,0.8);
+  margin-top: 4px;
+  position: relative; z-index: 1;
+}
+.hero-title-amount {
+  display: block;
+  font-size: clamp(2.5rem, 8vw, 6.5rem);
+  font-weight: 800;
+  background: linear-gradient(135deg, #ffd700 0%, #ff9a00 50%, #ffd700 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  background-size: 200% auto;
+  animation: hero-shimmer 3s linear infinite;
+  line-height: 1.15;
+  position: relative; z-index: 1;
+}
+@keyframes hero-shimmer {
+  0%   { background-position: 0% center; }
+  100% { background-position: 200% center; }
+}
+.hero-divider {
+  width: clamp(140px, 28vw, 280px);
+  height: 1px;
+  margin: 18px auto;
+  background: linear-gradient(90deg, transparent, rgba(234,88,12,0.55), rgba(255,215,0,0.55), rgba(234,88,12,0.55), transparent);
+  position: relative; z-index: 1;
+}
+.hero-start-label {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: rgba(255,255,255,0.38);
+  text-transform: uppercase;
+  position: relative; z-index: 1;
+}
+.hero-start-date {
+  font-size: clamp(0.95rem, 2.2vw, 1.25rem);
+  font-weight: 700;
+  color: rgba(255,215,0,0.88);
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+  position: relative; z-index: 1;
+}
+.hero-countdown {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  position: relative; z-index: 1;
+  align-items: center;
+}
+.hero-cd-unit {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(234,88,12,0.28);
+  border-radius: 8px;
+  padding: 10px 14px;
+  min-width: 68px;
+  text-align: center;
+}
+.hero-cd-num {
+  display: block;
+  font-size: clamp(1.5rem, 4vw, 2.4rem);
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.hero-cd-lbl {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,0.38);
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+.hero-cd-colon {
+  font-size: clamp(1.3rem, 3vw, 1.9rem);
+  font-weight: 800;
+  color: #EA580C;
+  align-self: center;
+  margin-bottom: 10px;
+  animation: hcd-blink 1s step-start infinite;
+}
+@keyframes hcd-blink { 50% { opacity: 0; } }
+.hero-started {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  margin-top: 20px;
+  position: relative; z-index: 1;
+}
+.hero-elapsed-label {
+  font-size: clamp(0.7rem, 1.5vw, 0.85rem);
+  font-weight: 600;
+  color: #A8978A;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hero-elapsed-value {
+  font-size: clamp(2.5rem, 7vw, 4.5rem);
+  font-weight: 800;
+  color: #EA580C;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  text-shadow: 0 0 32px rgba(234, 88, 12, 0.4);
+}
+.hero-elapsed-sub {
+  font-size: clamp(0.75rem, 1.8vw, 1rem);
+  font-weight: 500;
+  color: #78716C;
+}
+
+/* ══ 차트 컬럼 (차트 + 하단 위젯) ════════════ */
+.chart-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+.bottom-section {
+  background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px;
+  overflow: hidden;
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+@media (max-width: 1200px) {
+  .main-grid { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
 <div class="page">
 
+  <!-- 히어로 섹션 -->
+  <div class="hero-section">
+    <div class="hero-badge">RE : ZERO CHALLENGE</div>
+    <h1 style="margin:0;line-height:1.1;position:relative;z-index:1;">
+      <span class="hero-title-re">RE:</span>
+      <span class="hero-title-sub">제로부터 시작하는</span>
+      <span class="hero-title-amount">$5,000</span>
+      <span class="hero-title-sub" style="font-size:clamp(0.85rem,2vw,1.2rem);opacity:0.65;">챌린지</span>
+    </h1>
+    <div class="hero-divider"></div>
+    <div class="hero-start-label">챌린지 시작일</div>
+    <div class="hero-start-date">2026년 4월 19일 (일) 오전 10:00</div>
+    <div class="hero-countdown" id="hero-countdown">
+      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-days">--</span><span class="hero-cd-lbl">일</span></div>
+      <div class="hero-cd-colon">:</div>
+      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-hours">--</span><span class="hero-cd-lbl">시간</span></div>
+      <div class="hero-cd-colon">:</div>
+      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-mins">--</span><span class="hero-cd-lbl">분</span></div>
+      <div class="hero-cd-colon">:</div>
+      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-secs">--</span><span class="hero-cd-lbl">초</span></div>
+    </div>
+    <div id="hero-started" class="hero-started" style="display:none;">챌린지가 시작되었습니다!</div>
+  </div>
+
   <!-- 셋업 모달 -->
   <div id="setup-overlay" role="dialog" aria-modal="true" aria-labelledby="setup-title">
     <div class="setup-card">
       <div class="setup-header">
-        <span style="font-size:26px;">🔑</span>
         <div id="setup-title" class="setup-title">API 키 설정</div>
       </div>
       <div class="setup-desc">
@@ -1017,8 +1233,8 @@ body {
   <!-- 헤더 -->
   <div class="header">
     <div>
-      <span id="header-base" class="header-title">₿ BTC</span>
-      <span id="header-quote" class="header-pair">/ USDC</span>
+      <span id="header-base" class="header-title">BTC</span>
+      <span id="header-quote" class="header-pair">/ USDT</span>
     </div>
     <div id="header-price" class="header-price"></div>
     <div class="header-meta">
@@ -1030,7 +1246,11 @@ body {
         <span id="analysis-status-dot" class="status-dot"></span>
         <span id="analysis-status-text">분석 대기</span>
       </div>
-      <button id="notif-btn" class="notif-btn" onclick="toggleNotifications()" title="브라우저 알림">🔔</button>
+      <div id="connections-chip" class="status-chip" title="현재 접속 중인 사용자 수">
+        <span class="status-dot" style="background:#A8978A;"></span>
+        <span id="connections-text">— 명</span>
+      </div>
+      <button id="notif-btn" class="notif-btn" onclick="toggleNotifications()" title="브라우저 알림">알림</button>
     </div>
     <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
   </div>
@@ -1069,7 +1289,7 @@ body {
   </div>
 
   <!-- 거시경제 레짐 카드 행 -->
-  <div class="macro-section-label">🌐 &nbsp;거시경제 레짐</div>
+  <div class="macro-section-label">거시경제 레짐</div>
   <div class="macro-row" id="macro-row">
     <div class="macro-card" id="macro-DFII10">
       <div class="card-label">10Y 실질금리</div>
@@ -1108,7 +1328,8 @@ body {
   <!-- 메인 그리드 -->
   <div class="main-grid">
 
-    <!-- 왼쪽: 차트 -->
+    <!-- 왼쪽: 차트 + 하단 탭 -->
+    <div class="chart-col">
     <div class="chart-area">
       <div class="tab-bar" id="tab-bar">
         <button class="tab-btn active" data-tf="5m"  onclick="switchTab('5m')">5m</button>
@@ -1116,7 +1337,6 @@ body {
         <button class="tab-btn"        data-tf="1h"  onclick="switchTab('1h')">1h</button>
         <button class="tab-btn"        data-tf="4h"  onclick="switchTab('4h')">4h</button>
         <button class="tab-btn"        data-tf="1d"  onclick="switchTab('1d')">1d</button>
-        <button id="arrow-toggle-btn" class="arrow-toggle-btn" onclick="toggleHistoryArrows()" title="분석 신호 화살표 표시/숨김">📍</button>
       </div>
       <div class="chart-container">
         <div id="chart-plot">
@@ -1125,68 +1345,36 @@ body {
       </div>
     </div>
 
-    <!-- 오른쪽: 패널 -->
-    <div class="panel">
-
-      <!-- 🤖 봇 상태 위젯 (항상 표시) -->
-      <div class="panel-card" id="bot-status-card">
-        <div class="panel-card-header" style="justify-content:space-between;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div class="panel-card-dot" id="bot-status-dot" style="background:#A8978A;"></div>
-            <span class="panel-card-label">🤖 드라이런 봇 상태</span>
-          </div>
-          <span id="bot-status-mode" style="font-size:10px;font-weight:700;color:#A8978A;"></span>
+    <!-- 하단 탭: 히스토리 + 성과 대시보드 -->
+    <div class="bottom-section">
+      <div class="bottom-tab-bar">
+        <button id="btab-history" class="bottom-tab-btn active" onclick="switchBottomTab('history')">분석 히스토리</button>
+        <button id="btab-performance" class="bottom-tab-btn" onclick="switchBottomTab('performance')">성과 대시보드</button>
+        <button class="bottom-tab-refresh" onclick="refreshBottomTab()" title="새로고침">↻</button>
+      </div>
+      <div id="bottom-tab-history" class="bottom-tab-content">
+        <div id="history-container"><div class="history-empty">로딩 중...</div></div>
+      </div>
+      <div id="bottom-tab-performance" class="bottom-tab-content" style="display:none;">
+        <div class="perf-summary-grid" id="perf-summary">
+          <div class="perf-no-data" style="grid-column:1/-1;">로딩 중...</div>
         </div>
-        <div class="panel-card-body" style="padding:12px 16px;">
-          <!-- 현재 포지션 행 -->
-          <div id="bot-pos-row" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:10px 12px;border-radius:10px;background:#F5F0EB;">
-            <div id="bot-pos-pulse" style="width:8px;height:8px;border-radius:50%;background:#A8978A;flex-shrink:0;"></div>
-            <div style="flex:1;min-width:0;">
-              <div id="bot-pos-label" style="font-size:11px;font-weight:700;color:#78716C;">포지션 없음</div>
-              <div id="bot-pos-detail" style="font-size:11px;color:#A8978A;margin-top:1px;"></div>
-            </div>
-            <div id="bot-pos-pnl" style="font-size:15px;font-weight:800;text-align:right;"></div>
+        <div class="perf-charts-row">
+          <div class="perf-chart-wrap">
+            <div class="perf-chart-label">자산 곡선</div>
+            <div id="perf-equity-chart" style="height:200px;"></div>
           </div>
-          <!-- 오늘 통계 -->
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
-            <div style="text-align:center;padding:7px 4px;background:#F5F0EB;border-radius:8px;">
-              <div style="font-size:9px;font-weight:700;color:#A8978A;margin-bottom:2px;">오늘 진입</div>
-              <div id="bot-stat-entries" style="font-size:16px;font-weight:800;color:#1C1917;">—</div>
-            </div>
-            <div style="text-align:center;padding:7px 4px;background:#F0FDF4;border-radius:8px;">
-              <div style="font-size:9px;font-weight:700;color:#A8978A;margin-bottom:2px;">▲ LONG</div>
-              <div id="bot-stat-longs" style="font-size:16px;font-weight:800;color:#16A34A;">—</div>
-            </div>
-            <div style="text-align:center;padding:7px 4px;background:#FFF1F2;border-radius:8px;">
-              <div style="font-size:9px;font-weight:700;color:#A8978A;margin-bottom:2px;">▼ SHORT</div>
-              <div id="bot-stat-shorts" style="font-size:16px;font-weight:800;color:#DC2626;">—</div>
-            </div>
+          <div class="perf-chart-wrap">
+            <div class="perf-chart-label">일별 손익</div>
+            <div id="perf-daily-chart" style="height:200px;"></div>
           </div>
-          <!-- 가상 잔고 복리 현황 -->
-          <div id="bot-balance-row" style="margin-top:10px;padding:10px 12px;background:#F5F0EB;border-radius:10px;display:none;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <span style="font-size:10px;font-weight:700;color:#A8978A;">💰 드라이런 가상 잔고</span>
-              <button onclick="resetDryBalance()" style="font-size:10px;font-weight:700;color:#FFF;background:#EA580C;border:none;border-radius:5px;cursor:pointer;padding:3px 8px;">$10,000 초기화</button>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
-              <div style="text-align:center;">
-                <div style="font-size:9px;color:#A8978A;margin-bottom:2px;">현재 잔고</div>
-                <div id="bot-bal-current" style="font-size:14px;font-weight:800;color:#1C1917;">—</div>
-              </div>
-              <div style="text-align:center;">
-                <div style="font-size:9px;color:#A8978A;margin-bottom:2px;">총 손익</div>
-                <div id="bot-bal-pnl" style="font-size:14px;font-weight:800;">—</div>
-              </div>
-              <div style="text-align:center;">
-                <div style="font-size:9px;color:#A8978A;margin-bottom:2px;">수익률</div>
-                <div id="bot-bal-pct" style="font-size:14px;font-weight:800;">—</div>
-              </div>
-            </div>
-          </div>
-          <!-- 마지막 신호 -->
-          <div id="bot-last-signal" style="margin-top:8px;font-size:11px;color:#78716C;text-align:center;"></div>
         </div>
       </div>
+    </div>
+    </div><!-- /chart-col -->
+
+    <!-- 오른쪽: 패널 -->
+    <div class="panel">
 
       <!-- Claude 리포트 -->
       <div class="panel-card">
@@ -1201,7 +1389,7 @@ body {
         </div>
       </div>
 
-      <!-- 멀티 에이전트 토론 (Bull/Bear + Risk Triad + 과거 회상) -->
+      <!-- 멀티 에이전트 토론 (강세/약세 + 위험 분석 + 과거 회상) -->
       <div class="panel-card" id="agents-card" style="display:none;">
         <div class="panel-card-header">
           <div class="panel-card-dot" style="background:#7C3AED;"></div>
@@ -1210,10 +1398,10 @@ body {
         </div>
         <div class="panel-card-body" style="padding:10px 12px 14px;">
           <div id="agents-tabs" class="agents-tabs">
-            <button type="button" class="agents-tab" data-agents-tab="debate">🐂🐻 Bull vs Bear</button>
-            <button type="button" class="agents-tab" data-agents-tab="judge">⚖️ 투자 심판</button>
-            <button type="button" class="agents-tab" data-agents-tab="risk">🛡️ Risk Triad</button>
-            <button type="button" class="agents-tab" data-agents-tab="memory">🧠 과거 상황</button>
+            <button type="button" class="agents-tab" data-agents-tab="debate">강세 vs 약세</button>
+            <button type="button" class="agents-tab" data-agents-tab="judge">투자 심판</button>
+            <button type="button" class="agents-tab" data-agents-tab="risk">위험 분석</button>
+            <button type="button" class="agents-tab" data-agents-tab="memory">과거 상황</button>
           </div>
           <div id="agents-tab-body" class="agents-tab-body">
             <div class="agents-placeholder">아직 토론 데이터가 없습니다. 분석을 실행하면 여기에 표시됩니다.</div>
@@ -1221,7 +1409,7 @@ body {
           <!-- 리플렉션 버튼은 탭과 무관하게 항상 보이도록 (탭에 잠겨서 영영 못 누르는 문제 방지). -->
           <div id="agents-reflect-row" class="agents-reflect-row">
             <button id="btn-reflect" type="button" class="agents-reflect-btn" onclick="runReflection()">
-              📝 과거 판단 리플렉션 실행
+              과거 판단 리플렉션 실행
             </button>
             <span id="reflect-status" class="agents-reflect-status"></span>
           </div>
@@ -1313,75 +1501,6 @@ body {
     </div><!-- /panel -->
   </div><!-- /main-grid -->
 
-  <!-- 하단 탭: 히스토리 + 성과 대시보드 -->
-  <div class="bottom-section">
-    <div class="bottom-tab-bar">
-      <button id="btab-history" class="bottom-tab-btn active" onclick="switchBottomTab('history')">📋 분석 히스토리</button>
-      <button id="btab-performance" class="bottom-tab-btn" onclick="switchBottomTab('performance')">📈 성과 대시보드</button>
-      <button id="btab-backtest" class="bottom-tab-btn" onclick="switchBottomTab('backtest')">🧪 백테스트</button>
-      <button class="bottom-tab-refresh" onclick="refreshBottomTab()" title="새로고침">↻</button>
-    </div>
-    <div id="bottom-tab-history" class="bottom-tab-content">
-      <div id="history-container"><div class="history-empty">로딩 중...</div></div>
-    </div>
-    <div id="bottom-tab-backtest" class="bottom-tab-content" style="display:none;">
-      <!-- 라이브 포지션 카드 -->
-      <div id="bt-live-card" class="live-pos-card none" style="margin-bottom:16px;">
-        <div class="live-pos-pulse"></div>
-        <div style="flex:1;">
-          <div style="font-size:11px;font-weight:700;color:#A8978A;margin-bottom:4px;">드라이런 현재 포지션</div>
-          <div style="font-size:13px;color:#78716C;">자동매매 활성화 후 신호가 오면 여기에 실시간으로 표시됩니다.</div>
-        </div>
-      </div>
-
-      <!-- 툴바 -->
-      <div id="bt-toolbar" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
-        <div class="bt-auto-badge"><div class="bt-auto-dot"></div> 자동 갱신</div>
-        <span style="font-size:12px;font-weight:700;color:#78716C;">최근</span>
-        <select id="bt-limit" style="border:1px solid #E8DDD4;border-radius:6px;padding:4px 8px;font-size:12px;color:#1C1917;background:#FFF;">
-          <option value="50">50건</option>
-          <option value="100">100건</option>
-          <option value="200" selected>200건</option>
-          <option value="0">전체</option>
-        </select>
-        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#78716C;cursor:pointer;">
-          <input type="checkbox" id="bt-dryonly" checked> 드라이런만
-        </label>
-        <button onclick="fetchBacktest(true)" style="padding:5px 14px;background:#EA580C;color:#FFF;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">↻ 새로고침</button>
-        <span id="bt-status" style="font-size:11px;color:#78716C;"></span>
-      </div>
-      <!-- 요약 카드 -->
-      <div id="bt-summary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:16px;"></div>
-      <!-- 트레이드별 테이블 -->
-      <div id="bt-table-wrap" style="overflow-x:auto;">
-        <div id="bt-empty" style="text-align:center;color:#A8978A;padding:32px 0;font-size:13px;">아직 진입 기록이 없습니다. 자동매매를 활성화하면 기록이 쌓입니다.</div>
-        <table id="bt-table" class="history-table" style="display:none;">
-          <thead><tr>
-            <th>시각</th><th>방향</th><th>결과</th><th>확신도</th>
-            <th>진입가</th><th>손절가</th><th>목표가</th><th>청산가</th>
-            <th>손익(USD)</th><th>손익률</th><th>보유</th><th>D/R</th>
-          </tr></thead>
-          <tbody id="bt-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div id="bottom-tab-performance" class="bottom-tab-content" style="display:none;">
-      <div class="perf-summary-grid" id="perf-summary">
-        <div class="perf-no-data" style="grid-column:1/-1;">로딩 중...</div>
-      </div>
-      <div class="perf-charts-row">
-        <div class="perf-chart-wrap">
-          <div class="perf-chart-label">자산 곡선</div>
-          <div id="perf-equity-chart" style="height:200px;"></div>
-        </div>
-        <div class="perf-chart-wrap">
-          <div class="perf-chart-label">일별 손익</div>
-          <div id="perf-daily-chart" style="height:200px;"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
 </div><!-- /page -->
 
 <!-- 로딩 오버레이 -->
@@ -1418,8 +1537,8 @@ const ANALYSIS_POLL_MS = 1500;
 const LD_STEPS  = [
   ["바이낸스 데이터 수신","20%"],
   ["보조지표 계산","40%"],
-  ["🐂🐻⚔️ 멀티 에이전트 토론","75%"],
-  ["🧠 최종 종합","100%"],
+  ["멀티 에이전트 토론","75%"],
+  ["최종 종합","100%"],
 ];
 
 // 백엔드에서 보내는 phase 이름 → LD_STEPS 인덱스 매핑
@@ -1436,15 +1555,15 @@ const PHASE_TO_STEP_INDEX = {
 
 // phase → 한글 라벨 (오버레이 하단 상세 문구)
 const PHASE_LABEL = {
-  "bull":              "🐂 Bull 리서처 분석 중",
-  "bear":              "🐻 Bear 리서처 반박 중",
-  "debate_warn":       "⚠️ 토론 부분 실패 — 하위 단계 입력 비대칭",
-  "judge":             "⚖️ 투자 심판 중재 중",
-  "risk_aggressive":   "⚔️ Aggressive Risk 발언 중",
-  "risk_conservative": "🛡️ Conservative Risk 발언 중",
-  "risk_neutral":      "⚖️ Neutral Risk 중재 중",
-  "memory":            "🧠 과거 유사 상황 회상 중",
-  "final":             "🧠 최종 애널리스트 종합 중",
+  "bull":              "강세 리서처 분석 중",
+  "bear":              "약세 리서처 반박 중",
+  "debate_warn":       "토론 부분 실패 — 하위 단계 입력 비대칭",
+  "judge":             "투자 심판 중재 중",
+  "risk_aggressive":   "공세적 리스크 발언 중",
+  "risk_conservative": "보수적 리스크 발언 중",
+  "risk_neutral":      "중립 리스크 중재 중",
+  "memory":            "과거 유사 상황 회상 중",
+  "final":             "최종 애널리스트 종합 중",
 };
 
 // 경고성 phase — 오버레이에 황색으로 표시
@@ -1490,11 +1609,6 @@ const state = {
   analysisFromCache:false,
   analysisStale:false,
   lastMarketUpdate:null,
-  // 차트 분석 화살표 오버레이
-  analysisHistory: [],
-  showHistoryArrows: localStorage.getItem("showHistoryArrows") !== "false",
-  // 히스토리 행 클릭 오버레이 선택 상태
-  selectedHistoryTs: null,
   // 수동 분석 쿨다운 (서버 기준, 브라우저 UI 표시용)
   cooldownUntilMs: 0,
   cooldownTimerId: null,
@@ -1544,7 +1658,6 @@ window.addEventListener("DOMContentLoaded", () => {
   updateAutoUI();
   updateMarketStatus();
   updateAnalysisStatus();
-  startBotStatusPolling();   // 봇 상태 위젯 — 탭 무관하게 항상 폴링 시작
   restoreCachedAnalysis();
   syncAnalysisStatus({ includeLatest: true });
   fetchAccount();
@@ -1749,7 +1862,7 @@ function _updateCooldownBtn() {
   const s = Math.ceil((left % 60000) / 1000);
   btn.disabled = true;
   btn.setAttribute("aria-busy", "false");
-  btn.textContent = `⏳ ${m}분 ${s}초 후 가능`;
+  btn.textContent = `${m}분 ${s}초 후 가능`;
 }
 
 function setAnalyzeBtn(enabled) {
@@ -1861,16 +1974,6 @@ function applyResult(data, options = {}) {
   if (persist) {
     persistAnalysisCache(data);
     notifyAnalysisResult(data);
-    // 분석 완료 후 화살표 오버레이 갱신 (약간 딜레이 후 서버 기록이 확정된 뒤 로드)
-    setTimeout(() => loadAnalysisHistory(), 1200);
-    // 분석 완료 → 3초 후 봇 상태 + 백테스트 갱신 (자동매매 기록 확정 후)
-    setTimeout(() => {
-      fetchBotSummary();                                // 봇 위젯 항상 갱신
-      if (currentBottomTab === "backtest") {
-        fetchBacktest(false);
-        fetchLivePosition();
-      }
-    }, 3000);
   }
 }
 
@@ -1891,8 +1994,6 @@ function applyMarketData(data, source = "market") {
     });
     state.price = data.price;
     applyLiveBtcPositionMarks(data.price);
-    // 봇 위젯 P&L + 백테스트 탭 라이브 카드 즉시 갱신
-    tickBotPnl(data.price);
   }
 
   if (data.last_update) {
@@ -2060,16 +2161,15 @@ function renderSignalBadge(signal, confidence) {
   if (state.judge && state.judge.enabled && state.judge.verdict) {
     const jv = state.judge.verdict;
     const jColor = jv === "상방 우위" ? "#16A34A" : jv === "하방 우위" ? "#DC2626" : "#78716C";
-    const jIcon  = jv === "상방 우위" ? "📈" : jv === "하방 우위" ? "📉" : "⚖️";
     const jAligned = (
       (signal === "매수" && jv === "상방 우위") ||
       (signal === "매도" && jv === "하방 우위") ||
       (signal === "홀드" && jv === "중립")
     );
-    const alignIcon = jAligned ? "✅" : "⚠️";
+    const alignMark = jAligned ? "[일치]" : "[불일치]";
     judgeBadgeHtml = `
       <div class="card-sub" style="margin-top:5px;padding:3px 6px;background:#F5F0EB;border-radius:6px;font-size:10px;">
-        ${alignIcon} 심판: <span style="color:${jColor};font-weight:700">${jIcon} ${jv}</span>
+        ${alignMark} 심판: <span style="color:${jColor};font-weight:700">${jv}</span>
       </div>`;
   }
 
@@ -2105,11 +2205,11 @@ function renderHeaderSymbol() {
   const quoteEl = document.getElementById("header-quote");
   if (!baseEl || !quoteEl) return;
 
-  const pair = state.pairLabel || state.symbol || "BTC/USDC";
+  const pair = state.pairLabel || state.symbol || "BTC/USDT";
   const parts = String(pair).split("/");
   const base = parts[0] || "BTC";
   const quote = parts[1] || "";
-  baseEl.textContent = `₿ ${base}`;
+  baseEl.textContent = base;
   quoteEl.textContent = quote ? `/ ${quote}` : "";
 }
 
@@ -2249,49 +2349,7 @@ function renderAccountPanel(account) {
   const errorHtml = errorMessages.length
     ? `<div class="account-error-note">${errorMessages.map(msg => escapeHtml(msg)).join("<br>")}</div>`
     : "";
-  const contextSummary = account.context_summary || {};
-  const contextSections = Array.isArray(contextSummary.sections)
-    ? contextSummary.sections.filter(section => section && Array.isArray(section.lines) && section.lines.length)
-    : [];
-  const contextLines = Array.isArray(contextSummary.lines) ? contextSummary.lines : [];
-  const contextHtml = contextSections.length
-    ? `
-      <div class="account-context-card">
-        <div class="account-context-head">
-          <div class="account-context-title">멀티 윈도우 계좌 맥락</div>
-          <div class="account-context-meta">오늘(KST) / 72h / 7d</div>
-        </div>
-        ${contextSections.map(section => `
-          <div class="account-context-section">
-            <div class="account-context-section-head">
-              <div class="account-context-section-title">${escapeHtml(section.label || "계좌 맥락")}</div>
-              <div class="account-context-section-meta">${escapeHtml(section.meta || "")}</div>
-            </div>
-            <div class="account-context-list">
-              ${(Array.isArray(section.lines) ? section.lines : []).map(line => `<div class="account-context-item">${escapeHtml(line)}</div>`).join("")}
-            </div>
-            ${Array.isArray(section.highlights) && section.highlights.length ? `
-              <div class="account-context-events">
-                ${section.highlights.map(item => `<span class="account-context-chip">${escapeHtml(item)}</span>`).join("")}
-              </div>
-            ` : ""}
-          </div>
-        `).join("")}
-      </div>
-    `
-    : contextLines.length
-    ? `
-      <div class="account-context-card">
-        <div class="account-context-head">
-          <div class="account-context-title">최근 계좌 맥락</div>
-          <div class="account-context-meta">표본 축적 중</div>
-        </div>
-        <div class="account-context-list">
-          ${contextLines.map(line => `<div class="account-context-item">${escapeHtml(line)}</div>`).join("")}
-        </div>
-      </div>
-    `
-    : "";
+  const contextHtml = ""; // 멀티 윈도우 계좌 맥락 UI 비표시
   const balanceHtml = balances.length
     ? `<div class="account-assets">${
         balances.map(asset => `
@@ -2855,123 +2913,6 @@ function buildTooltipHtml(chart, params) {
   ].join("");
 }
 
-// ── 분석 히스토리 화살표 오버레이 ─────────────────
-// 분석 히스토리를 가져와 state에 캐시하고 차트를 재렌더링
-async function loadAnalysisHistory() {
-  try {
-    const res = await fetch("/api/analysis-history?limit=200");
-    const data = await res.json();
-    state.analysisHistory = data.entries || [];
-    renderCurrentChart(); // 화살표 포함해서 차트 재렌더
-  } catch (e) {
-    // 히스토리 로드 실패는 조용히 무시
-  }
-}
-
-// 차트 labels 배열에서 ISO timestamp에 가장 가까운 인덱스를 찾음
-function findClosestLabelIndex(labels, isoTimestamp) {
-  if (!labels || !labels.length || !isoTimestamp) return -1;
-  // ISO → "YYYY-MM-DD HH:MM" 형식으로 변환
-  const dt = new Date(isoTimestamp);
-  if (isNaN(dt)) return -1;
-  const pad = n => String(n).padStart(2, "0");
-  const target = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-  const targetMs = dt.getTime();
-
-  // 완전 일치 먼저 탐색
-  const exactIdx = labels.indexOf(target);
-  if (exactIdx !== -1) return exactIdx;
-
-  // 가장 가까운 라벨 (밀리초 차이 기준)
-  let bestIdx = -1, bestDiff = Infinity;
-  labels.forEach((lbl, i) => {
-    const t = new Date(lbl.replace(" ", "T") + ":00Z").getTime();
-    if (!isNaN(t)) {
-      const diff = Math.abs(t - targetMs);
-      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-    }
-  });
-  // 한 캔들 간격(타임프레임별)보다 너무 멀면 무시
-  return bestIdx;
-}
-
-// 분석 히스토리 → markPoint data 배열 생성
-function buildAnalysisMarkPoints(chart, tf) {
-  if (!state.showHistoryArrows || !state.analysisHistory.length) return [];
-
-  // 타임프레임별 허용 오차 (ms)
-  const TF_TOLERANCE = { "5m": 5*60e3, "15m": 15*60e3, "1h": 60*60e3, "4h": 4*60*60e3, "1d": 24*60*60e3 };
-  const tolerance = (TF_TOLERANCE[tf] || 60*60e3) * 1.5; // 1.5배 여유
-
-  const labels = chart.labels || [];
-  const candles = chart.candles || [];
-  const points = [];
-
-  const selectedTs = state.selectedHistoryTs;
-  const hasSelection = !!selectedTs;
-
-  state.analysisHistory.forEach(entry => {
-    if (!entry.timestamp || !entry.signal) return;
-    if (entry.signal === "홀드") return; // 홀드는 표시 안 함
-
-    const idx = findClosestLabelIndex(labels, entry.timestamp);
-    if (idx < 0) return;
-
-    // 오차 체크
-    const entryMs = new Date(entry.timestamp).getTime();
-    const labelMs = new Date((labels[idx] || "").replace(" ", "T") + ":00Z").getTime();
-    if (!isNaN(labelMs) && Math.abs(entryMs - labelMs) > tolerance) return;
-
-    const candle = candles[idx]; // [open, close, low, high]
-    if (!candle) return;
-    const high = Number(candle[3]);
-    const low  = Number(candle[2]);
-    if (!Number.isFinite(high) || !Number.isFinite(low)) return;
-
-    const isBuy  = entry.signal === "매수";
-    const isSelected = hasSelection && entry.timestamp === selectedTs;
-    const isDimmed   = hasSelection && !isSelected;
-
-    // 선택 시: 해당 마커 크게+선명, 나머지 흐리게
-    const baseColor  = isBuy ? "#16A34A" : "#DC2626";
-    const dimColor   = isBuy ? "rgba(22,163,74,0.25)"  : "rgba(220,38,38,0.25)";
-    const color      = isDimmed ? dimColor : baseColor;
-    const borderColor = isSelected
-      ? "#F97316"                              // 선택: 주황 테두리
-      : (isBuy ? "#BBF7D0" : "#FECACA");
-    const borderWidth = isSelected ? 2.5 : 1;
-    const symbolSize  = isSelected ? [22, 16] : [14, 10];
-    const labelColor  = isDimmed ? "rgba(255,255,255,0.3)" : "#FFFFFF";
-    const conf   = entry.confidence != null ? `${entry.confidence}%` : "";
-    const priceStr = entry.price != null ? `$${Number(entry.price).toLocaleString("en-US",{maximumFractionDigits:0})}` : "";
-
-    points.push({
-      coord: [labels[idx], isBuy ? low : high],
-      symbolOffset: isBuy ? [0, "70%"] : [0, "-70%"],
-      symbol: "triangle",
-      symbolRotate: isBuy ? 0 : 180,
-      symbolSize,
-      itemStyle: { color, borderColor, borderWidth },
-      label: {
-        show: true,
-        position: isBuy ? "bottom" : "top",
-        distance: 4,
-        formatter: isBuy ? "▲" : "▼",
-        color: labelColor,
-        fontSize: isSelected ? 12 : 10,
-        fontWeight: 700,
-      },
-      tooltip: {
-        formatter: () => {
-          const time = entry.timestamp.replace("T", " ").slice(0, 16);
-          return `<b>${entry.signal}</b> ${conf}<br/>${time}<br/>${priceStr}`;
-        },
-      },
-    });
-  });
-  return points;
-}
-
 function buildChartOption(chart, tf, viewport) {
   const len = chart.labels.length;
   const zoom = getChartViewport(tf, len);
@@ -3289,12 +3230,6 @@ function buildChartOption(chart, tf, viewport) {
           },
           data: buildPriceGuides(chart, viewport),
         },
-        markPoint: {
-          animation: false,
-          data: buildAnalysisMarkPoints(chart, tf),
-          tooltip: { trigger: "item" },
-          z: 10,
-        },
         z: 3,
       },
       makeLineSeries("BB Upper", chart.bb_upper, 0, 0, {
@@ -3557,11 +3492,10 @@ function renderAgentsPanel() {
   const parts = [];
   if (hasDebate) {
     const rounds = debate.rounds ?? (debate.turns ? Math.ceil(debate.turns.length / 2) : 0);
-    parts.push(`Debate ${rounds}R`);
+    parts.push(`토론 ${rounds}R`);
   }
   if (hasJudge && judge.verdict) {
-    const verdictShort = judge.verdict === "상방 우위" ? "📈" : judge.verdict === "하방 우위" ? "📉" : "⚖️";
-    parts.push(`심판 ${verdictShort}`);
+    parts.push(`심판 ${judge.verdict}`);
   }
   if (hasRisk) {
     const rounds = risk.rounds ?? 1;
@@ -3623,9 +3557,6 @@ function renderJudgeTab(judge) {
   const verdictColor = judge.verdict === "상방 우위" ? "#16A34A"
     : judge.verdict === "하방 우위" ? "#DC2626"
     : "#78716C";
-  const verdictIcon = judge.verdict === "상방 우위" ? "📈"
-    : judge.verdict === "하방 우위" ? "📉" : "⚖️";
-
   const elapsed = typeof judge.elapsed_s === "number" ? `${judge.elapsed_s.toFixed(1)}s` : "";
   const errorHtml = judge.error
     ? `<div class="agents-error-note" style="margin-top:8px">일부 실패 — ${escapeHtml(judge.error)}</div>`
@@ -3634,13 +3565,12 @@ function renderJudgeTab(judge) {
   return `
     <div class="agent-turn" style="border-left:3px solid ${verdictColor}">
       <div class="agent-turn-head" style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:18px">${verdictIcon}</span>
         <span style="font-weight:700;font-size:14px;color:${verdictColor}">${escapeHtml(judge.verdict || "판정 없음")}</span>
-        <span class="agent-turn-meta" style="margin-left:auto">${escapeHtml(judge.model || "")} · ${elapsed}</span>
+        ${elapsed ? `<span class="agent-turn-meta" style="margin-left:auto">${elapsed}</span>` : ""}
       </div>
       ${judge.reasoning ? `<div class="agent-turn-body" style="margin-top:6px"><strong>판정 이유:</strong> ${renderMarkdown(judge.reasoning)}</div>` : ""}
-      ${judge.bull_key ? `<div class="agent-turn-body" style="color:#16A34A;margin-top:4px">🐂 Bull 핵심: ${escapeHtml(judge.bull_key)}</div>` : ""}
-      ${judge.bear_key ? `<div class="agent-turn-body" style="color:#DC2626;margin-top:4px">🐻 Bear 핵심: ${escapeHtml(judge.bear_key)}</div>` : ""}
+      ${judge.bull_key ? `<div class="agent-turn-body" style="color:#16A34A;margin-top:4px">강세측 핵심: ${escapeHtml(judge.bull_key)}</div>` : ""}
+      ${judge.bear_key ? `<div class="agent-turn-body" style="color:#DC2626;margin-top:4px">약세측 핵심: ${escapeHtml(judge.bear_key)}</div>` : ""}
       ${errorHtml}
     </div>`;
 }
@@ -3652,7 +3582,7 @@ function renderDebateTab(debate) {
   }
 
   const turnsHtml = (debate.turns || []).map(t => {
-    const side = t.side === "bull" ? "🐂 Bull" : "🐻 Bear";
+    const side = t.side === "bull" ? "강세" : "약세";
     const sideCls = t.side === "bull" ? "bull" : "bear";
     const elapsed = typeof t.elapsed_s === "number" ? `${t.elapsed_s.toFixed(1)}s` : "";
     return `
@@ -3660,7 +3590,7 @@ function renderDebateTab(debate) {
         <div class="agent-turn-head">
           <span class="agent-turn-side ${sideCls}">${side}</span>
           <span>라운드 ${t.round_index + 1}</span>
-          <span class="agent-turn-meta">${escapeHtml(t.model || "")} · ${elapsed}</span>
+          ${elapsed ? `<span class="agent-turn-meta">${elapsed}</span>` : ""}
         </div>
         <div class="agent-turn-body">${renderMarkdown(t.content || "")}</div>
       </div>`;
@@ -3680,9 +3610,9 @@ function renderRiskTab(risk) {
   }
 
   const iconBySide = {
-    "aggressive":   "⚔️ Aggressive",
-    "conservative": "🛡️ Conservative",
-    "neutral":      "⚖️ Neutral",
+    "aggressive":   "공세적",
+    "conservative": "보수적",
+    "neutral":      "중립",
   };
 
   const turnsHtml = (risk.turns || []).map(t => {
@@ -3693,7 +3623,7 @@ function renderRiskTab(risk) {
         <div class="agent-turn-head">
           <span class="agent-turn-side ${t.side}">${label}</span>
           <span>라운드 ${t.round_index + 1}</span>
-          <span class="agent-turn-meta">${escapeHtml(t.model || "")} · ${elapsed}</span>
+          ${elapsed ? `<span class="agent-turn-meta">${elapsed}</span>` : ""}
         </div>
         <div class="agent-turn-body">${renderMarkdown(t.content || "")}</div>
       </div>`;
@@ -3756,27 +3686,27 @@ async function runReflection() {
     const res = await fetch("/api/reflect", { method: "POST" });
     const data = await res.json();
     if (!data.ok) {
-      if (status) status.textContent = `❌ ${data.error || "실패"}`;
+      if (status) status.textContent = `실패: ${data.error || "오류"}`;
     } else {
       if (status) {
         const processed = data.processed || 0;
         const total = data.memory_size ?? data.analyst_memory_size ?? 0;
         const pending = data.pending_count ?? 0;
         if (processed > 0) {
-          status.textContent = `✅ ${processed}건 리플렉션 완료 (전체 ${total}건 · 대기 ${pending}건)`;
+          status.textContent = `${processed}건 리플렉션 완료 (전체 ${total}건 · 대기 ${pending}건)`;
         } else if (total === 0) {
-          status.textContent = `ℹ️ 저장된 분석 기록이 없습니다. 분석을 먼저 실행해주세요.`;
+          status.textContent = `저장된 분석 기록이 없습니다. 분석을 먼저 실행해주세요.`;
         } else if (pending === 0) {
-          status.textContent = `ℹ️ 모든 기록이 이미 리플렉션 완료됐습니다 (전체 ${total}건)`;
+          status.textContent = `모든 기록이 이미 리플렉션 완료됐습니다 (전체 ${total}건)`;
         } else {
-          status.textContent = `ℹ️ 대기 기록 ${pending}건이 30분 미경과로 아직 대상 아님 (전체 ${total}건)`;
+          status.textContent = `대기 기록 ${pending}건이 30분 미경과로 아직 대상 아님 (전체 ${total}건)`;
         }
       }
     }
   } catch (e) {
-    if (status) status.textContent = `❌ ${e.message}`;
+    if (status) status.textContent = `오류: ${e.message}`;
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "📝 과거 판단 리플렉션 실행"; }
+    if (btn) { btn.disabled = false; btn.textContent = "과거 판단 리플렉션 실행"; }
   }
 }
 
@@ -3914,7 +3844,7 @@ function showLoadingOverlay(activeStep, phase = null, phaseDetail = null) {
   let html = "";
   LD_STEPS.forEach(([label, pct], i) => {
     const cls  = i < activeStep ? "done" : i === activeStep ? "active" : "wait";
-    const icon = i < activeStep ? "✓" : "";
+    const icon = i < activeStep ? "완료" : "";
     html += `
       <div class="ld-step ${cls}">
         <div class="ld-icon">${icon}</div>
@@ -4158,7 +4088,7 @@ function toggleNotifications() {
   function _onPermResult(perm) {
     if (perm === "granted") {
       try {
-        new Notification("BTC Signal Analyzer", { body: "✅ 알림이 활성화되었습니다." });
+        new Notification("BTC Signal Analyzer", { body: "알림이 활성화되었습니다." });
       } catch (e) { /* Safari 일부 버전 오류 무시 */ }
     } else if (perm === "denied") {
       _notifToast("알림 권한이 거부됨 — Safari 설정 → 웹사이트 → 알림에서 수동으로 허용해주세요.");
@@ -4193,7 +4123,7 @@ function updateNotifBtn() {
   const active = granted && !off;
   btn.classList.toggle("on", active);
   btn.title = active ? "알림 ON (클릭하면 끔)" : "알림 OFF (클릭하면 켬)";
-  btn.textContent = active ? "🔔" : "🔕";
+  btn.textContent = active ? "알림ON" : "알림OFF";
 }
 
 function notifyAnalysisResult(data) {
@@ -4336,7 +4266,7 @@ let currentBottomTab = "history";
 
 function switchBottomTab(tab) {
   currentBottomTab = tab;
-  ["history", "performance", "backtest"].forEach(t => {
+  ["history", "performance"].forEach(t => {
     const btn     = document.getElementById("btab-" + t);
     const content = document.getElementById("bottom-tab-" + t);
     if (btn)     btn.classList.toggle("active", t === tab);
@@ -4344,276 +4274,13 @@ function switchBottomTab(tab) {
   });
   if (tab === "history")     fetchHistory();
   if (tab === "performance") fetchPerformance();
-  if (tab === "backtest") {
-    // 탭 진입 즉시 실행 + 폴링 시작
-    fetchBacktest(true);
-    fetchLivePosition();
-    startBtPolling();
-  } else {
-    // 다른 탭으로 이동하면 폴링 중단
-    stopBtPolling();
-  }
 }
 
 function refreshBottomTab() {
   if (currentBottomTab === "history")     fetchHistory();
   if (currentBottomTab === "performance") fetchPerformance();
-  if (currentBottomTab === "backtest")    fetchBacktest(true);
 }
 
-// ══════════════════════════════════════════════
-// 백테스트 — 자동 폴링 & 라이브 포지션
-// ══════════════════════════════════════════════
-let _btPollTimer   = null;   // 백테스트 자동 폴링
-let _lpPollTimer   = null;   // 라이브 포지션 폴링
-let _lpPnlTimer    = null;   // P&L 실시간 업데이트 (1초)
-let _livePosData   = null;   // 현재 오픈 포지션 데이터
-const BT_POLL_MS   = 30_000; // 백테스트 30초마다 갱신
-const LP_POLL_MS   = 15_000; // 라이브 포지션 15초마다 확인
-
-function startBtPolling() {
-  stopBtPolling();
-  _btPollTimer = setInterval(() => {
-    if (currentBottomTab === "backtest") fetchBacktest(false);
-  }, BT_POLL_MS);
-  _lpPollTimer = setInterval(fetchLivePosition, LP_POLL_MS);
-  _lpPnlTimer  = setInterval(tickLivePnl, 1_000);
-}
-function stopBtPolling() {
-  clearInterval(_btPollTimer); _btPollTimer = null;
-  clearInterval(_lpPollTimer); _lpPollTimer = null;
-  clearInterval(_lpPnlTimer);  _lpPnlTimer  = null;
-}
-
-async function fetchBacktest(showSpinner = true) {
-  const limit   = document.getElementById("bt-limit")?.value  || "200";
-  const dryOnly = document.getElementById("bt-dryonly")?.checked ?? true;
-  const status  = document.getElementById("bt-status");
-  if (status && showSpinner) status.textContent = "⏳ 캔들 조회 중…";
-
-  try {
-    const params = new URLSearchParams({ limit, dry_only: dryOnly ? "true" : "false" });
-    const res  = await fetch("/api/autotrader/backtest?" + params);
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    const now  = new Date().toLocaleTimeString("ko-KR");
-    if (status) status.textContent = `마지막 갱신 ${now} (${data.total || 0}건)`;
-    renderBacktest(data);
-  } catch (e) {
-    if (status) status.textContent = "❌ 실패: " + e.message;
-  }
-}
-
-async function fetchLivePosition() {
-  try {
-    const res = await fetch("/api/autotrader/live-position");
-    if (!res.ok) return;
-    const data = await res.json();
-    _livePosData = data.position || null;
-    renderLivePosition(_livePosData, state.price);
-  } catch (_) {}
-}
-
-function tickLivePnl() {
-  if (!_livePosData || !state.price) return;
-  renderLivePosition(_livePosData, state.price);
-}
-
-function renderLivePosition(pos, currentPrice) {
-  const card = document.getElementById("bt-live-card");
-  if (!card) return;
-
-  if (!pos) {
-    card.className = "live-pos-card none";
-    card.innerHTML = `
-      <div class="live-pos-pulse"></div>
-      <div style="flex:1;">
-        <div style="font-size:11px;font-weight:700;color:#A8978A;margin-bottom:4px;">드라이런 현재 포지션</div>
-        <div style="font-size:13px;color:#78716C;">포지션 없음 — 다음 분석 신호를 대기 중입니다.</div>
-      </div>`;
-    return;
-  }
-
-  const isPending = pos.status === "pending";
-  const isLong    = pos.direction === "LONG";
-  const cls       = isLong ? "long" : "short";
-  const cp        = currentPrice || 0;
-  const entry     = pos.entry_price || 0;
-  const qty       = pos.quantity    || 0;
-  const lev       = pos.leverage    || 1;
-  const sl        = pos.sl_price    || 0;
-  const tp        = pos.tp_price    || 0;
-
-  // PENDING 상태: 체결 대기 표시
-  if (isPending) {
-    const distPct = cp > 0 && entry > 0
-      ? ((entry - cp) / cp * 100 * (isLong ? 1 : -1))
-      : null;
-    const distStr = distPct != null
-      ? (distPct > 0 ? `▼ ${Math.abs(distPct).toFixed(2)}% 하락 시 체결` : `▲ ${Math.abs(distPct).toFixed(2)}% 상승 시 체결`)
-      : "";
-    card.className = `live-pos-card ${cls}`;
-    card.style.opacity = "0.75";
-    card.innerHTML = `
-      <div class="live-pos-pulse" style="background:#F59E0B;"></div>
-      <div style="flex:0 0 auto;">
-        <span class="live-pos-badge" style="background:#F59E0B;color:#fff;">⏳ ${isLong ? "LONG" : "SHORT"} 대기</span>
-        <div style="font-size:11px;color:#78716C;">${pos.symbol} · ${pos.confidence}% 확신 · ${pos.held_min?.toFixed(0) ?? 0}분 경과</div>
-      </div>
-      <div class="live-pos-group">
-        <div class="live-pos-label">지정 진입가</div>
-        <div class="live-pos-value">${fmtPrice(entry)}</div>
-      </div>
-      <div class="live-pos-group">
-        <div class="live-pos-label">현재가</div>
-        <div class="live-pos-value">${cp ? fmtPrice(cp) : "—"}</div>
-      </div>
-      <div class="live-pos-group">
-        <div class="live-pos-label">체결까지</div>
-        <div style="font-size:12px;font-weight:700;color:#92400E;">${distStr || "—"}</div>
-      </div>
-      <div class="live-pos-group">
-        <div class="live-pos-label">손절 / 목표</div>
-        <div style="font-size:13px;font-weight:700;">
-          <span style="color:#DC2626;">${fmtPrice(sl)}</span>
-          <span style="color:#A8978A;"> / </span>
-          <span style="color:#16A34A;">${fmtPrice(tp)}</span>
-        </div>
-      </div>
-      <div class="live-pos-group">
-        <div class="live-pos-label">레버리지 / 증거금</div>
-        <div style="font-size:13px;font-weight:700;">${lev}x / $${((entry * qty) / lev).toFixed(2)}</div>
-      </div>
-      <div style="font-size:10px;background:#FEF9C3;color:#92400E;padding:3px 8px;border-radius:6px;font-weight:700;">DR</div>
-    `;
-    return;
-  }
-
-  // OPEN 포지션
-  card.style.opacity = "1";
-  const pnlUsd   = cp > 0 && entry > 0 && qty > 0
-    ? (isLong ? (cp - entry) * qty : (entry - cp) * qty)
-    : null;
-  const margin   = entry > 0 && qty > 0 ? (entry * qty) / lev : 0;
-  const pnlPct   = pnlUsd != null && margin > 0
-    ? (pnlUsd / margin * 100) : null;
-  const pnlCls   = pnlUsd == null ? "" : pnlUsd >= 0 ? "live-pnl-pos" : "live-pnl-neg";
-
-  const totalRange = Math.abs(tp - sl);
-  const progress   = (cp > 0 && totalRange > 0)
-    ? Math.min(100, Math.max(0, Math.abs(cp - entry) / (Math.abs(tp - entry) || 1) * 100))
-    : 0;
-  const progressToSl = (cp > 0 && totalRange > 0)
-    ? Math.min(100, Math.max(0, Math.abs(cp - entry) / (Math.abs(sl - entry) || 1) * 100))
-    : 0;
-
-  card.className = `live-pos-card ${cls}`;
-  card.innerHTML = `
-    <div class="live-pos-pulse"></div>
-    <div style="flex:0 0 auto;">
-      <span class="live-pos-badge ${cls}">${isLong ? "▲ LONG" : "▼ SHORT"}</span>
-      <div style="font-size:11px;color:#78716C;">${pos.symbol} · ${pos.confidence}% 확신 · ${pos.held_min}분 보유</div>
-    </div>
-    <div class="live-pos-group">
-      <div class="live-pos-label">진입가</div>
-      <div class="live-pos-value">${fmtPrice(entry)}</div>
-    </div>
-    <div class="live-pos-group">
-      <div class="live-pos-label">현재가</div>
-      <div class="live-pos-value">${cp ? fmtPrice(cp) : "—"}</div>
-    </div>
-    <div class="live-pos-group">
-      <div class="live-pos-label">미실현 손익</div>
-      <div class="live-pos-value ${pnlCls}">
-        ${pnlUsd != null ? fmtPnl(pnlUsd) : "—"}
-        ${pnlPct != null ? `<span style="font-size:13px;">(${fmtPct(pnlPct)})</span>` : ""}
-      </div>
-    </div>
-    <div class="live-pos-group">
-      <div class="live-pos-label">손절 / 목표</div>
-      <div style="font-size:13px;font-weight:700;">
-        <span style="color:#DC2626;">${fmtPrice(sl)}</span>
-        <span style="color:#A8978A;"> / </span>
-        <span style="color:#16A34A;">${fmtPrice(tp)}</span>
-      </div>
-      <div style="margin-top:5px;font-size:10px;color:#78716C;">
-        TP ${progress.toFixed(0)}% · SL ${progressToSl.toFixed(0)}%
-      </div>
-    </div>
-    <div class="live-pos-group">
-      <div class="live-pos-label">레버리지 / 증거금</div>
-      <div style="font-size:13px;font-weight:700;">${lev}x / $${margin.toFixed(2)}</div>
-    </div>
-    ${pos.dry_run ? '<div style="font-size:10px;background:#FEF9C3;color:#92400E;padding:3px 8px;border-radius:6px;font-weight:700;">DR</div>' : ""}
-  `;
-}
-
-function renderBacktest(d) {
-  // ── 요약 카드 ──
-  const summaryEl = document.getElementById("bt-summary");
-  const cards = [
-    { label: "전체 건수",   value: d.total,        color: "#1C1917" },
-    { label: "✅ 승",       value: d.wins,          color: "#16A34A" },
-    { label: "❌ 패",       value: d.losses,        color: "#DC2626" },
-    { label: "⏱ 타임아웃", value: d.timeouts,      color: "#D97706" },
-    { label: "승률",        value: d.win_rate + "%", color: d.win_rate >= 50 ? "#16A34A" : "#DC2626" },
-    { label: "총 손익",     value: fmtPnl(d.total_pnl), color: d.total_pnl >= 0 ? "#16A34A" : "#DC2626" },
-    { label: "평균 손익",   value: fmtPnl(d.avg_pnl),   color: d.avg_pnl   >= 0 ? "#16A34A" : "#DC2626" },
-    { label: "최대 낙폭",   value: "$" + Math.abs(d.max_drawdown || 0).toFixed(2), color: "#DC2626" },
-    { label: "평균 보유",   value: (d.avg_hold_min || 0) + "분", color: "#0284C7" },
-  ];
-  summaryEl.innerHTML = cards.map(c => `
-    <div style="background:#FFF;border:1px solid #E8DDD4;border-radius:10px;padding:10px 14px;min-width:0;">
-      <div style="font-size:10px;font-weight:700;color:#A8978A;margin-bottom:4px;">${c.label}</div>
-      <div style="font-size:17px;font-weight:800;color:${c.color};">${c.value}</div>
-    </div>`).join("");
-
-  // ── 테이블 ──
-  const trades = d.trades || [];
-  const tbody  = document.getElementById("bt-tbody");
-  const table  = document.getElementById("bt-table");
-  const empty  = document.getElementById("bt-empty");
-
-  const actionable = trades.filter(t => ["WIN","LOSS","TIMEOUT","PENDING","INVALID"].includes(t.outcome));
-  if (!actionable.length) {
-    table.style.display = "none";
-    empty.style.display = "block";
-    empty.textContent = "진입 레코드가 없습니다. 자동매매를 활성화하면 기록이 쌓입니다.";
-    return;
-  }
-
-  table.style.display = "";
-  empty.style.display = "none";
-
-  const outcomeEmoji = { WIN:"✅", LOSS:"❌", TIMEOUT:"⏱", PENDING:"⌛", INVALID:"⚠️" };
-  const outcomeColor = { WIN:"#16A34A", LOSS:"#DC2626", TIMEOUT:"#D97706", PENDING:"#78716C", INVALID:"#A8978A" };
-
-  tbody.innerHTML = actionable.map(t => {
-    const dir   = t.action.includes("LONG") ? "▲ LONG" : "▼ SHORT";
-    const dirCl = t.action.includes("LONG") ? "buy"    : "sell";
-    const oc    = outcomeEmoji[t.outcome] || t.outcome;
-    const ocCol = outcomeColor[t.outcome] || "#1C1917";
-    const ts    = (t.ts || "").replace("T"," ").slice(0,16);
-    const pnl   = t.pnl_usd != null ? fmtPnl(t.pnl_usd) : "—";
-    const pct   = t.pnl_pct != null ? fmtPct(t.pnl_pct) : "—";
-    const pnlCl = (t.pnl_usd || 0) >= 0 ? "#16A34A" : "#DC2626";
-    const pctCl = (t.pnl_pct || 0) >= 0 ? "#16A34A" : "#DC2626";
-    return `<tr>
-      <td style="white-space:nowrap;color:#78716C;">${ts}</td>
-      <td><span class="hist-signal ${dirCl}">${dir}</span></td>
-      <td style="font-weight:700;color:${ocCol};">${oc} ${t.outcome}</td>
-      <td>${t.confidence}%</td>
-      <td>${fmtPrice(t.entry_price)}</td>
-      <td>${fmtPrice(t.sl_price)}</td>
-      <td>${fmtPrice(t.tp_price)}</td>
-      <td>${t.exit_price ? fmtPrice(t.exit_price) : "—"}</td>
-      <td style="font-weight:700;color:${pnlCl};">${pnl}</td>
-      <td style="color:${pctCl};">${pct}</td>
-      <td>${t.hold_min != null ? t.hold_min + "분" : "—"}</td>
-      <td style="color:#A8978A;">${t.dry_run ? "DR" : "실매매"}</td>
-    </tr>`;
-  }).join("");
-}
 
 function fmtPnl(v) {
   if (v == null) return "—";
@@ -4626,152 +4293,6 @@ function fmtPct(v) {
 function fmtPrice(v) {
   if (!v) return "—";
   return "$" + Number(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
-}
-
-// ══════════════════════════════════════════════
-// 봇 상태 위젯 — 항상 폴링 (탭 무관)
-// ══════════════════════════════════════════════
-let _botSummaryData  = null;   // 마지막 summary 응답
-let _botSummaryTimer = null;
-const BOT_SUMMARY_MS = 15_000; // 15초마다
-
-function startBotStatusPolling() {
-  fetchBotSummary();                                    // 즉시 1회
-  _botSummaryTimer = setInterval(fetchBotSummary, BOT_SUMMARY_MS);
-}
-
-async function fetchBotSummary() {
-  try {
-    const res = await fetch("/api/autotrader/summary");
-    if (!res.ok) return;
-    _botSummaryData = await res.json();
-    renderBotStatus(_botSummaryData, state.price);
-  } catch (_) {}
-}
-
-function renderBotStatus(d, currentPrice) {
-  if (!d) return;
-  const pos   = d.live_position;
-  const dot   = document.getElementById("bot-status-dot");
-  const mode  = document.getElementById("bot-status-mode");
-  const pulse = document.getElementById("bot-pos-pulse");
-  const label = document.getElementById("bot-pos-label");
-  const detail= document.getElementById("bot-pos-detail");
-  const pnlEl = document.getElementById("bot-pos-pnl");
-  const row   = document.getElementById("bot-pos-row");
-
-  // 모드 배지
-  if (mode) mode.textContent = d.dry_run ? "LIVE DR" : "LIVE";
-
-  if (pos) {
-    const isPending = pos.status === "pending";
-    const isLong = pos.direction === "LONG";
-    const cp     = currentPrice || 0;
-    const entry  = pos.entry_price || 0;
-    const qty    = pos.quantity    || 0;
-    const lev    = pos.leverage    || 1;
-
-    if (isPending) {
-      // 대기 중 — 주황색
-      if (dot)   { dot.style.background = "#F59E0B"; }
-      if (pulse) { pulse.style.background = "#F59E0B"; pulse.style.animation = "lp-pulse 1.4s infinite"; }
-      if (row)   row.style.background = "#FFFBEB";
-      if (label) { label.style.color = "#92400E"; label.textContent = `⏳ ${isLong ? "LONG" : "SHORT"} 대기 중`; }
-      if (detail) {
-        const distPct = cp > 0 && entry > 0
-          ? Math.abs((entry - cp) / cp * 100).toFixed(2)
-          : null;
-        detail.textContent = `목표가 ${fmtPrice(entry)} · ${distPct ? distPct + "% 거리" : ""}`;
-      }
-      if (pnlEl) { pnlEl.style.color = "#92400E"; pnlEl.textContent = "미체결"; }
-    } else {
-      const pnlUsd = cp > 0 && entry > 0 && qty > 0
-        ? (isLong ? (cp - entry) * qty : (entry - cp) * qty)
-        : null;
-      const margin  = entry > 0 && qty > 0 ? (entry * qty) / lev : 0;
-      const pnlPct  = pnlUsd != null && margin > 0 ? (pnlUsd / margin * 100) : null;
-      const isPosP  = pnlUsd == null || pnlUsd >= 0;
-
-      if (dot)   { dot.style.background = isLong ? "#16A34A" : "#DC2626"; }
-      if (pulse) {
-        pulse.style.background = isLong ? "#16A34A" : "#DC2626";
-        pulse.style.animation  = "lp-pulse 1.4s infinite";
-      }
-      if (row) row.style.background = isLong ? "#F0FDF4" : "#FFF1F2";
-      if (label) {
-        label.style.color = isLong ? "#15803D" : "#B91C1C";
-        label.textContent = (isLong ? "▲ LONG " : "▼ SHORT ") + pos.symbol;
-      }
-      if (detail) {
-        detail.textContent = `진입 ${fmtPrice(entry)} · ${lev}x · ${pos.held_min}분 보유`;
-      }
-      if (pnlEl) {
-        pnlEl.style.color = isPosP ? "#16A34A" : "#DC2626";
-        pnlEl.innerHTML = pnlUsd != null
-          ? `${fmtPnl(pnlUsd)}<br><span style="font-size:11px;">${fmtPct(pnlPct)}</span>`
-          : "—";
-      }
-    }
-  } else {
-    // 포지션 없음
-    if (dot)   dot.style.background  = "#A8978A";
-    if (pulse) { pulse.style.background = "#A8978A"; pulse.style.animation = "none"; }
-    if (row)   row.style.background   = "#F5F0EB";
-    if (label) { label.style.color = "#78716C"; label.textContent = "포지션 없음"; }
-    if (detail) detail.textContent = "다음 분석 신호 대기 중";
-    if (pnlEl)  pnlEl.innerHTML = "";
-  }
-
-  // 오늘 통계
-  const eEl = document.getElementById("bot-stat-entries");
-  const lEl = document.getElementById("bot-stat-longs");
-  const sEl = document.getElementById("bot-stat-shorts");
-  if (eEl) eEl.textContent = d.entries_today ?? "—";
-  if (lEl) lEl.textContent = d.longs_today   ?? "—";
-  if (sEl) sEl.textContent = d.shorts_today  ?? "—";
-
-  // 마지막 신호
-  const sigEl = document.getElementById("bot-last-signal");
-  if (sigEl && d.last_ts) {
-    const ts  = d.last_ts.replace("T", " ").slice(0, 16);
-    const sig = d.last_signal || "";
-    const conf= d.last_confidence != null ? ` · ${d.last_confidence}%` : "";
-    sigEl.textContent = `마지막 신호: ${sig}${conf}  (${ts})`;
-  }
-
-  // 가상 잔고 복리 현황
-  const bal = d.balance;
-  const balRow = document.getElementById("bot-balance-row");
-  if (bal && balRow) {
-    balRow.style.display = "block";
-    const current  = bal.balance         ?? 0;
-    const initial  = bal.initial_balance ?? current;
-    const totalPnl = bal.total_pnl       ?? 0;
-    const pct      = initial > 0 ? ((current - initial) / initial * 100) : 0;
-    const pnlColor = totalPnl >= 0 ? "#16A34A" : "#DC2626";
-    const pctColor = pct      >= 0 ? "#16A34A" : "#DC2626";
-
-    const curEl = document.getElementById("bot-bal-current");
-    const pnlEl = document.getElementById("bot-bal-pnl");
-    const pctEl = document.getElementById("bot-bal-pct");
-    if (curEl) curEl.textContent = "$" + current.toLocaleString("en-US", {minimumFractionDigits:0, maximumFractionDigits:0});
-    if (pnlEl) { pnlEl.textContent = fmtPnl(totalPnl); pnlEl.style.color = pnlColor; }
-    if (pctEl) { pctEl.textContent = fmtPct(pct);      pctEl.style.color = pctColor; }
-  }
-}
-
-async function resetDryBalance() {
-  if (!confirm("가상 잔고를 $10,000으로 초기화할까요?")) return;
-  try {
-    await fetch(`/api/autotrader/balance/reset?initial=10000`, { method: "POST" });
-    fetchBotSummary();
-  } catch(e) { alert("실패: " + e.message); }
-}
-
-// 가격 업데이트 시 봇 위젯 P&L도 즉시 갱신
-function tickBotPnl(price) {
-  if (_botSummaryData) renderBotStatus(_botSummaryData, price);
-  if (currentBottomTab === "backtest" && _livePosData) renderLivePosition(_livePosData, price);
 }
 
 // ══════════════════════════════════════════════
@@ -4797,139 +4318,35 @@ function renderHistory(entries) {
     container.innerHTML = '<div class="history-empty">분석 기록이 없습니다. 분석을 실행하면 여기에 쌓입니다.</div>';
     return;
   }
-  const sigClass  = { "매수": "buy", "매도": "sell", "홀드": "hold" };
-  const sigEmoji  = { "매수": "▲", "매도": "▼", "홀드": "●" };
-  let rows = "";
+  const sigClass = { "매수": "buy", "매도": "sell", "홀드": "hold" };
+  const sigEmoji = { "매수": "▲", "매도": "▼", "홀드": "●" };
+  let items = "";
   entries.forEach(e => {
     const ts    = e.timestamp || "";
-    const time  = ts ? ts.replace("T", " ").slice(0, 16) : "—";
-    const sig   = e.signal  || "—";
+    const time  = ts ? ts.replace("T", " ").slice(5, 16) : "—"; // MM-DD HH:mm
+    const sig   = e.signal || "—";
     const cls   = sigClass[sig] || "hold";
     const emoji = sigEmoji[sig] || "";
     const conf  = e.confidence != null ? `${e.confidence}%` : "—";
-    const price = e.price    != null ? `$${Number(e.price).toLocaleString("en-US",{minimumFractionDigits:0,maximumFractionDigits:0})}` : "—";
-    const regime  = escapeHtml(e.regime  || "—");
-    const summary = escapeHtml(e.summary || "—");
-    rows += `<tr data-ts="${escapeHtml(ts)}" onclick="onHistoryRowClick(this)">
-      <td style="white-space:nowrap;color:#78716C;">${time}</td>
-      <td><span class="hist-signal ${cls}">${emoji} ${sig}</span></td>
-      <td class="hist-conf">${conf}</td>
-      <td class="hist-price">${price}</td>
-      <td class="hist-regime">${regime}</td>
-      <td class="hist-summary" title="${summary}">${summary}</td>
-    </tr>`;
+    const price = e.price != null
+      ? `$${Number(e.price).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+      : "—";
+    const regime = escapeHtml(e.regime || "—");
+    items += `
+      <div class="hist-item" data-ts="${escapeHtml(ts)}">
+        <span class="hist-signal ${cls}">${emoji} ${sig}</span>
+        <span class="hist-price">${price}</span>
+        <span class="hist-time">${time}</span>
+        <span class="hist-conf">${conf}</span>
+        <span class="hist-regime">${regime}</span>
+      </div>`;
   });
-  container.innerHTML = `
-    <table class="history-table">
-      <thead><tr>
-        <th>시간 (KST)</th><th>신호</th><th>확신도</th><th>가격</th><th>레짐</th>
-        <th style="display:flex;align-items:center;gap:6px;">한줄 요약
-          <span style="font-size:9px;font-weight:500;color:#B8A898;letter-spacing:0;">(행 클릭 → 차트 이동)</span>
-        </th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-
-  // 이전 선택 상태 복원
-  if (state.selectedHistoryTs) {
-    const sel = container.querySelector(`tr[data-ts="${CSS.escape(state.selectedHistoryTs)}"]`);
-    if (sel) sel.classList.add("hist-selected");
-  }
+  container.innerHTML = `<div class="hist-list">${items}</div>`;
 }
 
 // 초기 로드
 fetchHistory();
 
-// ── 히스토리 행 클릭 → 차트 오버레이 ─────────────
-function onHistoryRowClick(trEl) {
-  const ts = trEl.dataset.ts;
-  if (!ts) return;
-
-  const isAlreadySelected = state.selectedHistoryTs === ts;
-
-  // 모든 행 선택 해제
-  document.querySelectorAll(".history-table tr.hist-selected")
-    .forEach(r => r.classList.remove("hist-selected"));
-
-  if (isAlreadySelected) {
-    // 같은 행 재클릭 → 선택 해제
-    state.selectedHistoryTs = null;
-    renderCurrentChart();
-    return;
-  }
-
-  // 새 행 선택
-  state.selectedHistoryTs = ts;
-  trEl.classList.add("hist-selected");
-
-  // 화살표 토글이 꺼져 있으면 자동으로 켬
-  if (!state.showHistoryArrows) {
-    state.showHistoryArrows = true;
-    localStorage.setItem("showHistoryArrows", "true");
-    updateArrowToggleBtn();
-  }
-
-  // 차트 마커 하이라이트 + 뷰포트 이동
-  renderCurrentChart();
-  highlightHistoryOnChart(ts);
-}
-
-function highlightHistoryOnChart(ts) {
-  const chart = state.chartInstance;
-  if (!chart) return;
-  const tf = state.currentTf;
-  const chartData = state.charts[tf];
-  if (!chartData || !chartData.labels || !chartData.labels.length) return;
-
-  const labels = chartData.labels;
-  const total  = labels.length;
-  const idx    = findClosestLabelIndex(labels, ts);
-  if (idx < 0) return;
-
-  // 선택된 캔들 중심으로 ~40개 캔들 보이도록 zoom
-  const windowSize = Math.min(40, total);
-  const half = Math.floor(windowSize / 2);
-  const startIdx = Math.max(0, idx - half);
-  const endIdx   = Math.min(total - 1, idx + half);
-  const startPct = total > 1 ? (startIdx / (total - 1)) * 100 : 0;
-  const endPct   = total > 1 ? (endIdx   / (total - 1)) * 100 : 100;
-
-  chart.dispatchAction({ type: "dataZoom", start: startPct, end: endPct });
-
-  // 약간의 딜레이 후 해당 캔들에 툴팁 표시
-  setTimeout(() => {
-    chart.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: idx });
-  }, 120);
-}
-
-// ── 화살표 오버레이 토글 ──────────────────────
-function toggleHistoryArrows() {
-  state.showHistoryArrows = !state.showHistoryArrows;
-  localStorage.setItem("showHistoryArrows", state.showHistoryArrows ? "true" : "false");
-  updateArrowToggleBtn();
-  renderCurrentChart();
-}
-
-function updateArrowToggleBtn() {
-  const btn = document.getElementById("arrow-toggle-btn");
-  if (!btn) return;
-  btn.classList.toggle("active", state.showHistoryArrows);
-  btn.title = state.showHistoryArrows ? "분석 신호 화살표 숨김" : "분석 신호 화살표 표시";
-}
-
-// ESC 키로 히스토리 행 선택 해제
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && state.selectedHistoryTs) {
-    state.selectedHistoryTs = null;
-    document.querySelectorAll(".history-table tr.hist-selected")
-      .forEach(r => r.classList.remove("hist-selected"));
-    renderCurrentChart();
-  }
-});
-
-// 초기 버튼 상태 설정 및 히스토리 로드
-updateArrowToggleBtn();
-loadAnalysisHistory();
 
 // ══════════════════════════════════════════════
 // 성과 대시보드
@@ -5186,6 +4603,87 @@ function showError(msg) {
   el.textContent = msg;
   el.classList.add("visible");
 }
+
+// ══════════════════════════════════════════════
+// ══════════════════════════════════════════════
+// 실시간 동시접속자 수 폴링
+// ══════════════════════════════════════════════
+(function() {
+  const POLL_MS = 15_000;
+  async function fetchConnections() {
+    try {
+      const res = await fetch("/api/connections");
+      if (!res.ok) return;
+      const { count } = await res.json();
+      const chip = document.getElementById("connections-chip");
+      const text = document.getElementById("connections-text");
+      const dot  = chip?.querySelector(".status-dot");
+      if (text) text.textContent = `${count}명 접속 중`;
+      if (dot)  dot.style.background = count > 0 ? "#86EFAC" : "#A8978A";
+      if (chip) chip.className = `status-chip${count > 0 ? " live" : ""}`;
+    } catch (_) {}
+  }
+  fetchConnections();
+  setInterval(fetchConnections, POLL_MS);
+})();
+
+// 히어로 카운트다운 — 2026년 4월 19일 오전 10:00 KST
+// ══════════════════════════════════════════════
+(function() {
+  const TARGET = new Date('2026-04-19T10:00:00+09:00').getTime();
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function tickCountdown() {
+    const now  = Date.now();
+    const diff = TARGET - now;
+
+    const countdownEl = document.getElementById('hero-countdown');
+    const startedEl   = document.getElementById('hero-started');
+
+    if (diff <= 0) {
+      if (countdownEl) countdownEl.style.display = 'none';
+      if (startedEl) {
+        startedEl.style.display = 'block';
+        const elapsed   = Math.abs(diff);
+        const totalSecs = Math.floor(elapsed / 1000);
+        const elDays    = Math.floor(totalSecs / 86400);
+        const elHours   = Math.floor((totalSecs % 86400) / 3600);
+        const elMins    = Math.floor((totalSecs % 3600) / 60);
+        startedEl.innerHTML =
+          `<span class="hero-elapsed-label">챌린지 진행 중</span>` +
+          `<span class="hero-elapsed-value">D+${elDays}</span>` +
+          `<span class="hero-elapsed-sub">${pad(elHours)}시간 ${pad(elMins)}분 경과</span>`;
+      }
+      setTimeout(tickCountdown, 60000); // 1분마다 경과 시간 갱신
+      return;
+    }
+
+    const totalSecs = Math.floor(diff / 1000);
+    const days  = Math.floor(totalSecs / 86400);
+    const hours = Math.floor((totalSecs % 86400) / 3600);
+    const mins  = Math.floor((totalSecs % 3600) / 60);
+    const secs  = totalSecs % 60;
+
+    const d = document.getElementById('hcd-days');
+    const h = document.getElementById('hcd-hours');
+    const m = document.getElementById('hcd-mins');
+    const s = document.getElementById('hcd-secs');
+
+    if (d) d.textContent = days;
+    if (h) h.textContent = pad(hours);
+    if (m) m.textContent = pad(mins);
+    if (s) s.textContent = pad(secs);
+
+    setTimeout(tickCountdown, 1000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tickCountdown);
+  } else {
+    tickCountdown();
+  }
+})();
 </script>
 </body>
 </html>
