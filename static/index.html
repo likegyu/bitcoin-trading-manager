@@ -856,26 +856,28 @@ body {
   animation: lp-pulse 1.4s infinite;
 }
 
-/* ══ 히스토리 테이블 ════════════════════ */
+/* ══ 히스토리 카드 리스트 ════════════════════ */
 .history-empty { color: #A8978A; font-size: 13px; text-align: center; padding: 40px 0; }
-
-/* 히스토리 카드 리스트 */
-.hist-list { display: flex; flex-direction: column; }
+.hist-list { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
 .hist-item {
   display: grid;
   grid-template-columns: auto 1fr auto;
   grid-template-rows: auto auto;
-  column-gap: 10px; row-gap: 2px;
+  column-gap: 10px; row-gap: 3px;
   align-items: center;
-  padding: 9px 14px;
-  border-bottom: 1px solid #F5F0EB;
+  padding: 10px 12px;
+  background: #FFFFFF;
+  border: 1px solid #E8DDD4;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: box-shadow .15s;
 }
-.hist-item:last-child { border-bottom: none; }
+.hist-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 
-/* 신호 배지 — 그리드 row 1, col 1 */
+/* 신호 배지 — row 1, col 1 */
 .hist-signal {
   display: inline-flex; align-items: center; gap: 3px; font-weight: 700;
-  font-size: 11px; padding: 3px 8px; border-radius: 5px; white-space: nowrap;
+  font-size: 11px; padding: 3px 8px; border-radius: 6px; white-space: nowrap;
   grid-row: 1; grid-column: 1;
 }
 .hist-signal.buy  { background: #DCFCE7; color: #16A34A; }
@@ -929,15 +931,14 @@ body {
   .bottom-tab-btn { padding: 10px 12px; font-size: 12px; }
 }
 
-/* ══ 히어로 섹션 ═══════════════════════════════ */
 /* ══ 히어로 티커 바 ══════════════════════════ */
 .hero-section {
   display: flex;
   align-items: center;
   gap: 0;
   height: 40px;
-  background: #0F0F14;
-  border: 1px solid rgba(234,88,12,0.22);
+  background: #FFFFFF;
+  border: 1px solid #E8DDD4;
   border-radius: 10px;
   margin-bottom: 16px;
   overflow: hidden;
@@ -960,21 +961,14 @@ body {
   flex-shrink: 0;
   display: flex; align-items: center; gap: 5px;
   padding: 0 14px;
-  border-right: 1px solid rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.85);
+  border-right: 1px solid #E8DDD4;
+  color: #57534E;
   white-space: nowrap;
 }
 .hero-ticker-amount {
   font-weight: 800;
-  color: #ffd700;
+  color: #EA580C;
 }
-.hero-ticker-sep {
-  flex-shrink: 0;
-  width: 1px; height: 18px;
-  background: rgba(255,255,255,0.1);
-  margin: 0 2px;
-}
-/* .hero-start-date 제거됨 */
 .hero-countdown {
   display: flex;
   align-items: center;
@@ -988,13 +982,13 @@ body {
 .hero-cd-num {
   font-size: 13px;
   font-weight: 800;
-  color: #fff;
+  color: #1C1917;
   letter-spacing: 0.02em;
 }
 .hero-cd-lbl {
   font-size: 9px;
   font-weight: 600;
-  color: rgba(255,255,255,0.4);
+  color: #A8978A;
   margin-right: 6px;
 }
 .hero-cd-colon {
@@ -1009,24 +1003,11 @@ body {
   display: flex; align-items: center; gap: 8px;
   padding: 0 14px;
 }
-/* 모바일: 히어로 티커 압축 */
-@media (max-width: 540px) {
-  .hero-ticker-title { font-size: 10px; padding: 0 8px; }
-  .hero-ticker-amount { font-size: 11px; }
-  .hero-cd-num { font-size: 11px; }
-  .hero-cd-lbl { font-size: 8px; margin-right: 4px; }
-  .hero-countdown { padding: 0 8px; }
-  .hero-elapsed-label { display: none; }  /* "진행 중" 텍스트 숨김 */
-  .hero-elapsed-sub { display: none; }    /* "HH시간 MM분 경과" 숨김 */
-  .hero-elapsed-value { font-size: 13px; }
-  .hero-started { padding: 0 10px; gap: 0; }
-  .hero-badge { padding: 0 10px; font-size: 9px; }
-}
 .hero-elapsed-label {
   font-size: 10px;
   font-weight: 600;
-  color: rgba(255,255,255,0.38);
-  letter-spacing: 0.1em;
+  color: #A8978A;
+  letter-spacing: 0.08em;
 }
 .hero-elapsed-value {
   font-size: 14px;
@@ -1037,7 +1018,20 @@ body {
 .hero-elapsed-sub {
   font-size: 11px;
   font-weight: 500;
-  color: rgba(255,255,255,0.4);
+  color: #78716C;
+}
+/* 모바일: 히어로 티커 압축 */
+@media (max-width: 540px) {
+  .hero-ticker-title { font-size: 10px; padding: 0 8px; }
+  .hero-ticker-amount { font-size: 11px; }
+  .hero-cd-num { font-size: 11px; }
+  .hero-cd-lbl { font-size: 8px; margin-right: 4px; }
+  .hero-countdown { padding: 0 8px; }
+  .hero-elapsed-label { display: none; }
+  .hero-elapsed-sub { display: none; }
+  .hero-elapsed-value { font-size: 13px; }
+  .hero-started { padding: 0 10px; gap: 0; }
+  .hero-badge { padding: 0 10px; font-size: 9px; }
 }
 
 /* ══ bottom-section (히스토리/성과 위젯) ═══════ */
@@ -1045,7 +1039,7 @@ body {
   background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px;
   overflow: hidden;
   display: flex; flex-direction: column;
-  flex: 1; min-height: 0;
+  /* 높이는 syncBottomHeight() JS 로 동적 제어 */
 }
 
 @media (max-width: 1200px) {
@@ -1053,9 +1047,11 @@ body {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
   }
-  .chart-col          { grid-column: 1; grid-row: 1; }
-  .panel              { grid-column: 1; grid-row: 2; }
+  .chart-col           { grid-column: 1; grid-row: 1; }
+  .panel               { grid-column: 1; grid-row: 2; }
   .bottom-section-wrap { grid-column: 1; grid-row: 3; }
+  /* 모바일에서는 JS 높이 제어 해제 */
+  .bottom-section { height: auto !important; }
 }
 </style>
 </head>
@@ -1937,6 +1933,8 @@ function applyResult(data, options = {}) {
   renderReport(data.raw_text, data.report_sections, data.report_missing_sections);
   renderAgentsPanel();
   renderLevels(data.signal, data.trade_levels);
+  // 패널 높이 변동 후 bottom-section 재동기화
+  setTimeout(syncBottomHeight, 200);
   // account 데이터는 실시간 account-stream 에서만 적용 — 분석 시점 스냅샷 덮어쓰기 방지
 
   if (persist) {
@@ -4234,6 +4232,8 @@ let currentBottomTab = "history";
 
 function switchBottomTab(tab) {
   currentBottomTab = tab;
+  // 탭 전환 후 높이 재계산 (성과 탭↔히스토리 탭 전환 시 패널 높이 변동 반영)
+  setTimeout(syncBottomHeight, 50);
   ["history", "performance"].forEach(t => {
     const btn     = document.getElementById("btab-" + t);
     const content = document.getElementById("bottom-tab-" + t);
@@ -4333,6 +4333,36 @@ function renderHistory(entries) {
 
 // 초기 로드
 fetchHistory();
+
+
+// ══════════════════════════════════════════════
+// bottom-section 높이 동기화 (패널 하단 맞춤)
+// ══════════════════════════════════════════════
+function syncBottomHeight() {
+  if (window.innerWidth <= 1200) return; // 모바일: auto
+  const panel  = document.querySelector('.panel');
+  const chart  = document.querySelector('.chart-area');
+  const bottom = document.querySelector('.bottom-section');
+  if (!panel || !chart || !bottom) return;
+  requestAnimationFrame(() => {
+    const panelH  = panel.getBoundingClientRect().height;
+    const chartH  = chart.getBoundingClientRect().height;
+    const gap     = parseInt(getComputedStyle(document.querySelector('.main-grid')).gap) || 16;
+    const target  = panelH - chartH - gap;
+    if (target > 80) {
+      bottom.style.height    = target + 'px';
+      bottom.style.maxHeight = target + 'px';
+    }
+  });
+}
+
+// 패널 높이가 바뀔 수 있는 시점마다 재계산
+window.addEventListener('load',   syncBottomHeight);
+window.addEventListener('resize', () => {
+  const bs = document.querySelector('.bottom-section');
+  if (bs) { bs.style.height = ''; bs.style.maxHeight = ''; }
+  syncBottomHeight();
+});
 
 
 // ══════════════════════════════════════════════
