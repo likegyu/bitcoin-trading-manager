@@ -290,6 +290,28 @@ def fetch_macro_context() -> dict:
     return result
 
 
+def _staleness_days(latest_date_str: Optional[str]) -> Optional[int]:
+    """FRED 기준일로부터 오늘까지 경과 일수. None이면 날짜 없음."""
+    if not latest_date_str:
+        return None
+    try:
+        from datetime import date as _date
+        ld = _date.fromisoformat(latest_date_str)
+        return (_date.today() - ld).days
+    except Exception:
+        return None
+
+
+# FRED 시리즈별 허용 지연 일수 (이 값 초과 시 경고)
+# DTWEXBGS는 H.10 릴리즈 기준 최대 7-8영업일 지연 정상
+_STALE_THRESHOLD_DAYS: dict[str, int] = {
+    "DFEDTARU": 4,   # FOMC 이후 익일 반영
+    "DFII10":   4,   # 영업일 기준 T+1 (주말 포함 시 3일)
+    "DGS2":     4,   # 영업일 기준 T+1
+    "DTWEXBGS": 7,   # H.10 릴리즈 5-7일 지연 정상; 7일 초과 시 경고
+}
+
+
 def format_macro_context(macro: dict) -> str:
     """
     Claude 프롬프트 삽입용 거시 지표 텍스트.
@@ -298,6 +320,7 @@ def format_macro_context(macro: dict) -> str:
     lines = [
         "[거시경제 지표]",
         "  ※ FRED 항목은 최신값뿐 아니라 24h/72h/7d/5일/20일 변화, 최근 흐름, 최근 3개 관측치를 함께 제공합니다.",
+        "  ※ DTWEXBGS(달러 인덱스)는 H.10 릴리즈 기준 최대 7-8영업일 지연이 정상입니다.",
     ]
     for key, d in macro.items():
         if str(key).startswith("_"):
@@ -323,8 +346,16 @@ def format_macro_context(macro: dict) -> str:
         trend20 = d.get("trend20")
         recent_flow = d.get("recent_flow")
         recent_points = d.get("recent_points")
+
+        # 데이터 지연 경고
+        stale_days = _staleness_days(latest_date)
+        stale_threshold = _STALE_THRESHOLD_DAYS.get(key, 4)
+        stale_flag = ""
+        if stale_days is not None and stale_days > stale_threshold:
+            stale_flag = f" ⚠️{stale_days}일지연"
+
         if latest_date is not None:
-            extras.append(f"기준일 {latest_date}")
+            extras.append(f"기준일 {latest_date}{stale_flag}")
 
         if d.get("change24h") is not None:
             suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
@@ -334,7 +365,14 @@ def format_macro_context(macro: dict) -> str:
             extras.append(f"72h 변화 {d['change72h']:+.2f}{suffix}")
         if d.get("change7d") is not None:
             suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
-            extras.append(f"7d 변화 {d['change7d']:+.2f}{suffix}")
+            ch7 = d["change7d"]
+            # history 기반 7d 변화는 서버 구동 중 누적된 스냅샷으로 계산됨.
+            # 스냅샷이 적으면 0처럼 보일 수 있어 FRED 5일 변화를 함께 참고해야 함.
+            samples = d.get("change7d_samples")
+            if samples is not None and samples < 3:
+                extras.append(f"7d 변화 {ch7:+.2f}{suffix}(스냅샷{samples}개-FRED5일변화참고)")
+            else:
+                extras.append(f"7d 변화 {ch7:+.2f}{suffix}")
         if c5  is not None:
             extras.append(f"5일 변화 {c5:+.3f}")
         if c20 is not None:
