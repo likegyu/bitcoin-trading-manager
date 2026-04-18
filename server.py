@@ -429,7 +429,7 @@ def _build_payload(tf_data: dict, price: float, analysis: dict) -> dict:
         "risk": analysis.get("risk"),
         # 과거 유사 상황 (BM25 회상 결과)
         "memories": analysis.get("memories", []),
-        "account": _build_account_payload(),
+        # account 는 account-stream 에서 실시간으로 별도 관리 — 여기서 포함하지 않음
     }
 
 

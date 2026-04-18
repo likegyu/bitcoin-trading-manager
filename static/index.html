@@ -1856,9 +1856,7 @@ function applyResult(data, options = {}) {
   renderReport(data.raw_text, data.report_sections, data.report_missing_sections);
   renderAgentsPanel();
   renderLevels(data.signal, data.trade_levels);
-  if (data.account) {
-    applyAccountData(data.account);
-  }
+  // account 데이터는 실시간 account-stream 에서만 적용 — 분석 시점 스냅샷 덮어쓰기 방지
 
   if (persist) {
     persistAnalysisCache(data);
