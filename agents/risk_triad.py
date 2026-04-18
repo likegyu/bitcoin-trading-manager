@@ -97,7 +97,7 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
         try:
             msg = client.messages.create(
                 model=RISK_MODEL,
-                max_tokens=2300,
+                max_tokens=7500,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )
