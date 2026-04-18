@@ -651,6 +651,9 @@ class MarketStreamManager:
 _market_stream = MarketStreamManager(DEFAULT_SYMBOL)
 
 
+ACCOUNT_PERIODIC_REFRESH_SECS = 60  # 주기적 REST 폴링 간격 (초)
+
+
 class AccountStreamManager:
     def __init__(self):
         self._payload: dict | None = None
@@ -659,6 +662,7 @@ class AccountStreamManager:
         self._listeners: set[asyncio.Queue] = set()
         self._runner_task: asyncio.Task | None = None
         self._refresh_task: asyncio.Task | None = None
+        self._periodic_task: asyncio.Task | None = None
         self._pending_refresh = False
         self._last_refresh_started_at = 0.0
         self._stopped = False
@@ -668,10 +672,11 @@ class AccountStreamManager:
             return
         self._stopped = False
         self._runner_task = asyncio.create_task(self._run_forever(), name="binance-account-stream")
+        self._periodic_task = asyncio.create_task(self._periodic_refresh(), name="binance-account-periodic")
 
     async def stop(self):
         self._stopped = True
-        tasks = [self._runner_task, self._refresh_task]
+        tasks = [self._runner_task, self._refresh_task, self._periodic_task]
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -732,7 +737,21 @@ class AccountStreamManager:
                     await asyncio.sleep(10)
                 else:
                     print(f"[account-stream] websocket disconnected: {exc}")
+                    # 재연결 전 REST 스냅샷 갱신 — 끊긴 동안의 변경사항 반영
+                    with contextlib.suppress(Exception):
+                        await self._refresh_payload(delay=0, broadcast=True)
                     await asyncio.sleep(3)
+
+    async def _periodic_refresh(self):
+        """WebSocket 이벤트 여부와 무관하게 주기적으로 REST 스냅샷을 갱신."""
+        while not self._stopped:
+            await asyncio.sleep(ACCOUNT_PERIODIC_REFRESH_SECS)
+            if self._stopped:
+                break
+            if not runtime_config.BINANCE_API_KEY:
+                continue
+            with contextlib.suppress(Exception):
+                await self._refresh_payload(delay=0, broadcast=True)
 
     async def _consume_stream(self):
         listen_key = await asyncio.to_thread(open_user_data_stream)
