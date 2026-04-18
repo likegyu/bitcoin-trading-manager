@@ -174,11 +174,14 @@ body {
   grid-template-columns: 69fr 31fr;
   grid-template-rows: auto auto;
   gap: 16px;
-  align-items: start;
 }
-.chart-col   { grid-column: 1; grid-row: 1; min-width: 0; }
-.panel       { grid-column: 2; grid-row: 1 / 3; min-width: 0; }
-.bottom-section-wrap { grid-column: 1; grid-row: 2; min-width: 0; }
+.chart-col          { grid-column: 1; grid-row: 1; min-width: 0; align-self: start; }
+.panel              { grid-column: 2; grid-row: 1 / 3; min-width: 0; }
+.bottom-section-wrap {
+  grid-column: 1; grid-row: 2; min-width: 0;
+  display: flex; flex-direction: column;
+  align-self: stretch;
+}
 
 /* ══ 차트 영역 ════════════════════════════════ */
 .chart-area {
@@ -971,15 +974,7 @@ body {
   background: rgba(255,255,255,0.1);
   margin: 0 2px;
 }
-.hero-start-date {
-  flex-shrink: 0;
-  display: flex; align-items: center;
-  padding: 0 14px;
-  color: rgba(255,255,255,0.45);
-  font-size: 11px;
-  white-space: nowrap;
-  border-right: 1px solid rgba(255,255,255,0.08);
-}
+/* .hero-start-date 제거됨 */
 .hero-countdown {
   display: flex;
   align-items: center;
@@ -1011,8 +1006,21 @@ body {
 }
 @keyframes hcd-blink { 50% { opacity: 0; } }
 .hero-started {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
   padding: 0 14px;
+}
+/* 모바일: 히어로 티커 압축 */
+@media (max-width: 540px) {
+  .hero-ticker-title { font-size: 10px; padding: 0 8px; }
+  .hero-ticker-amount { font-size: 11px; }
+  .hero-cd-num { font-size: 11px; }
+  .hero-cd-lbl { font-size: 8px; margin-right: 4px; }
+  .hero-countdown { padding: 0 8px; }
+  .hero-elapsed-label { display: none; }  /* "진행 중" 텍스트 숨김 */
+  .hero-elapsed-sub { display: none; }    /* "HH시간 MM분 경과" 숨김 */
+  .hero-elapsed-value { font-size: 13px; }
+  .hero-started { padding: 0 10px; gap: 0; }
+  .hero-badge { padding: 0 10px; font-size: 9px; }
 }
 .hero-elapsed-label {
   font-size: 10px;
@@ -1037,7 +1045,7 @@ body {
   background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px;
   overflow: hidden;
   display: flex; flex-direction: column;
-  max-height: 420px;
+  flex: 1; min-height: 0;
 }
 
 @media (max-width: 1200px) {
@@ -1060,7 +1068,6 @@ body {
     <div class="hero-ticker-title">
       제로부터 시작하는 <span class="hero-ticker-amount">$5,000</span> 챌린지
     </div>
-    <div class="hero-start-date">시작 2026.04.19 22:00</div>
     <div class="hero-countdown" id="hero-countdown">
       <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-days">--</span><span class="hero-cd-lbl">일</span></div>
       <div class="hero-cd-colon">:</div>
@@ -4286,14 +4293,23 @@ function renderHistory(entries) {
     const ts    = e.timestamp || "";
     let time = "—";
     if (ts) {
-      try {
-        const d = new Date(ts);
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        const hh = String(d.getHours()).padStart(2, "0");
-        const mi = String(d.getMinutes()).padStart(2, "0");
-        time = `${mm}-${dd} ${hh}:${mi}`;
-      } catch (_) { time = ts.slice(5, 16); }
+      // 구형 포맷 "HH:MM:SS" (날짜 없음) 방어
+      if (/^\d{2}:\d{2}/.test(ts)) {
+        time = ts.slice(0, 5); // "HH:MM"만 표시
+      } else {
+        try {
+          const d = new Date(ts);
+          if (!isNaN(d.getTime())) {
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const dd = String(d.getDate()).padStart(2, "0");
+            const hh = String(d.getHours()).padStart(2, "0");
+            const mi = String(d.getMinutes()).padStart(2, "0");
+            time = `${mm}-${dd} ${hh}:${mi}`;
+          } else {
+            time = ts.replace("T", " ").slice(5, 16) || "—";
+          }
+        } catch (_) { time = "—"; }
+      }
     }
     const sig   = e.signal || "—";
     const cls   = sigClass[sig] || "hold";
