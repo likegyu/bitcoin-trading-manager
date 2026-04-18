@@ -890,6 +890,27 @@ def tick_open_position() -> Optional[dict]:
     _save_cache(cache)
     _watcher_state.pop(ts, None)  # 감시 상태 정리
 
+    # ── trade_log 에 CLOSE 기록 → get_live_position() 이 포지션 없음을 인식 ──
+    close_rec = {
+        "action":      "CLOSE",
+        "symbol":      symbol,
+        "direction":   direction,
+        "entry_price": entry,
+        "exit_price":  exit_price,
+        "sl_price":    sl,
+        "tp_price":    tp,
+        "quantity":    qty,
+        "leverage":    lev,
+        "outcome":     outcome,
+        "pnl_usd":     round(pnl_usd, 4),
+        "pnl_pct":     round(pnl_pct, 4),
+        "hold_min":    round(hold_min, 1),
+        "ts":          exit_ts,
+        "entry_ts":    ts,
+        "dry_run":     pos.get("dry_run", True),
+    }
+    _append_trade_log_raw(close_rec)
+
     # 가상 잔고 복리 반영 (드라이런 전용)
     if pos.get("dry_run", True):
         _apply_pnl_to_balance(pnl_usd, outcome)
