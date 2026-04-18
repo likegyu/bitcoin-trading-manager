@@ -197,13 +197,46 @@ class FinancialSituationMemory:
                     return True
         return False
 
+    @staticmethod
+    def _jaccard(a: list[str], b: list[str]) -> float:
+        """토큰 집합 간 Jaccard 유사도 (0~1)."""
+        if not a or not b:
+            return 0.0
+        sa, sb = set(a), set(b)
+        inter = len(sa & sb)
+        union = len(sa | sb)
+        return inter / union if union else 0.0
+
+    def _jaccard_rank(
+        self,
+        query_tokens: list[str],
+        corpus_tokens: list[list[str]],
+        records: list,
+        top_k: int,
+    ) -> list[dict]:
+        """
+        Jaccard 유사도 기반 랭킹.
+        BM25 IDF 붕괴(소규모 균질 코퍼스) 시 대체 스코어링으로 사용.
+        """
+        scored = [
+            (r, self._jaccard(query_tokens, doc_tokens))
+            for r, doc_tokens in zip(records, corpus_tokens)
+        ]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [
+            {"record": r.to_dict(), "score": round(float(s), 4)}
+            for r, s in scored[:top_k]
+        ]
+
     def get_memories(self, query: str, top_k: int = 3) -> list[dict]:
         """
         query 와 가장 유사한 상황 top_k 개를 반환.
         반환: [{"record": {...}, "score": float}, ...]
 
-        BM25 전부 0점(어휘 불일치) 이거나 쿼리 토큰이 없을 때는
-        최신 K개를 score=0 으로 반환 (탭이 항상 표시되도록).
+        전략:
+          1) BM25 시도 → 유효한 양수 점수 있으면 BM25 랭킹 반환
+          2) BM25 전부 0점 (소규모 균질 코퍼스 → IDF 붕괴) → Jaccard 랭킹으로 대체
+          3) rank_bm25 미설치 / 쿼리 토큰 없음 → Jaccard 랭킹
         """
         with self._lock:
             records = list(self._records)
@@ -211,39 +244,32 @@ class FinancialSituationMemory:
         if not records:
             return []
 
-        def _recent_fallback() -> list[dict]:
-            recent = records[-top_k:]
-            return [{"record": r.to_dict(), "score": 0.0} for r in reversed(recent)]
-
-        if not _BM25_AVAILABLE:
-            # rank_bm25 미설치 → 최신 K개 fallback
-            return _recent_fallback()
-
         corpus_tokens = [_tokenize(r.situation) for r in records]
         query_tokens = _tokenize(query)
+
         if not query_tokens:
-            # 쿼리 토큰 없음 → 최신 K개 fallback
-            return _recent_fallback()
+            # 쿼리 토큰 없음 → Jaccard (최신순 보조)
+            return self._jaccard_rank(query_tokens, corpus_tokens, records, top_k)
 
-        try:
-            bm25 = BM25Okapi(corpus_tokens)
-            scores = bm25.get_scores(query_tokens)
-        except Exception:
-            return _recent_fallback()
+        if _BM25_AVAILABLE:
+            try:
+                bm25 = BM25Okapi(corpus_tokens)
+                scores = bm25.get_scores(query_tokens)
+                ranked = sorted(
+                    zip(records, scores),
+                    key=lambda x: x[1],
+                    reverse=True,
+                )[:top_k]
+                ranked_hit = [(r, s) for r, s in ranked if s > 0]
+                if ranked_hit:
+                    # BM25 정상 동작
+                    return [{"record": r.to_dict(), "score": float(s)} for r, s in ranked_hit]
+                # BM25 전부 0점 → IDF 붕괴 (소규모 균질 코퍼스) → Jaccard로 대체
+            except Exception:
+                pass
 
-        # 점수 내림차순 정렬 후 상위 K개
-        ranked = sorted(
-            zip(records, scores),
-            key=lambda x: x[1],
-            reverse=True,
-        )[:top_k]
-
-        # BM25 전부 0점 → 어휘 불일치 (저장 형식 차이 등) → 최신 K개 fallback
-        ranked_hit = [(r, s) for r, s in ranked if s > 0]
-        if not ranked_hit:
-            return _recent_fallback()
-
-        return [{"record": r.to_dict(), "score": float(s)} for r, s in ranked_hit]
+        # BM25 미설치 또는 IDF 붕괴 → Jaccard 유사도
+        return self._jaccard_rank(query_tokens, corpus_tokens, records, top_k)
 
     def __len__(self) -> int:
         return len(self._records)
