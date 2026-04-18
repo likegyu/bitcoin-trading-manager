@@ -588,30 +588,13 @@ def analyze_with_claude(
     )
     request_kwargs = {
         "model": CLAUDE_MODEL,
-        "max_tokens": 16000,
+        "max_tokens": 8000,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": prompt}],
     }
 
-    # Claude 4.6 계열은 adaptive thinking을, 그 외 thinking 지원 모델은 수동 예산 방식을 사용한다.
-    if (
-        CLAUDE_MODEL.startswith("claude-opus-4-6")
-        or CLAUDE_MODEL.startswith("claude-sonnet-4-6")
-    ):
-        request_kwargs["thinking"] = {"type": "adaptive"}
-    elif (
-        CLAUDE_MODEL.startswith("claude-haiku-4-5")
-        or CLAUDE_MODEL.startswith("claude-sonnet-4-5")
-        or CLAUDE_MODEL.startswith("claude-opus-4-5")
-        or CLAUDE_MODEL.startswith("claude-opus-4-1")
-        or CLAUDE_MODEL.startswith("claude-opus-4")
-        or CLAUDE_MODEL.startswith("claude-sonnet-4")
-        or CLAUDE_MODEL.startswith("claude-3-7-sonnet")
-    ):
-        request_kwargs["thinking"] = {
-            "type": "enabled",
-            "budget_tokens": 4096,
-        }
+    # thinking 완전 비활성화 — 최종 분석은 이미 debate/judge/risk 블록이 reasoning을 제공하므로
+    # adaptive thinking은 수만 토큰을 소모해 비용을 크게 높임. 구조화 출력에는 불필요.
 
     # 529 과부하 대비 지수 백오프 재시도 (최대 4회: 10s → 20s → 40s → 80s)
     max_retries = 4
