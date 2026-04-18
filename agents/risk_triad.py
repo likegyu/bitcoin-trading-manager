@@ -34,7 +34,7 @@ except Exception:
 
 # ── 설정 ──────────────────────────────────────────
 # Risk Triad 모델. 필요 시 env 로 오버라이드.
-RISK_MODEL = os.getenv("RISK_MODEL", "claude-sonnet-4-6")
+RISK_MODEL = os.getenv("RISK_MODEL", "claude-haiku-4-5-20251001")
 
 # 한 라운드 = Aggressive → Conservative → Neutral 순서로 1발언씩.
 # 기본 1라운드 (총 3회 호출). 2라운드면 6회 — 토론이 길어진다.

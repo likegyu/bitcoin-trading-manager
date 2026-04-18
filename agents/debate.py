@@ -31,7 +31,7 @@ except Exception:
 
 # ── 설정 ──────────────────────────────────────────
 # 토론 에이전트 모델. 필요 시 env 로 오버라이드.
-DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-sonnet-4-6")
+DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-haiku-4-5-20251001")
 
 # 한 라운드 = Bull 1회 + Bear 1회.
 # max_rounds=1 → 총 2회 LLM 호출 (가장 가벼운 조합).
