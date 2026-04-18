@@ -163,7 +163,7 @@ def _persist_analysis_history(payload: dict):
         os.makedirs(os.path.dirname(ANALYSIS_HISTORY_PATH), exist_ok=True)
         sections = payload.get("report_sections") or {}
         entry = {
-            "timestamp":   payload.get("analysis_time") or _now_iso(),
+            "timestamp":   _now_iso(),
             "signal":      payload.get("signal"),
             "confidence":  payload.get("confidence"),
             "price":       payload.get("price"),
