@@ -588,7 +588,7 @@ def analyze_with_claude(
     )
     request_kwargs = {
         "model": CLAUDE_MODEL,
-        "max_tokens": 8000,
+        "max_tokens": 12000,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": prompt}],
     }
