@@ -1906,7 +1906,7 @@ function getAnalysisFreshnessCopy() {
   if (!state.analysisTime) return "분석 대기 중";
   if (state.analysisFromCache) return `기준 ${state.analysisTime} · 이전 분석`;
   return state.analysisStale
-    ? `기준 ${state.analysisTime} · 실시간 시세 대비 지연 가능`
+    ? `기준 ${state.analysisTime} · 실시간 시세 대비 지연`
     : `기준 ${state.analysisTime} · 최신 분석`;
 }
 
@@ -4346,7 +4346,8 @@ function syncBottomHeight() {
   const chart  = document.querySelector('.chart-area');
   const bottom = document.querySelector('.bottom-section');
   if (!panel || !chart || !bottom) return;
-  requestAnimationFrame(() => {
+  // 두 번의 rAF로 레이아웃이 완전히 정착한 뒤 측정
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     const panelH  = panel.getBoundingClientRect().height;
     const chartH  = chart.getBoundingClientRect().height;
     const gap     = parseInt(getComputedStyle(document.querySelector('.main-grid')).gap) || 16;
@@ -4355,15 +4356,18 @@ function syncBottomHeight() {
       bottom.style.height    = target + 'px';
       bottom.style.maxHeight = target + 'px';
     }
-  });
+  }));
 }
 
 // 패널 높이가 바뀔 수 있는 시점마다 재계산
-window.addEventListener('load',   syncBottomHeight);
+window.addEventListener('load', syncBottomHeight);
 window.addEventListener('resize', () => {
+  // 리사이즈 중에는 즉시 height 해제 (auto로 흘러가게)
   const bs = document.querySelector('.bottom-section');
   if (bs) { bs.style.height = ''; bs.style.maxHeight = ''; }
-  syncBottomHeight();
+  // 리사이즈가 완전히 멈춘 뒤 재계산 (150ms debounce)
+  clearTimeout(window._syncBhTimer);
+  window._syncBhTimer = setTimeout(syncBottomHeight, 150);
 });
 
 

@@ -201,27 +201,35 @@ class FinancialSituationMemory:
         """
         query 와 가장 유사한 상황 top_k 개를 반환.
         반환: [{"record": {...}, "score": float}, ...]
+
+        BM25 전부 0점(어휘 불일치) 이거나 쿼리 토큰이 없을 때는
+        최신 K개를 score=0 으로 반환 (탭이 항상 표시되도록).
         """
         with self._lock:
             records = list(self._records)
 
         if not records:
             return []
-        if not _BM25_AVAILABLE:
-            # rank_bm25 미설치 → 최근 K개 fallback
+
+        def _recent_fallback() -> list[dict]:
             recent = records[-top_k:]
-            return [{"record": r.to_dict(), "score": 0.0} for r in recent[::-1]]
+            return [{"record": r.to_dict(), "score": 0.0} for r in reversed(recent)]
+
+        if not _BM25_AVAILABLE:
+            # rank_bm25 미설치 → 최신 K개 fallback
+            return _recent_fallback()
 
         corpus_tokens = [_tokenize(r.situation) for r in records]
         query_tokens = _tokenize(query)
         if not query_tokens:
-            return []
+            # 쿼리 토큰 없음 → 최신 K개 fallback
+            return _recent_fallback()
 
         try:
             bm25 = BM25Okapi(corpus_tokens)
             scores = bm25.get_scores(query_tokens)
         except Exception:
-            return []
+            return _recent_fallback()
 
         # 점수 내림차순 정렬 후 상위 K개
         ranked = sorted(
@@ -230,12 +238,12 @@ class FinancialSituationMemory:
             reverse=True,
         )[:top_k]
 
-        # 모두 0점이면 (매칭 없음) 빈 리스트
-        ranked = [(r, s) for r, s in ranked if s > 0]
-        if not ranked:
-            return []
+        # BM25 전부 0점 → 어휘 불일치 (저장 형식 차이 등) → 최신 K개 fallback
+        ranked_hit = [(r, s) for r, s in ranked if s > 0]
+        if not ranked_hit:
+            return _recent_fallback()
 
-        return [{"record": r.to_dict(), "score": float(s)} for r, s in ranked]
+        return [{"record": r.to_dict(), "score": float(s)} for r, s in ranked_hit]
 
     def __len__(self) -> int:
         return len(self._records)
