@@ -1,6 +1,7 @@
 # =============================================
 # 거시경제 지표 수집 모듈
-# ─ FRED : DFII10 (10Y 실질금리), DGS2 (2Y 국채), DTWEXBGS (달러 인덱스)
+# ─ FRED : DFEDTARU (기준금리 상단), DFII10 (10Y 실질금리),
+#           DGS2 (2Y 국채시장금리), DTWEXBGS (달러 인덱스)
 # ─ DefiLlama : 전체 스테이블코인 시총, USDT 도미넌스
 # =============================================
 import requests
@@ -14,10 +15,16 @@ from macro_history import attach_macro_history_summary
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
 # ── FRED 시리즈 정의 ──────────────────────────────────────────
+# DFEDTARU : Fed Funds Target Rate Upper Bound (실제 FOMC 기준금리 상단, 일별)
+#   → 25bp 단위로 계단식 변화. 시장금리(DGS2)와 달리 FOMC 결정일에만 변동.
+# DGS2     : 2Y Treasury Yield (시장 기대 반영 — 기준금리 예상치에 선행)
+# DFII10   : 10Y TIPS Yield (실질금리)
+# DTWEXBGS : Broad Dollar Index
 _FRED_SERIES = {
-    "DFII10":   {"label": "10Y 실질금리",  "unit": "%",  "fmt": "+.2f"},
-    "DGS2":     {"label": "2Y 국채금리",   "unit": "%",  "fmt": "+.2f"},
-    "DTWEXBGS": {"label": "달러 인덱스",   "unit": "",   "fmt": ".2f"},
+    "DFEDTARU": {"label": "기준금리(상단)",  "unit": "%",  "fmt": ".2f"},
+    "DFII10":   {"label": "10Y 실질금리",   "unit": "%",  "fmt": "+.2f"},
+    "DGS2":     {"label": "2Y 국채금리",    "unit": "%",  "fmt": "+.2f"},
+    "DTWEXBGS": {"label": "달러 인덱스",    "unit": "",   "fmt": ".2f"},
 }
 
 
@@ -239,9 +246,10 @@ def fetch_macro_context() -> dict:
     """
     result: dict = {}
 
-    # FRED
+    # FRED — DFEDTARU 는 step-function(계단식) 시계열이므로 days=120으로 길게 조회
     for sid, meta in _FRED_SERIES.items():
-        s     = _fetch_fred(sid)
+        days = 120 if sid == "DFEDTARU" else 60
+        s     = _fetch_fred(sid, days=days)
         stats = _compute_stats(s)
         result[sid] = {**meta, **stats}
 
@@ -296,7 +304,7 @@ def format_macro_context(macro: dict) -> str:
             continue
         v = d.get("value")
         if v is None:
-            if not FRED_API_KEY and key in ("DFII10", "DGS2", "DTWEXBGS"):
+            if not FRED_API_KEY and key in ("DFEDTARU", "DFII10", "DGS2", "DTWEXBGS"):
                 lines.append(f"  {d['label']} ({key}): FRED API 키 없음 — 미제공")
             else:
                 lines.append(f"  {d['label']} ({key}): 데이터 없음")
@@ -365,6 +373,8 @@ def format_macro_context(macro: dict) -> str:
 
     lines.append(
         "  ※ 해석 참고: "
+        "기준금리(DFEDTARU)는 FOMC 결정일에만 25bp 단위로 변동 — 2Y 국채금리(DGS2)와 달리 일별 등락 없음. "
+        "DGS2가 DFEDTARU보다 낮으면 시장이 금리 인하를 선반영. "
         "실질금리·달러 상승은 BTC 등 위험자산에 부정적 압력. "
         "스테이블코인 시총↑+USDT 도미넌스↓+BTC 도미넌스↑ = 알트→BTC 순환(위험선호 유지). "
         "스테이블코인 시총 정체+USDT 도미넌스↑+BTC 도미넌스↑ = 방어적 포지셔닝. "

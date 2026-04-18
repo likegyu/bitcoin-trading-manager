@@ -16,6 +16,8 @@ WINDOW_CONFIGS = (
 )
 
 METRIC_CONFIG = {
+    # DFEDTARU: FOMC 결정일에만 변동(25bp 단위). threshold=0.13 → 25bp 변화 시 확실히 감지.
+    "DFEDTARU": {"label": "기준금리(상단)", "threshold": 0.13},
     "DFII10": {"label": "10Y 실질금리", "threshold": 0.03},
     "DGS2": {"label": "2Y 국채금리", "threshold": 0.03},
     "DTWEXBGS": {"label": "달러 인덱스", "threshold": 0.15},
@@ -66,7 +68,7 @@ def _metric_threshold(metric: str) -> float:
 def _format_delta(metric: str, value: float | None) -> str:
     if value is None:
         return "N/A"
-    if metric in {"DFII10", "DGS2", "USDT_DOM", "BTC_DOM"}:
+    if metric in {"DFEDTARU", "DFII10", "DGS2", "USDT_DOM", "BTC_DOM"}:
         return f"{value:+.2f}%p"
     if metric == "STABLE_MCAP":
         return f"{value:+.2f}B"
@@ -170,7 +172,7 @@ def _section_lines(metrics: dict[str, dict], include_rates: bool = True) -> tupl
 
     if include_rates:
         rate_parts = []
-        for metric in ("DFII10", "DGS2", "DTWEXBGS"):
+        for metric in ("DFEDTARU", "DFII10", "DGS2", "DTWEXBGS"):
             change = metrics[metric]["change"]
             if change is None:
                 continue
