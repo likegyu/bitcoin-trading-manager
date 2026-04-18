@@ -31,7 +31,7 @@ from account_context import (
 )
 from data_fetcher import fetch_ohlcv, fetch_current_price
 from indicators import add_all_indicators, fibonacci_swing_levels, fib_window_for_tf
-from analyzer import analyze_with_claude, chat_with_claude, run_full_analysis
+from analyzer import analyze_with_claude, run_full_analysis
 from macro_fetcher import fetch_macro_context
 from time_utils import format_kst, now_kst
 
@@ -430,7 +430,6 @@ def _build_payload(tf_data: dict, price: float, analysis: dict) -> dict:
         # 과거 유사 상황 (BM25 회상 결과)
         "memories": analysis.get("memories", []),
         "account": _build_account_payload(),
-        "chat_context": f"{analysis.get('prompt_used', '')}\n\n[Claude 분석 결과]\n{analysis['raw_text']}",
     }
 
 
@@ -1343,20 +1342,6 @@ async def analyze_start():
 async def analyze_status(include_latest: bool = False):
     return await _analysis_manager.get_status(include_latest=include_latest)
 
-
-class ChatRequest(BaseModel):
-    messages: list
-    context:  str
-
-
-@app.post("/api/chat")
-async def chat_endpoint(body: ChatRequest):
-    loop = asyncio.get_event_loop()
-    reply = await loop.run_in_executor(
-        _executor,
-        lambda: chat_with_claude(body.messages, body.context),
-    )
-    return {"reply": reply}
 
 
 @app.post("/api/reflect")

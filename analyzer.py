@@ -787,30 +787,3 @@ def run_full_analysis(
     return result
 
 
-def chat_with_claude(messages: list, context: str) -> str:
-    """
-    분석 결과를 컨텍스트로 유지하며 멀티턴 채팅.
-
-    Parameters
-    ----------
-    messages : [{"role": "user"|"assistant", "content": str}, ...]
-    context  : 원본 분석 데이터 + Claude 응답 (세션 컨텍스트)
-    """
-    client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-
-    system = (
-        f"당신은 10년 경력의 {PAIR_LABEL} 시장 애널리스트입니다.\n"
-        f"아래는 방금 수행한 {PAIR_LABEL} 분석의 원본 데이터와 애널리스트 리포트입니다.\n"
-        "사용자의 추가 질문에 이 컨텍스트를 바탕으로 간결하고 명확하게 답하세요.\n"
-        "사실과 해석을 구분하고, 필요하면 반대 시나리오와 관점 무효화 조건도 함께 설명하세요.\n"
-        "마크다운(**,##,---), HTML 태그는 절대 사용하지 마세요. 이모지와 일반 텍스트만 사용하세요.\n\n"
-        f"[분석 컨텍스트]\n{context}"
-    )
-
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=3000,
-        system=system,
-        messages=messages,
-    )
-    return response.content[0].text

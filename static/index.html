@@ -577,81 +577,6 @@ body {
 .auto-dot.off { background: #D5C5B5; }
 .auto-hint { font-size: 11.5px; color: #A8978A; margin-top: 8px; }
 
-/* ══ 채팅 섹션 ════════════════════════════════ */
-.chat-section { margin-top: 16px; }
-.chat-card { background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px; overflow: hidden; }
-.chat-history {
-  padding: 14px 14px 6px; min-height: 80px; max-height: 440px; overflow-y: auto;
-}
-.chat-empty {
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 8px; padding: 32px 0 28px;
-  color: #C4B5AA; font-size: 13px; text-align: center;
-}
-.chat-empty-icon { font-size: 26px; }
-.msg { display: flex; gap: 8px; margin-bottom: 12px; }
-.msg.user { justify-content: flex-end; }
-.msg.assistant { justify-content: flex-start; }
-.msg-avatar {
-  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 800; margin-top: 2px;
-}
-.msg.user     .msg-avatar { background: #FEF0E8; border: 1px solid #FDBA74; color: #C2410C; order: 2; }
-.msg.assistant .msg-avatar { background: #EA580C; color: #FFF; font-size: 11px; }
-.msg-bubble {
-  max-width: 80%; padding: 10px 14px;
-  font-size: 13.5px; line-height: 1.75;
-  white-space: pre-wrap; font-family: 'Inter', sans-serif;
-}
-.msg.user     .msg-bubble {
-  background: #FEF0E8; color: #7C2D12;
-  border: 1px solid #FDBA74;
-  border-radius: 14px 3px 14px 14px; order: 1;
-}
-.msg.assistant .msg-bubble {
-  background: #FFFFFF; color: #44403C;
-  border: 1px solid #E8DDD4;
-  border-radius: 3px 14px 14px 14px;
-}
-.chat-typing { display: flex; gap: 4px; padding: 12px 14px; align-items: center; }
-.chat-typing span {
-  width: 6px; height: 6px; border-radius: 50%; background: #D5C5B5;
-  animation: typingBounce .9s infinite;
-}
-.chat-typing span:nth-child(2) { animation-delay: .15s; }
-.chat-typing span:nth-child(3) { animation-delay: .3s; }
-@keyframes typingBounce {
-  0%,60%,100% { transform: translateY(0); }
-  30% { transform: translateY(-5px); background: #EA580C; }
-}
-.chat-input-area {
-  padding: 10px 14px 12px; border-top: 1px solid #F0EAE2; background: #FAF8F5;
-}
-.chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
-.chat-textarea {
-  flex: 1; background: #FFFFFF; border: 1px solid #E8DDD4;
-  border-radius: 10px; padding: 9px 14px;
-  font-size: 13.5px; color: #1C1917; font-family: 'Inter', sans-serif;
-  resize: none; line-height: 1.6; outline: none;
-  transition: border-color .15s; min-height: 44px; max-height: 120px;
-}
-.chat-textarea:focus { border-color: #EA580C; }
-.chat-textarea::placeholder { color: #C4B5AA; }
-.chat-btn-group { display: flex; flex-direction: column; gap: 5px; }
-.btn-send {
-  background: #EA580C; color: #FFF; font-weight: 700;
-  border: none; border-radius: 9px; padding: 9px 16px;
-  font-size: 13px; cursor: pointer; transition: background .15s; white-space: nowrap;
-}
-.btn-send:hover:not(:disabled) { background: #C2410C; }
-.btn-send:disabled { background: #F0C4AD; cursor: not-allowed; }
-.btn-clear {
-  background: #FFFFFF; color: #78716C; font-weight: 600;
-  border: 1px solid #E8DDD4; border-radius: 9px; padding: 7px 16px;
-  font-size: 12px; cursor: pointer; transition: all .15s;
-}
-.btn-clear:hover { background: #F5F0EB; border-color: #D6C4B4; }
 
 /* ══ 셋업 모달 ════════════════════════════════ */
 #setup-overlay {
@@ -1388,38 +1313,6 @@ body {
     </div><!-- /panel -->
   </div><!-- /main-grid -->
 
-  <!-- 채팅 섹션 -->
-  <div id="chat-section" class="chat-section" style="display:none;">
-    <div class="chat-card">
-      <div class="panel-card-header">
-        <div class="panel-card-dot" style="background:#EA580C;"></div>
-        <span class="panel-card-label">Claude에게 추가 질문</span>
-      </div>
-      <div id="chat-history" class="chat-history">
-        <div class="chat-empty">
-          <div class="chat-empty-icon">💬</div>
-          <div>분석 결과에 대해 궁금한 점을 물어보세요.</div>
-        </div>
-      </div>
-      <div class="chat-input-area">
-        <div class="chat-input-row">
-          <textarea
-            id="chat-input"
-            class="chat-textarea"
-            placeholder="분석 결과에 대해 궁금한 점을 입력하세요..."
-            rows="2"
-            onkeydown="chatKeydown(event)"
-            oninput="autoResize(this)"
-          ></textarea>
-          <div class="chat-btn-group">
-            <button class="btn-send" id="btn-send" onclick="sendChat()">전송</button>
-            <button class="btn-clear" onclick="clearChat()">초기화</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- 하단 탭: 히스토리 + 성과 대시보드 -->
   <div class="bottom-section">
     <div class="bottom-tab-bar">
@@ -1566,9 +1459,6 @@ const state = {
   renderedTf:   null,
   chartInstance:null,
   chartViewport:{},
-  chatHistory:  [],
-  chatContext:  "",
-  chatWasReset: false,
   autoOn:       true,
   marketSource: null,
   marketRetryTimer: null,
@@ -1721,8 +1611,7 @@ function shouldApplyAnalysisPayload(data) {
   if (!state.analysisTime) return true;
   if (data.analysis_time && data.analysis_time !== state.analysisTime) return true;
   const rawText = String(data.raw_text || "").trim();
-  if (!rawText) return false;
-  return !(state.chatContext || "").includes(rawText);
+  return !!rawText;
 }
 
 async function fetchAnalysisStatus(includeLatest = false) {
@@ -1970,12 +1859,6 @@ function applyResult(data, options = {}) {
   if (data.account) {
     applyAccountData(data.account);
   }
-
-  state.chatContext  = data.chat_context || "";
-  state.chatWasReset = state.chatHistory.length > 0;
-  state.chatHistory  = [];
-  renderChatHistory();
-  document.getElementById("chat-section").style.display = "block";
 
   if (persist) {
     persistAnalysisCache(data);
@@ -4101,85 +3984,6 @@ function updateAutoUI() {
   updateMarketStatus();
 }
 
-// ══════════════════════════════════════════════
-// 채팅
-// ══════════════════════════════════════════════
-function chatKeydown(e) {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
-}
-
-function autoResize(el) {
-  el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, 120) + "px";
-}
-
-async function sendChat() {
-  const input = document.getElementById("chat-input");
-  const text  = input.value.trim();
-  if (!text || !state.chatContext) return;
-
-  input.value = "";
-  input.style.height = "auto";
-  document.getElementById("btn-send").disabled = true;
-
-  state.chatWasReset = false;
-  state.chatHistory.push({ role: "user", content: text });
-  renderChatHistory(true);
-
-  try {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: state.chatHistory, context: state.chatContext }),
-    });
-    const data = await res.json();
-    state.chatHistory.push({ role: "assistant", content: data.reply });
-  } catch (e) {
-    state.chatHistory.push({ role: "assistant", content: "오류가 발생했습니다: " + e.message });
-  }
-
-  document.getElementById("btn-send").disabled = false;
-  renderChatHistory();
-}
-
-function clearChat() {
-  state.chatWasReset = false;
-  state.chatHistory = [];
-  renderChatHistory();
-}
-
-function renderChatHistory(typing = false) {
-  const el = document.getElementById("chat-history");
-  if (state.chatHistory.length === 0) {
-    el.innerHTML = state.chatWasReset
-      ? `<div class="chat-empty"><div class="chat-empty-icon">💬</div><div>새 분석 결과로 대화 기준이 갱신되었습니다. 이전 대화는 초기화되었어요.</div></div>`
-      : `<div class="chat-empty"><div class="chat-empty-icon">💬</div><div>분석 결과에 대해 궁금한 점을 물어보세요.</div></div>`;
-    return;
-  }
-  let html = "";
-  state.chatHistory.forEach(m => {
-    const safe = escapeHtml(m.content);
-    if (m.role === "user") {
-      html += `<div class="msg user">
-        <div class="msg-bubble">${safe}</div>
-        <div class="msg-avatar">나</div>
-      </div>`;
-    } else {
-      html += `<div class="msg assistant">
-        <div class="msg-avatar">C</div>
-        <div class="msg-bubble">${safe}</div>
-      </div>`;
-    }
-  });
-  if (typing) {
-    html += `<div class="msg assistant" id="typing-indicator">
-      <div class="msg-avatar">C</div>
-      <div class="chat-typing"><span></span><span></span><span></span></div>
-    </div>`;
-  }
-  el.innerHTML = html;
-  el.scrollTop = el.scrollHeight;
-}
 
 function escapeHtml(str) {
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
