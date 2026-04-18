@@ -1498,6 +1498,10 @@ const SIG_COLOR = { "매수":C.bull,"매도":C.bear,"홀드":C.amber };
 const SIG_EMOJI = { "매수":"▲","매도":"▼","홀드":"●" };
 const SIG_VIEW  = { "매수":"상방 우위","매도":"하방 우위","홀드":"중립" };
 const ACCOUNT_STREAM_RETRY_MS = 2000;
+// 재연결 jitter — 서버 재시작 시 thundering herd 방지
+function retryDelay(baseMs = 2000, jitterMs = 8000) {
+  return baseMs + Math.random() * jitterMs;
+}
 const ANALYSIS_CACHE_KEY = "crypto_analyzer:last_analysis:v1";
 const ANALYSIS_POLL_MS = 1500;
 const LD_STEPS  = [
@@ -2061,7 +2065,7 @@ function startMarketStream() {
       clearMarketRetryTimer();
       state.marketRetryTimer = setTimeout(() => {
         if (state.autoOn && !state.marketSource) startMarketStream();
-      }, 2000);
+      }, retryDelay(2000, 8000));
     }
   };
 }
@@ -2100,7 +2104,7 @@ function startAccountStream() {
     clearAccountRetryTimer();
     state.accountRetryTimer = setTimeout(() => {
       if (!state.accountSource) startAccountStream();
-    }, ACCOUNT_STREAM_RETRY_MS);
+    }, retryDelay(ACCOUNT_STREAM_RETRY_MS, 8000));
   };
 }
 
