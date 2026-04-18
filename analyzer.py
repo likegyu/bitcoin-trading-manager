@@ -739,6 +739,7 @@ def run_full_analysis(
         current_situation=memory_query,
         progress_cb=progress_cb,
         agent_memories=agent_memories_obj,
+        price_at_analysis=price_at_analysis,   # ← reflection baseline
     )
 
     # 4) 최종 애널리스트 호출

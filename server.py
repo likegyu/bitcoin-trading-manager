@@ -53,7 +53,11 @@ try:
     from agents import get_agent_memories as _get_agent_memories
     from agents import reflect_on_record as _reflect_on_record
     from agents import reflect_for_role as _reflect_for_role
-    _REFLECTION_ENABLED = _get_memory is not None and _reflect_on_record is not None
+    _REFLECTION_ENABLED = (
+        _get_memory is not None
+        and _reflect_on_record is not None
+        and _reflect_for_role is not None
+    )
 except Exception as _reflect_exc:  # pragma: no cover
     _get_memory = None             # type: ignore
     _get_agent_memories = None     # type: ignore
@@ -1266,6 +1270,27 @@ async def _position_watcher_loop():
 # ══════════════════════════════════════════════
 # Routes
 # ══════════════════════════════════════════════
+async def _reflection_loop():
+    """6시간마다 자동으로 /api/reflect 를 내부 호출해 리플렉션을 수행한다."""
+    import logging as _rlog
+    _rlog = _rlog.getLogger("reflection-loop")
+    INTERVAL = 6 * 60 * 60  # 6시간
+    await asyncio.sleep(60)  # 서버 시작 후 1분 대기 (스트림 안정화)
+    while True:
+        if _REFLECTION_ENABLED:
+            try:
+                _rlog.info("[reflection-loop] 자동 리플렉션 시작")
+                result = await reflect_endpoint()
+                _rlog.info(
+                    "[reflection-loop] 완료 — processed=%s skipped=%s",
+                    result.get("processed", 0),
+                    result.get("skipped_no_baseline", 0),
+                )
+            except Exception as _exc:
+                _rlog.warning("[reflection-loop] 실패 — %s", _exc)
+        await asyncio.sleep(INTERVAL)
+
+
 @app.on_event("startup")
 async def on_startup():
     await _market_stream.start()
@@ -1273,6 +1298,7 @@ async def on_startup():
     await _macro_snapshot.start()
     await _schedule_manager.start()
     asyncio.create_task(_position_watcher_loop(), name="position-watcher")
+    asyncio.create_task(_reflection_loop(), name="reflection-loop")
 
 
 @app.on_event("shutdown")
@@ -1413,7 +1439,7 @@ async def reflect_endpoint():
 
     # ── Analyst 메모리 리플렉션 ─────────────────────────
     analyst_memory = _get_memory("analyst")
-    pending = analyst_memory.list_pending_reflections(min_age_seconds=1800.0, limit=5)
+    pending = analyst_memory.list_pending_reflections(min_age_seconds=300.0, limit=5)
 
     for rec in pending:
         try:
@@ -1455,7 +1481,7 @@ async def reflect_endpoint():
             agent_mems = _get_agent_memories()
             for role in _AGENT_ROLES_FOR_REFLECT:
                 role_mem = agent_mems.get(role)
-                role_pending = role_mem.list_pending_reflections(min_age_seconds=1800.0, limit=3)
+                role_pending = role_mem.list_pending_reflections(min_age_seconds=300.0, limit=3)
                 for rec in role_pending:
                     try:
                         ts = _dt.datetime.fromisoformat(rec.timestamp.replace("Z", "+00:00"))

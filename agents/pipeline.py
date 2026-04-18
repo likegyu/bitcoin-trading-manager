@@ -144,6 +144,7 @@ def run_pipeline(
     current_situation: Optional[str] = None,
     progress_cb: Optional[ProgressCallback] = None,
     agent_memories: Optional["AgentMemories"] = None,
+    price_at_analysis: Optional[float] = None,
 ) -> PipelineResult:
     """
     전체 에이전트 파이프라인 실행.
@@ -194,20 +195,21 @@ def run_pipeline(
             progress_cb("debate_warn", warn_detail)
 
     # 1-b) Bull/Bear 역할 메모리 기록
+    _price_meta = {"price_at_analysis": price_at_analysis} if price_at_analysis else {}
     if agent_memories is not None and debate.enabled:
         if debate.final_bull:
             _write_agent_memory(
                 agent_memories, "bull",
                 situation=_query,
                 advice=debate.final_bull,
-                meta={"pair": pair_label, "round": debate.rounds},
+                meta={"pair": pair_label, "round": debate.rounds, **_price_meta},
             )
         if debate.final_bear:
             _write_agent_memory(
                 agent_memories, "bear",
                 situation=_query,
                 advice=debate.final_bear,
-                meta={"pair": pair_label, "round": debate.rounds},
+                meta={"pair": pair_label, "round": debate.rounds, **_price_meta},
             )
 
     # ── 2) 투자 심판(Judge) ────────────────────────────
@@ -240,6 +242,7 @@ def run_pipeline(
                     "verdict": judge.verdict,
                     "bull_key": judge.bull_key,
                     "bear_key": judge.bear_key,
+                    **_price_meta,
                 },
             )
 
@@ -273,7 +276,7 @@ def run_pipeline(
                         agent_memories, role_key,
                         situation=_query,
                         advice=final_text,
-                        meta={"pair": pair_label, "rounds": risk.rounds},
+                        meta={"pair": pair_label, "rounds": risk.rounds, **_price_meta},
                     )
 
     # ── 4) Analyst 메모리 회상 ─────────────────────────

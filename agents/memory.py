@@ -251,7 +251,7 @@ class FinancialSituationMemory:
 
     def list_pending_reflections(
         self,
-        min_age_seconds: float = 1800.0,
+        min_age_seconds: float = 300.0,   # 5분 (기존 30분 → 완화)
         limit: int = 5,
     ) -> list[MemoryRecord]:
         """
