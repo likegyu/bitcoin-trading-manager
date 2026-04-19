@@ -583,8 +583,8 @@ class MarketStreamManager:
         print(f"[market-stream] WebSocket 연결 시도 #{self._ws_connect_count}: {self._stream_url()}")
         async with websockets.connect(
             self._stream_url(),
-            ping_interval=20,   # 20초마다 ping — 연결 유지
-            ping_timeout=10,
+            ping_interval=None,   # Binance는 WS 프로토콜 ping frame 미지원 → None 필수
+            ping_timeout=None,
             close_timeout=5,
             max_size=2**20,
         ) as ws:
