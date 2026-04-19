@@ -1038,6 +1038,95 @@ body {
   .hero-started { padding: 0 10px; }
 }
 
+/* ══ 니코동 응원 댓글 ══════════════════════════ */
+#cheer-stage {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9000;
+  overflow: hidden;
+}
+.cheer-bullet {
+  position: absolute;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'Inter', sans-serif;
+  text-shadow: 0 0 4px rgba(0,0,0,.55), 1px 1px 0 rgba(0,0,0,.4);
+  will-change: transform;
+  pointer-events: none;
+  animation: cheer-fly linear forwards;
+}
+@keyframes cheer-fly {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(-100vw - 100%)); }
+}
+
+/* 입력 패널 */
+#cheer-btn {
+  position: fixed;
+  bottom: 22px;
+  right: 22px;
+  z-index: 9100;
+  background: #EA580C;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(234,88,12,.35);
+  transition: background .15s, transform .1s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#cheer-btn:hover { background: #C2410C; transform: scale(1.04); }
+
+#cheer-panel {
+  display: none;
+  position: fixed;
+  bottom: 70px;
+  right: 22px;
+  z-index: 9100;
+  background: #fff;
+  border: 1px solid #E8DDD4;
+  border-radius: 16px;
+  padding: 16px;
+  width: 320px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.12);
+  animation: fadein .15s ease;
+}
+#cheer-panel.open { display: block; }
+#cheer-panel-title {
+  font-size: 13px; font-weight: 700; color: #1C1917; margin-bottom: 10px;
+}
+#cheer-count-hint {
+  font-size: 11px; color: #A8978A; margin-bottom: 8px; text-align: right;
+}
+#cheer-input {
+  width: 100%; box-sizing: border-box;
+  border: 1.5px solid #E8DDD4; border-radius: 10px;
+  padding: 9px 12px; font-size: 13px; font-family: inherit;
+  resize: none; outline: none; transition: border-color .15s;
+  height: 72px;
+  color: #1C1917;
+}
+#cheer-input:focus { border-color: #EA580C; }
+#cheer-send {
+  margin-top: 8px; width: 100%;
+  background: #EA580C; color: #fff;
+  border: none; border-radius: 10px;
+  padding: 9px; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background .15s;
+}
+#cheer-send:hover:not(:disabled) { background: #C2410C; }
+#cheer-send:disabled { background: #F0C4AD; cursor: not-allowed; }
+#cheer-feedback {
+  font-size: 11px; margin-top: 6px; min-height: 14px; text-align: center;
+}
+
 /* ══ bottom-section (히스토리/성과 위젯) ═══════ */
 .bottom-section {
   background: #FFFFFF; border: 1px solid #E8DDD4; border-radius: 14px;
@@ -4774,6 +4863,174 @@ function showError(msg) {
   } else {
     tickCountdown();
   }
+})();
+</script>
+
+<!-- 니코동 응원 댓글 무대 -->
+<div id="cheer-stage"></div>
+
+<!-- 응원 입력 버튼 -->
+<button id="cheer-btn" onclick="toggleCheerPanel()">
+  <span>💬</span><span>응원 남기기</span>
+</button>
+
+<!-- 응원 입력 패널 -->
+<div id="cheer-panel">
+  <div id="cheer-panel-title">✨ 응원의 한 줄</div>
+  <div id="cheer-count-hint"><span id="cheer-cur">0</span> / 250</div>
+  <textarea id="cheer-input" maxlength="250" placeholder="응원 메시지를 입력해주세요 (최대 250자)"></textarea>
+  <button id="cheer-send" onclick="submitCheer()">화면에 띄우기 🚀</button>
+  <div id="cheer-feedback"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+// 니코동 응원 댓글 시스템
+// ══════════════════════════════════════════════
+(function() {
+
+  // 댓글 색상 팔레트 (밝고 선명하게)
+  const COLORS = [
+    '#FFFFFF', '#FFD700', '#FF8C00', '#FF6B6B',
+    '#7CFC00', '#00BFFF', '#FF69B4', '#DA70D6',
+    '#40E0D0', '#FFA07A', '#98FB98', '#87CEEB',
+  ];
+
+  // 이미 화면에 띄운 ID 추적 (중복 방지)
+  const _seen = new Set();
+
+  // 레인 관리 — 수직 위치 충돌 최소화
+  const LANE_COUNT  = 12;
+  const _laneUntil  = new Array(LANE_COUNT).fill(0); // 각 레인이 언제까지 사용 중인지 (ms)
+
+  function pickLane() {
+    const now = Date.now();
+    // 비어있는 레인 중 랜덤 선택
+    const free = _laneUntil.map((t, i) => t <= now ? i : -1).filter(i => i >= 0);
+    if (free.length) return free[Math.floor(Math.random() * free.length)];
+    // 다 차있으면 가장 일찍 끝나는 레인
+    return _laneUntil.indexOf(Math.min(..._laneUntil));
+  }
+
+  function fireBullet(text, color) {
+    const stage = document.getElementById('cheer-stage');
+    if (!stage) return;
+
+    const el = document.createElement('div');
+    el.className = 'cheer-bullet';
+    el.textContent = text;
+    el.style.color = color;
+
+    // 레인 결정 → 수직 위치
+    const lane     = pickLane();
+    const stageH   = window.innerHeight;
+    const laneH    = stageH / LANE_COUNT;
+    const top      = lane * laneH + laneH * 0.2 + Math.random() * laneH * 0.4;
+    el.style.top   = `${top}px`;
+    el.style.left  = '100vw'; // 오른쪽 밖에서 시작
+
+    // 글자 길이 기반 속도 (짧은 글자는 빠르게, 긴 글자는 느리게 — 체감 시간 균일화)
+    const duration = 7 + text.length * 0.04; // 7~17초 범위
+    el.style.animationDuration = `${duration}s`;
+
+    stage.appendChild(el);
+
+    // 레인 점유 시간 기록
+    _laneUntil[lane] = Date.now() + duration * 1000;
+
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+  }
+
+  // ── 서버에서 댓글 가져와 새 것만 발사 ──
+  async function fetchAndFire() {
+    try {
+      const res  = await fetch('/api/cheers');
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = data.cheers || [];
+      list.forEach(c => {
+        if (_seen.has(c.id)) return;
+        _seen.add(c.id);
+        const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+        fireBullet(c.text, color);
+      });
+    } catch (_) {}
+  }
+
+  // 최초 로드 + 10초마다 폴링
+  fetchAndFire();
+  setInterval(fetchAndFire, 10000);
+
+  // ── UI 함수 (전역 노출) ──
+  window.toggleCheerPanel = function() {
+    const panel = document.getElementById('cheer-panel');
+    panel.classList.toggle('open');
+    if (panel.classList.contains('open')) {
+      document.getElementById('cheer-input').focus();
+    }
+  };
+
+  // 글자 수 카운터
+  document.addEventListener('DOMContentLoaded', () => {
+    const inp = document.getElementById('cheer-input');
+    if (!inp) return;
+    inp.addEventListener('input', () => {
+      const cur = document.getElementById('cheer-cur');
+      if (cur) cur.textContent = inp.value.length;
+    });
+    // 패널 바깥 클릭 시 닫기
+    document.addEventListener('click', (e) => {
+      const panel = document.getElementById('cheer-panel');
+      const btn   = document.getElementById('cheer-btn');
+      if (!panel || !btn) return;
+      if (!panel.contains(e.target) && !btn.contains(e.target)) {
+        panel.classList.remove('open');
+      }
+    });
+  });
+
+  window.submitCheer = async function() {
+    const inp  = document.getElementById('cheer-input');
+    const fb   = document.getElementById('cheer-feedback');
+    const send = document.getElementById('cheer-send');
+    if (!inp || !fb || !send) return;
+
+    const text = inp.value.trim();
+    if (!text) { fb.style.color = '#DC2626'; fb.textContent = '내용을 입력해주세요.'; return; }
+    if (text.length > 250) { fb.style.color = '#DC2626'; fb.textContent = '250자를 초과했습니다.'; return; }
+
+    send.disabled = true;
+    fb.style.color = '#78716C'; fb.textContent = '전송 중…';
+
+    try {
+      const res  = await fetch('/api/cheers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '오류');
+
+      // 즉시 화면에 발사
+      const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+      fireBullet(text, color);
+      if (data.id) _seen.add(data.id);
+
+      inp.value = '';
+      const cur = document.getElementById('cheer-cur');
+      if (cur) cur.textContent = '0';
+      fb.style.color = '#16A34A'; fb.textContent = '🎉 화면에 띄웠어요!';
+      setTimeout(() => {
+        fb.textContent = '';
+        send.disabled = false;
+        document.getElementById('cheer-panel').classList.remove('open');
+      }, 1500);
+    } catch (e) {
+      fb.style.color = '#DC2626'; fb.textContent = e.message || '전송 실패';
+      send.disabled = false;
+    }
+  };
+
 })();
 </script>
 </body>

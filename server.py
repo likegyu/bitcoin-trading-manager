@@ -1970,6 +1970,47 @@ async def performance_endpoint(days: int = 30):
     return {"snapshots": snapshots, "daily": daily}
 
 
+# ══════════════════════════════════════════════
+# 응원 댓글 (니코동 스타일)
+# ══════════════════════════════════════════════
+import collections as _collections
+
+_CHEER_MAX_LEN  = 250       # 글자수 제한
+_CHEER_MAX_KEEP = 200       # 메모리에 보관할 최대 개수
+
+_cheer_store: _collections.deque = _collections.deque(maxlen=_CHEER_MAX_KEEP)
+_cheer_lock  = asyncio.Lock()
+
+
+class CheerRequest(BaseModel):
+    text: str
+
+
+@app.get("/api/cheers")
+async def cheers_list():
+    """최근 응원 댓글 반환 (오래된 순)."""
+    async with _cheer_lock:
+        return {"cheers": list(_cheer_store)}
+
+
+@app.post("/api/cheers")
+async def cheers_post(body: CheerRequest):
+    """응원 댓글 등록."""
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="내용을 입력해주세요.")
+    if len(text) > _CHEER_MAX_LEN:
+        raise HTTPException(status_code=422, detail=f"최대 {_CHEER_MAX_LEN}자까지 입력 가능합니다.")
+    entry = {
+        "id":   str(uuid.uuid4()),
+        "text": text,
+        "ts":   int(time.time()),
+    }
+    async with _cheer_lock:
+        _cheer_store.append(entry)
+    return {"ok": True, "id": entry["id"]}
+
+
 @app.get("/")
 async def root():
     html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
