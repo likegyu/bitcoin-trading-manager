@@ -17,7 +17,7 @@ import uuid
 
 import pandas as pd
 import websockets
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -1975,12 +1975,14 @@ async def performance_endpoint(days: int = 30):
 # ══════════════════════════════════════════════
 import collections as _collections
 
-_CHEER_MAX_LEN  = 80        # 글자수 제한
-_CHEER_MAX_KEEP = 200       # 메모리에 보관할 최대 개수
-_CHEER_TTL_SEC  = 600       # 10분 지난 메시지 자동 제거
+_CHEER_MAX_LEN   = 80        # 글자수 제한
+_CHEER_MAX_KEEP  = 200       # 메모리에 보관할 최대 개수
+_CHEER_TTL_SEC   = 600       # 10분 지난 메시지 자동 제거
+_CHEER_RATE_SEC  = 10        # IP당 전송 간격 제한 (초)
 
 _cheer_store: _collections.deque = _collections.deque(maxlen=_CHEER_MAX_KEEP)
-_cheer_lock  = asyncio.Lock()
+_cheer_lock      = asyncio.Lock()
+_cheer_ip_last: dict = {}    # {ip: last_post_timestamp}
 
 
 class CheerRequest(BaseModel):
@@ -1997,20 +1999,27 @@ async def cheers_list():
 
 
 @app.post("/api/cheers")
-async def cheers_post(body: CheerRequest):
-    """응원 댓글 등록."""
+async def cheers_post(body: CheerRequest, request: Request):
+    """응원 댓글 등록 — IP당 10초 1회 제한."""
+    ip   = request.client.host if request.client else "unknown"
+    now  = int(time.time())
     text = body.text.strip()
+
     if not text:
         raise HTTPException(status_code=422, detail="내용을 입력해주세요.")
     if len(text) > _CHEER_MAX_LEN:
         raise HTTPException(status_code=422, detail=f"최대 {_CHEER_MAX_LEN}자까지 입력 가능합니다.")
-    entry = {
-        "id":   str(uuid.uuid4()),
-        "text": text,
-        "ts":   int(time.time()),
-    }
+
     async with _cheer_lock:
+        last = _cheer_ip_last.get(ip, 0)
+        remaining = _CHEER_RATE_SEC - (now - last)
+        if remaining > 0:
+            raise HTTPException(status_code=429, detail=f"{remaining}초 후에 다시 시도해주세요.")
+
+        entry = {"id": str(uuid.uuid4()), "text": text, "ts": now}
         _cheer_store.append(entry)
+        _cheer_ip_last[ip] = now
+
     return {"ok": True, "id": entry["id"]}
 
 

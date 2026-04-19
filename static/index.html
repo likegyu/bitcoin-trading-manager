@@ -5012,7 +5012,7 @@ function showError(msg) {
         body: JSON.stringify({ text }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || '오류');
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '오류');
 
       // 즉시 화면에 발사
       const color = COLORS[Math.floor(Math.random() * COLORS.length)];
