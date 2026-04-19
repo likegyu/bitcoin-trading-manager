@@ -463,6 +463,11 @@ class MarketStreamManager:
         self._trade_count: int = 0          # aggTrade 수신 카운터 (디버그용)
         self._kline_count: int = 0          # kline 수신 카운터 (디버그용)
         self._ws_connect_count: int = 0     # WebSocket 재연결 횟수
+        # 타임프레임별 최신 kline 데이터 + 계산 진행 플래그
+        # 계산 중일 때 새 kline이 오면 데이터만 갱신 (새 태스크 생성 안 함)
+        # 계산 완료 후 pending이 있으면 즉시 재실행 → 최신 데이터 반영
+        self._pending_kline: dict[str, dict] = {}   # tf → latest kline dict
+        self._kline_running: dict[str, bool] = {}   # tf → computing flag
 
     async def start(self):
         if self._runner_task and not self._runner_task.done():
@@ -596,17 +601,10 @@ class MarketStreamManager:
 
                 if event_type == "aggTrade":
                     self._trade_count += 1
-                    # _handle_trade는 빠른 딕셔너리 접근만 → await OK
                     await self._handle_trade(data)
                 elif event_type == "kline":
                     self._kline_count += 1
-                    # _handle_kline은 내부에서 asyncio.to_thread로 지표 계산(수 초)
-                    # await하면 그동안 WebSocket 루프가 멈춰 aggTrade 가격이 수 초 지연됨
-                    # → create_task로 백그라운드 실행, 루프는 즉시 다음 메시지로
-                    asyncio.create_task(
-                        self._handle_kline(data.get("k", {})),
-                        name=f"kline-{data.get('k', {}).get('i', '?')}",
-                    )
+                    self._enqueue_kline(data.get("k", {}))
 
     async def _handle_trade(self, data: dict):
         price = _safe(data.get("p"))
@@ -619,41 +617,57 @@ class MarketStreamManager:
 
         self._schedule_price_flush()
 
-    async def _handle_kline(self, kline: dict):
+    def _enqueue_kline(self, kline: dict):
+        """kline 이벤트를 받아 pending에 저장. 계산 중이 아니면 즉시 태스크 생성."""
         tf = kline.get("i")
         if tf not in TIMEFRAMES:
             return
+        # 최신 kline으로 덮어씀 — 계산 중에 여러 이벤트가 와도 최신 것만 사용
+        self._pending_kline[tf] = kline
+        if not self._kline_running.get(tf, False):
+            self._kline_running[tf] = True
+            asyncio.create_task(self._process_kline(tf), name=f"kline-{tf}")
 
-        timestamp = pd.to_datetime(int(kline["t"]), unit="ms")
-        row = {
-            "open": float(kline["o"]),
-            "high": float(kline["h"]),
-            "low": float(kline["l"]),
-            "close": float(kline["c"]),
-            "volume": float(kline["v"]),
-        }
+    async def _process_kline(self, tf: str):
+        """pending_kline을 소진할 때까지 지표 계산 반복. 완료 후 pending 없으면 종료."""
+        try:
+            while True:
+                kline = self._pending_kline.pop(tf, None)
+                if kline is None:
+                    break  # 더 이상 처리할 데이터 없음
 
-        # CPU 연산(upsert + 지표계산)을 락 밖 스레드에서 실행
-        async with self._lock:
-            current = self._tf_data.get(tf)
+                timestamp = pd.to_datetime(int(kline["t"]), unit="ms")
+                row = {
+                    "open":   float(kline["o"]),
+                    "high":   float(kline["h"]),
+                    "low":    float(kline["l"]),
+                    "close":  float(kline["c"]),
+                    "volume": float(kline["v"]),
+                }
 
-        def _compute():
-            up = _upsert_ohlcv(current, timestamp, row)
-            return add_all_indicators(up)
+                async with self._lock:
+                    current = self._tf_data.get(tf)
 
-        updated = await asyncio.to_thread(_compute)
+                def _compute(cur=current, ts=timestamp, r=row):
+                    up = _upsert_ohlcv(cur, ts, r)
+                    return add_all_indicators(up)
 
-        async with self._lock:
-            self._tf_data[tf] = updated
-            # self._price 는 aggTrade(_handle_trade) 에서만 갱신.
-            # to_thread 완료 시점에 row["close"]는 이미 지난 값일 수 있어
-            # 최신 aggTrade 가격을 덮어쓰는 race condition을 방지.
-            self._last_update = _now_label()
-            self._dirty_tfs.add(tf)
-            if tf == "1h":
-                self._needs_full_refresh = True
+                updated = await asyncio.to_thread(_compute)
 
-        self._schedule_market_flush()
+                async with self._lock:
+                    self._tf_data[tf] = updated
+                    self._last_update = _now_label()
+                    self._dirty_tfs.add(tf)
+                    if tf == "1h":
+                        self._needs_full_refresh = True
+
+                self._schedule_market_flush()
+        finally:
+            self._kline_running[tf] = False
+            # finally 이후 pending이 새로 생겼으면 즉시 재실행
+            if self._pending_kline.get(tf):
+                self._kline_running[tf] = True
+                asyncio.create_task(self._process_kline(tf), name=f"kline-{tf}")
 
     def _schedule_price_flush(self):
         if self._price_flush_task and not self._price_flush_task.done():
