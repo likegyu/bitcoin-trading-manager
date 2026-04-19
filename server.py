@@ -931,7 +931,11 @@ class AnalysisManager:
         self._job: dict | None = None
         self._task: asyncio.Task | None = None
         self._latest_result: dict | None = _load_latest_analysis()
-        self._latest_result_json: str | None = None  # deepcopy 방지용 JSON 캐시
+        # deepcopy 방지용 JSON 캐시 — 시작 시 디스크 로드 결과도 즉시 직렬화
+        _lr = self._latest_result
+        self._latest_result_json: str | None = (
+            json.dumps(_lr, ensure_ascii=False) if _lr is not None else None
+        )
         self._last_manual_started_at: float = _load_manual_cooldown_time()
 
     async def stop(self):
