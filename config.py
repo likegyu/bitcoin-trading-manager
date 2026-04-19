@@ -62,6 +62,8 @@ AUTO_TRADE_REVERSAL_MIN_HOLD    = int(os.getenv("AUTO_TRADE_REVERSAL_MIN_HOLD", 
 AUTO_TRADE_REVERSAL_MIN_CONF    = int(os.getenv("AUTO_TRADE_REVERSAL_MIN_CONF",    "67"))  # 반전 최소 확신도 (진입보다 높게)
 AUTO_TRADE_REVERSAL_MAX_PER_DAY = int(os.getenv("AUTO_TRADE_REVERSAL_MAX_PER_DAY", "2"))   # 하루 최대 반전 횟수
 
+OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "changeme")  # 주인장 확성기 비밀번호
+
 # 분석할 시간봉 목록
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
 

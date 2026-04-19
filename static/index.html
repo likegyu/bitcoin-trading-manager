@@ -1062,6 +1062,35 @@ body {
   to   { transform: translateX(calc(-100vw - 100%)); }
 }
 
+/* 주인장 확성기 배너 */
+#owner-banner {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 9500;
+  background: linear-gradient(90deg, #92400E, #EA580C, #92400E);
+  background-size: 200% 100%;
+  animation: owner-banner-shine 3s linear infinite;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 10px 20px;
+  text-align: center;
+  letter-spacing: 0.03em;
+  box-shadow: 0 2px 16px rgba(234,88,12,.5);
+  cursor: pointer;
+}
+#owner-banner.visible { display: block; }
+#owner-banner-close {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  font-size: 18px; cursor: pointer; opacity: .7;
+}
+#owner-banner-close:hover { opacity: 1; }
+@keyframes owner-banner-shine {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* 입력 패널 */
 #cheer-btn {
   position: fixed;
@@ -4866,6 +4895,12 @@ function showError(msg) {
 })();
 </script>
 
+<!-- 주인장 확성기 배너 -->
+<div id="owner-banner">
+  <span id="owner-banner-text"></span>
+  <span id="owner-banner-close" onclick="dismissOwnerBanner()">✕</span>
+</div>
+
 <!-- 니코동 응원 댓글 무대 -->
 <div id="cheer-stage"></div>
 
@@ -4963,6 +4998,66 @@ function showError(msg) {
   // 최초 로드 + 10초마다 폴링
   fetchAndFire();
   setInterval(fetchAndFire, 10000);
+
+  // ── 주인장 확성기 ──
+  let _ownerLastTs = 0;
+
+  function fireOwnerBullet(text) {
+    const stage = document.getElementById('cheer-stage');
+    if (!stage) return;
+    // 여러 줄로 연속 발사 (3줄)
+    [0, 1.5, 3].forEach(delay => {
+      setTimeout(() => {
+        const el = document.createElement('div');
+        el.className = 'cheer-bullet';
+        el.textContent = '📢 주인장: ' + text;
+        el.style.color    = '#FFD700';
+        el.style.fontSize = '20px';
+        el.style.textShadow = '0 0 8px rgba(255,215,0,.8), 1px 1px 0 rgba(0,0,0,.6)';
+        const stageH = window.innerHeight;
+        el.style.top  = `${20 + Math.random() * (stageH * 0.6)}px`;
+        el.style.left = '100vw';
+        el.style.animationDuration = '9s';
+        stage.appendChild(el);
+        el.addEventListener('animationend', () => el.remove(), { once: true });
+      }, delay * 1000);
+    });
+  }
+
+  function showOwnerBanner(text) {
+    const banner = document.getElementById('owner-banner');
+    const textEl = document.getElementById('owner-banner-text');
+    if (!banner || !textEl) return;
+    textEl.textContent = '📢 주인장: ' + text;
+    banner.classList.add('visible');
+  }
+
+  window.dismissOwnerBanner = function() {
+    const banner = document.getElementById('owner-banner');
+    if (banner) banner.classList.remove('visible');
+  };
+
+  async function fetchOwnerMessage() {
+    try {
+      const res  = await fetch('/api/owner-message');
+      if (!res.ok) return;
+      const data = await res.json();
+      const msg  = data.message;
+      if (!msg) { dismissOwnerBanner(); return; }
+      // 새 메시지인 경우만 발사
+      if (msg.ts > _ownerLastTs) {
+        _ownerLastTs = msg.ts;
+        showOwnerBanner(msg.text);
+        fireOwnerBullet(msg.text);
+      } else {
+        // 기존 메시지면 배너만 유지 (총알 재발사 없음)
+        showOwnerBanner(msg.text);
+      }
+    } catch (_) {}
+  }
+
+  fetchOwnerMessage();
+  setInterval(fetchOwnerMessage, 10000);
 
   // ── UI 함수 (전역 노출) ──
   window.toggleCheerPanel = function() {

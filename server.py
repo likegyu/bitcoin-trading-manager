@@ -1975,6 +1975,43 @@ async def performance_endpoint(days: int = 30):
 # ══════════════════════════════════════════════
 import collections as _collections
 
+# ── 주인장 확성기 ──
+_owner_message: dict | None = None   # {"text": str, "ts": int}
+_owner_lock = asyncio.Lock()
+
+
+class OwnerAnnounceRequest(BaseModel):
+    password: str
+    text: str
+
+
+@app.get("/api/owner-message")
+async def owner_message_get():
+    """현재 주인장 메시지 반환 — 없으면 null."""
+    async with _owner_lock:
+        return {"message": _owner_message}
+
+
+@app.post("/api/owner-message")
+async def owner_message_post(body: OwnerAnnounceRequest):
+    """주인장 메시지 등록 (비밀번호 인증 필요)."""
+    global _owner_message
+    if body.password != runtime_config.OWNER_PASSWORD:
+        raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+    text = body.text.strip()
+    if not text:
+        # 빈 문자열이면 메시지 삭제
+        async with _owner_lock:
+            _owner_message = None
+        return {"ok": True, "cleared": True}
+    if len(text) > 200:
+        raise HTTPException(status_code=422, detail="최대 200자까지 입력 가능합니다.")
+    entry = {"text": text, "ts": int(time.time())}
+    async with _owner_lock:
+        _owner_message = entry
+    return {"ok": True}
+
+
 _CHEER_MAX_LEN   = 80        # 글자수 제한
 _CHEER_MAX_KEEP  = 200       # 메모리에 보관할 최대 개수
 _CHEER_TTL_SEC   = 600       # 10분 지난 메시지 자동 제거
