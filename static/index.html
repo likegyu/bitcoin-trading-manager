@@ -1961,7 +1961,9 @@ function applyMarketData(data, source = "market") {
     renderHeaderSymbol();
   }
 
-  if (data.price !== undefined && data.price !== null) {
+  // 분석 결과(source="analysis")의 price는 분석 실행 시점 스냅샷이라 stale함.
+  // 가격 표시는 SSE 실시간 스트림(source="market"/"price")에서만 업데이트한다.
+  if (source !== "analysis" && data.price !== undefined && data.price !== null) {
     document.getElementById("header-price").textContent = "$" + data.price.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
