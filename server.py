@@ -452,16 +452,18 @@ class MarketStreamManager:
         self._dirty_tfs: set[str] = set()
         self._needs_full_refresh = False
         self._stopped = False
+        self._price_tick_task: asyncio.Task | None = None
 
     async def start(self):
         if self._runner_task and not self._runner_task.done():
             return
         self._stopped = False
         self._runner_task = asyncio.create_task(self._run_forever(), name="binance-market-stream")
+        self._price_tick_task = asyncio.create_task(self._periodic_price_tick(), name="price-tick-1s")
 
     async def stop(self):
         self._stopped = True
-        tasks = [self._runner_task, self._market_flush_task, self._price_flush_task]
+        tasks = [self._runner_task, self._market_flush_task, self._price_flush_task, self._price_tick_task]
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -616,6 +618,21 @@ class MarketStreamManager:
         if self._market_flush_task and not self._market_flush_task.done():
             return
         self._market_flush_task = asyncio.create_task(self._flush_market_update())
+
+    async def _periodic_price_tick(self):
+        """매 1초마다 현재 가격을 클라이언트에 브로드캐스트."""
+        while not self._stopped:
+            await asyncio.sleep(1.0)
+            if self._stopped:
+                break
+            async with self._lock:
+                if self._price is None:
+                    continue
+                payload = {
+                    "price": self._price,
+                    "last_update": self._last_update,
+                }
+            await self._broadcast({"type": "price", "data": payload})
 
     async def _flush_price_update(self):
         await asyncio.sleep(0.25)
