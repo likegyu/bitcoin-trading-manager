@@ -515,10 +515,23 @@ class MarketStreamManager:
             )
 
     async def get_analysis_inputs(self) -> tuple[dict, float | None]:
+        """분석용 데이터 반환. 최신 OHLCV(미확정 캔들 포함)로 지표를 재계산한다."""
         await self.wait_until_ready()
         async with self._lock:
-            tf_data = {tf: df.copy(deep=True) for tf, df in self._tf_data.items()}
+            raw_snapshot = {tf: df.copy(deep=True) for tf, df in self._tf_data.items()}
             price = self._price
+
+        # 분석 시점에 지표 재계산 — 미확정 캔들 OHLCV가 반영된 최신 상태
+        def _recompute_all(snapshot: dict) -> dict:
+            result = {}
+            for tf, df in snapshot.items():
+                try:
+                    result[tf] = add_all_indicators(df)
+                except Exception:
+                    result[tf] = df  # 실패 시 원본 유지
+            return result
+
+        tf_data = await asyncio.to_thread(_recompute_all, raw_snapshot)
         return tf_data, price
 
     async def _run_forever(self):
@@ -628,13 +641,32 @@ class MarketStreamManager:
              프론트엔드 patchLastCandlePrice가 aggTrade 가격으로 직접 처리한다.
           3) 초당 4회 지표 계산 → 이벤트 루프 과부하 → 실시간 가격 지연의 근본 원인.
 
+        미확정 캔들은 OHLCV만 tf_data에 업데이트 (지표 계산 없이 빠르게).
+        → 분석 실행 시 최신 OHLCV가 포함된 상태로 지표를 재계산해서 Claude에 전달.
         확정 빈도: 15m=15분, 1h=1시간, 4h=4시간, 1d=1일 → 하루 총 수십 회.
         """
         tf = kline.get("i")
         if tf not in TIMEFRAMES:
             return
+
         if not kline.get("x", False):
-            return  # 미확정 캔들 → 무시
+            # 미확정 캔들: OHLCV만 저장 (지표 계산 없음)
+            # DataFrame 조작은 락 밖에서, 결과만 락 안에서 교체
+            timestamp = pd.to_datetime(int(kline["t"]), unit="ms")
+            row = {
+                "open":   float(kline["o"]),
+                "high":   float(kline["h"]),
+                "low":    float(kline["l"]),
+                "close":  float(kline["c"]),
+                "volume": float(kline["v"]),
+            }
+            async with self._lock:
+                current = self._tf_data.get(tf)
+            if current is not None:
+                updated = _upsert_ohlcv(current, timestamp, row)
+                async with self._lock:
+                    self._tf_data[tf] = updated
+            return
 
         # 확정 캔들: 계산 중에 또 확정이 오면 최신 것으로 덮어씀
         self._pending_kline[tf] = kline
