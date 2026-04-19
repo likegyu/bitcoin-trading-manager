@@ -463,11 +463,11 @@ class MarketStreamManager:
         self._trade_count: int = 0          # aggTrade 수신 카운터 (디버그용)
         self._kline_count: int = 0          # kline 수신 카운터 (디버그용)
         self._ws_connect_count: int = 0     # WebSocket 재연결 횟수
-        # 타임프레임별 최신 kline 데이터 + 계산 진행 플래그
-        # 계산 중일 때 새 kline이 오면 데이터만 갱신 (새 태스크 생성 안 함)
-        # 계산 완료 후 pending이 있으면 즉시 재실행 → 최신 데이터 반영
-        self._pending_kline: dict[str, dict] = {}   # tf → latest kline dict
-        self._kline_running: dict[str, bool] = {}   # tf → computing flag
+        self._pending_kline: dict[str, dict] = {}    # 확정 kline 처리 큐
+        self._kline_running: dict[str, bool] = {}    # 타임프레임별 계산 진행 플래그
+        self._forming_kline: dict[str, dict] = {}    # 미확정(진행 중) 캔들 최신 OHLCV
+        # tf_data는 항상 지표 컬럼 포함 상태로 유지.
+        # 미확정 캔들 OHLCV는 _forming_kline에만 보관하고 분석 시 합산.
 
     async def start(self):
         if self._runner_task and not self._runner_task.done():
@@ -515,23 +515,33 @@ class MarketStreamManager:
             )
 
     async def get_analysis_inputs(self) -> tuple[dict, float | None]:
-        """분석용 데이터 반환. 최신 OHLCV(미확정 캔들 포함)로 지표를 재계산한다."""
+        """분석용 데이터 반환. 미확정 캔들 OHLCV를 반영해 지표를 재계산한다."""
         await self.wait_until_ready()
         async with self._lock:
             raw_snapshot = {tf: df.copy(deep=True) for tf, df in self._tf_data.items()}
+            forming = dict(self._forming_kline)  # 미확정 캔들 최신본
             price = self._price
 
-        # 분석 시점에 지표 재계산 — 미확정 캔들 OHLCV가 반영된 최신 상태
-        def _recompute_all(snapshot: dict) -> dict:
+        def _recompute_all(snapshot: dict, forming_klines: dict) -> dict:
             result = {}
             for tf, df in snapshot.items():
                 try:
+                    # 미확정 캔들이 있으면 OHLCV를 먼저 upsert
+                    k = forming_klines.get(tf)
+                    if k:
+                        ts = pd.to_datetime(int(k["t"]), unit="ms")
+                        row = {
+                            "open": float(k["o"]), "high": float(k["h"]),
+                            "low":  float(k["l"]), "close": float(k["c"]),
+                            "volume": float(k["v"]),
+                        }
+                        df = _upsert_ohlcv(df, ts, row)
                     result[tf] = add_all_indicators(df)
                 except Exception:
-                    result[tf] = df  # 실패 시 원본 유지
+                    result[tf] = snapshot[tf]  # 실패 시 원본 유지
             return result
 
-        tf_data = await asyncio.to_thread(_recompute_all, raw_snapshot)
+        tf_data = await asyncio.to_thread(_recompute_all, raw_snapshot, forming)
         return tf_data, price
 
     async def _run_forever(self):
@@ -650,22 +660,10 @@ class MarketStreamManager:
             return
 
         if not kline.get("x", False):
-            # 미확정 캔들: OHLCV만 저장 (지표 계산 없음)
-            # DataFrame 조작은 락 밖에서, 결과만 락 안에서 교체
-            timestamp = pd.to_datetime(int(kline["t"]), unit="ms")
-            row = {
-                "open":   float(kline["o"]),
-                "high":   float(kline["h"]),
-                "low":    float(kline["l"]),
-                "close":  float(kline["c"]),
-                "volume": float(kline["v"]),
-            }
-            async with self._lock:
-                current = self._tf_data.get(tf)
-            if current is not None:
-                updated = _upsert_ohlcv(current, timestamp, row)
-                async with self._lock:
-                    self._tf_data[tf] = updated
+            # 미확정 캔들: _forming_kline에만 보관 — tf_data는 건드리지 않음
+            # tf_data를 수정하면 지표 컬럼이 제거돼 KeyError 발생
+            # 분석 시 get_analysis_inputs에서 _forming_kline을 합산해 처리
+            self._forming_kline[tf] = kline
             return
 
         # 확정 캔들: 계산 중에 또 확정이 오면 최신 것으로 덮어씀
