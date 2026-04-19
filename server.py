@@ -1417,6 +1417,34 @@ async def connections():
     return {"count": count}
 
 
+@app.get("/api/debug/price")
+async def debug_price():
+    """WebSocket 연결 상태 및 현재 가격 진단용 엔드포인트."""
+    import datetime as _dt
+    async with _market_stream._lock:
+        price = _market_stream._price
+        last_update = _market_stream._last_update
+        listeners = len(_market_stream._listeners)
+        ready = _market_stream._ready.is_set()
+        runner_alive = (
+            _market_stream._runner_task is not None
+            and not _market_stream._runner_task.done()
+        )
+        tick_alive = (
+            _market_stream._price_tick_task is not None
+            and not _market_stream._price_tick_task.done()
+        )
+    return {
+        "price": price,
+        "last_update": last_update,
+        "server_time": _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "stream_ready": ready,
+        "runner_task_alive": runner_alive,
+        "price_tick_task_alive": tick_alive,
+        "sse_listeners": listeners,
+    }
+
+
 @app.get("/api/schedule")
 async def schedule_get():
     """현재 자동분석 스케줄 상태 반환."""
