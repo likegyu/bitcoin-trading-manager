@@ -466,8 +466,7 @@ class MarketStreamManager:
         self._pending_kline: dict[str, dict] = {}    # 확정 kline 처리 큐
         self._kline_running: dict[str, bool] = {}    # 타임프레임별 계산 진행 플래그
         self._forming_kline: dict[str, dict] = {}    # 미확정(진행 중) 캔들 최신 OHLCV
-        # tf_data는 항상 지표 컬럼 포함 상태로 유지.
-        # 미확정 캔들 OHLCV는 _forming_kline에만 보관하고 분석 시 합산.
+        self._forming_refresh_task: asyncio.Task | None = None
 
     async def start(self):
         if self._runner_task and not self._runner_task.done():
@@ -475,10 +474,12 @@ class MarketStreamManager:
         self._stopped = False
         self._runner_task = asyncio.create_task(self._run_forever(), name="binance-market-stream")
         self._price_tick_task = asyncio.create_task(self._periodic_price_tick(), name="price-tick-1s")
+        self._forming_refresh_task = asyncio.create_task(self._forming_indicator_refresh(), name="forming-refresh-2s")
 
     async def stop(self):
         self._stopped = True
-        tasks = [self._runner_task, self._market_flush_task, self._price_flush_task, self._price_tick_task]
+        tasks = [self._runner_task, self._market_flush_task, self._price_flush_task,
+                 self._price_tick_task, self._forming_refresh_task]
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -723,7 +724,13 @@ class MarketStreamManager:
         self._market_flush_task = asyncio.create_task(self._flush_market_update())
 
     async def _periodic_price_tick(self):
-        """1초 주기 가격 브로드캐스트 — aggTrade 이벤트가 없는 저활동 구간 대비 fallback."""
+        """1초 주기 가격 + 진행 중 캔들 OHLCV 브로드캐스트.
+
+        price: 실시간 aggTrade 가격
+        forming: 타임프레임별 현재 캔들 OHLCV (Binance kline 기준)
+                 → 프론트가 마지막 캔들을 실시간으로 갱신하는 데 사용
+        지표(RSI·MACD 등)는 캔들 확정 시에만 재계산 — 여기서는 포함하지 않음
+        """
         while not self._stopped:
             await asyncio.sleep(1.0)
             if self._stopped:
@@ -731,12 +738,79 @@ class MarketStreamManager:
             async with self._lock:
                 price = self._price
                 last_update = self._last_update
+                forming_raw = dict(self._forming_kline)
             if price is None:
                 continue
+
+            # 진행 중 캔들 OHLCV 직렬화 (계산 없음 — 단순 숫자 변환)
+            forming = {}
+            for tf, k in forming_raw.items():
+                try:
+                    forming[tf] = {
+                        "open":   float(k["o"]),
+                        "high":   float(k["h"]),
+                        "low":    float(k["l"]),
+                        "close":  float(k["c"]),
+                        "volume": float(k["v"]),
+                    }
+                except Exception:
+                    pass
+
             await self._broadcast({"type": "price", "data": {
                 "price": price,
                 "last_update": last_update,
+                "forming": forming,   # tf → {open, high, low, close, volume}
             }})
+
+    async def _forming_indicator_refresh(self):
+        """2초마다 진행 중 캔들 포함 지표를 재계산해 브로드캐스트.
+
+        확정 캔들 처리(_process_kline)와 독립적으로 동작.
+        tf_data는 수정하지 않고 스냅샷 + forming_kline으로 임시 계산 후 브로드캐스트.
+        이벤트 루프는 비블로킹 — 계산은 asyncio.to_thread 스레드풀에서 실행.
+        """
+        while not self._stopped:
+            await asyncio.sleep(2.0)
+            if self._stopped or not self._ready.is_set():
+                continue
+
+            async with self._lock:
+                if not self._forming_kline:
+                    continue  # forming kline 아직 없음 (서버 막 시작)
+                forming_raw = dict(self._forming_kline)
+                tf_snap = {tf: df.copy(deep=True) for tf, df in self._tf_data.items()}
+                price = self._price
+                last_update = self._last_update
+
+            def _compute(snap, forming):
+                result = {}
+                for tf, df in snap.items():
+                    k = forming.get(tf)
+                    if k:
+                        ts = pd.to_datetime(int(k["t"]), unit="ms")
+                        row = {
+                            "open":   float(k["o"]), "high": float(k["h"]),
+                            "low":    float(k["l"]), "close": float(k["c"]),
+                            "volume": float(k["v"]),
+                        }
+                        df = _upsert_ohlcv(df, ts, row)
+                    try:
+                        result[tf] = add_all_indicators(df)
+                    except Exception:
+                        result[tf] = df
+                return result
+
+            try:
+                updated = await asyncio.to_thread(_compute, tf_snap, forming_raw)
+                payload = await asyncio.to_thread(
+                    build_market_payload,
+                    updated, price, last_update,
+                    chart_tfs=TIMEFRAMES,
+                    include_overview=True,
+                )
+                await self._broadcast({"type": "market", "data": payload})
+            except Exception as exc:
+                print(f"[forming-refresh] 오류: {exc}")
 
     async def _flush_price_update(self):
         """aggTrade 수신 후 100ms 디바운스 — 최신 가격을 빠르게 브로드캐스트."""
