@@ -346,21 +346,28 @@ def _build_swing_fibs(tf_data: dict, target_tfs: list[str]) -> dict:
 
 
 def _market_overview(tf_data: dict, price: float, last_update: str | None) -> dict:
-    h1   = tf_data.get("1h")
+    h1 = tf_data.get("1h")
     if h1 is None:
-        h1 = tf_data.get(TIMEFRAMES[0])
-    last = h1.iloc[-1]
+        h1 = tf_data.get(TIMEFRAMES[0]) if TIMEFRAMES else None
 
-    close_v = _safe(last["close"]) or 1.0
-    indicators = {
-        "rsi":       _safe(last["rsi"]),
-        "macd_hist": _safe(last["macd_hist"]),
-        "bb_pct":    _safe(last["bb_pct"]),
-        "vol_ratio": round(_safe(last["volume"]) / max(_safe(last["volume_ma"]) or 1, 1) * 100, 1),
-        "atr":       _safe(last["atr"]),
-        "close":     _safe(last["close"]),
-        "atr_pct":   round((_safe(last["atr"]) or 0) / close_v * 100, 2),
-    }
+    if h1 is not None and not h1.empty:
+        last = h1.iloc[-1]
+        close_v = _safe(last["close"]) or 1.0
+        indicators = {
+            "rsi":       _safe(last["rsi"]),
+            "macd_hist": _safe(last["macd_hist"]),
+            "bb_pct":    _safe(last["bb_pct"]),
+            "vol_ratio": round(_safe(last["volume"]) / max(_safe(last["volume_ma"]) or 1, 1) * 100, 1),
+            "atr":       _safe(last["atr"]),
+            "close":     _safe(last["close"]),
+            "atr_pct":   round((_safe(last["atr"]) or 0) / close_v * 100, 2),
+        }
+    else:
+        # tf_data 아직 없음 — WebSocket 스트림이 채울 때까지 빈 indicators
+        indicators = {
+            "rsi": None, "macd_hist": None, "bb_pct": None,
+            "vol_ratio": None, "atr": None, "close": None, "atr_pct": None,
+        }
 
     overview = {
         "symbol":      DEFAULT_SYMBOL,
@@ -514,7 +521,7 @@ class MarketStreamManager:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    print(f"[market-stream] bootstrap failed: {exc}")
+                    print(f"[market-stream] bootstrap failed: {exc} — 5초 후 재시도")
                     await asyncio.sleep(5)
                     continue
 
@@ -527,10 +534,30 @@ class MarketStreamManager:
                 await asyncio.sleep(3)
 
     async def _bootstrap(self):
-        tf_data = await asyncio.to_thread(_fetch_all, self.symbol)
+        """REST API로 초기 데이터 로드. 실패해도 WebSocket 기동은 계속한다."""
+        # ── OHLCV 히스토리 fetch (실패 시 빈 dict로 폴백) ──
         try:
-            price = await asyncio.to_thread(fetch_current_price, self.symbol)
-        except Exception:
+            tf_data = await asyncio.wait_for(
+                asyncio.to_thread(_fetch_all, self.symbol),
+                timeout=30,
+            )
+            print(f"[market-stream] bootstrap OHLCV 완료: {list(tf_data.keys())}")
+        except asyncio.TimeoutError:
+            print("[market-stream] bootstrap OHLCV timeout — 빈 데이터로 계속")
+            tf_data = {}
+        except Exception as exc:
+            print(f"[market-stream] bootstrap OHLCV 실패: {exc} — 빈 데이터로 계속")
+            tf_data = {}
+
+        # ── 현재가 fetch (실패 허용) ──
+        try:
+            price = await asyncio.wait_for(
+                asyncio.to_thread(fetch_current_price, self.symbol),
+                timeout=8,
+            )
+            print(f"[market-stream] bootstrap 현재가: {price}")
+        except Exception as exc:
+            print(f"[market-stream] bootstrap 현재가 실패: {exc}")
             price = None
 
         async with self._lock:
@@ -538,7 +565,9 @@ class MarketStreamManager:
             self._price = price
             self._last_update = _now_label()
 
+        # OHLCV 없어도 ready 설정 — WebSocket이 실시간으로 채움
         self._ready.set()
+        print(f"[market-stream] ready! tf_data={list(tf_data.keys())} price={price}")
 
     def _stream_url(self) -> str:
         symbol = self.symbol.lower()
@@ -1364,7 +1393,16 @@ async def market_stream():
     async def generate():
         queue = await _market_stream.subscribe()
         try:
-            await _market_stream.wait_until_ready()
+            # ready 대기 중에도 keepalive를 5초마다 보내
+            # → 브라우저가 연결이 끊겼다고 오해해서 재연결을 반복하는 것을 방지
+            while not _market_stream.is_ready():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(_market_stream._ready.wait()), timeout=5
+                    )
+                except asyncio.TimeoutError:
+                    yield ": waiting\n\n"
+
             snapshot = await _market_stream.get_full_snapshot()
             yield f"data: {json.dumps({'type':'snapshot','data':snapshot})}\n\n"
 
