@@ -338,14 +338,16 @@ def format_memory_block(memories: list[dict]) -> str:
 
         lines.append(f"\n— 사례 {i} · {ts} · 유사도 {score:.2f} —")
         if situation:
-            # 상황 요약 — 너무 길면 잘라낸다 (프롬프트 비용 관리)
             snippet = situation if len(situation) <= 600 else situation[:600] + " …"
             lines.append(f"  상황: {snippet}")
         if advice:
-            snippet = advice if len(advice) <= 400 else advice[:400] + " …"
+            # 과거 조언 — 핵심 논거가 뒤에 있을 수 있어 여유 있게 유지
+            snippet = advice if len(advice) <= 600 else advice[:600] + " …"
             lines.append(f"  당시 조언: {snippet}")
         if outcome:
-            snippet = outcome if len(outcome) <= 300 else outcome[:300] + " …"
+            # 리플렉션 전문 포함 — '놓친 단서'·'다음 체크리스트' 등이 후반부에 위치하므로
+            # 300자 제한을 1000자로 확장해 자기개선 루프에 실질적으로 활용
+            snippet = outcome if len(outcome) <= 1000 else outcome[:1000] + " …"
             lines.append(f"  실제 결과: {snippet}")
         else:
             lines.append("  실제 결과: (아직 리플렉션 미기록)")
@@ -420,9 +422,9 @@ class AgentMemories:
             advice = (rec.get("advice") or "").strip()
             outcome = (rec.get("outcome") or "").strip()
             ts = rec.get("timestamp", "?")
-            # 너무 길면 잘라서 프롬프트 토큰 절약
-            advice_snippet = advice[:300] + " …" if len(advice) > 300 else advice
-            outcome_snippet = outcome[:200] + " …" if len(outcome) > 200 else outcome
+            # 역할별 회상 — outcome 에 리플렉션 교훈이 담기므로 충분히 전달
+            advice_snippet  = advice[:400]  + " …" if len(advice)  > 400  else advice
+            outcome_snippet = outcome[:600] + " …" if len(outcome) > 600 else outcome
             lines.append(f"\n— 사례 {i} · {ts} · 유사도 {score:.2f} —")
             if advice_snippet:
                 lines.append(f"  당시 주장: {advice_snippet}")
