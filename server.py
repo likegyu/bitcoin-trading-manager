@@ -601,7 +601,9 @@ class MarketStreamManager:
 
         async with self._lock:
             self._tf_data[tf] = updated
-            self._price = row["close"]
+            # self._price 는 aggTrade(_handle_trade) 에서만 갱신.
+            # to_thread 완료 시점에 row["close"]는 이미 지난 값일 수 있어
+            # 최신 aggTrade 가격을 덮어쓰는 race condition을 방지.
             self._last_update = _now_label()
             self._dirty_tfs.add(tf)
             if tf == "1h":
