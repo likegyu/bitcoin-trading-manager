@@ -1977,7 +1977,7 @@ import collections as _collections
 
 _CHEER_MAX_LEN  = 80        # 글자수 제한
 _CHEER_MAX_KEEP = 200       # 메모리에 보관할 최대 개수
-_CHEER_TTL_SEC  = 1800      # 30분 지난 메시지 자동 제거
+_CHEER_TTL_SEC  = 600       # 10분 지난 메시지 자동 제거
 
 _cheer_store: _collections.deque = _collections.deque(maxlen=_CHEER_MAX_KEEP)
 _cheer_lock  = asyncio.Lock()
