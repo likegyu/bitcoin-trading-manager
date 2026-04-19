@@ -460,6 +460,9 @@ class MarketStreamManager:
         self._needs_full_refresh = False
         self._stopped = False
         self._price_tick_task: asyncio.Task | None = None
+        self._trade_count: int = 0          # aggTrade 수신 카운터 (디버그용)
+        self._kline_count: int = 0          # kline 수신 카운터 (디버그용)
+        self._ws_connect_count: int = 0     # WebSocket 재연결 횟수
 
     async def start(self):
         if self._runner_task and not self._runner_task.done():
@@ -576,21 +579,26 @@ class MarketStreamManager:
         return f"{MARKET_STREAM_WS_BASE}?streams={joined}"
 
     async def _consume_stream(self):
+        self._ws_connect_count += 1
+        print(f"[market-stream] WebSocket 연결 시도 #{self._ws_connect_count}: {self._stream_url()}")
         async with websockets.connect(
             self._stream_url(),
-            ping_interval=None,
-            ping_timeout=None,
+            ping_interval=20,   # 20초마다 ping — 연결 유지
+            ping_timeout=10,
             close_timeout=5,
             max_size=2**20,
         ) as ws:
+            print(f"[market-stream] WebSocket 연결 성공 #{self._ws_connect_count}")
             async for raw_msg in ws:
                 payload = json.loads(raw_msg)
                 data = payload.get("data", payload)
                 event_type = data.get("e")
 
                 if event_type == "aggTrade":
+                    self._trade_count += 1
                     await self._handle_trade(data)
                 elif event_type == "kline":
+                    self._kline_count += 1
                     await self._handle_kline(data.get("k", {}))
 
     async def _handle_trade(self, data: dict):
@@ -1480,6 +1488,10 @@ async def debug_price():
         "runner_task_alive": runner_alive,
         "price_tick_task_alive": tick_alive,
         "sse_listeners": listeners,
+        # aggTrade/kline 수신 카운터 — 0이면 WebSocket이 데이터를 못 받는 것
+        "trade_events_received": _market_stream._trade_count,
+        "kline_events_received": _market_stream._kline_count,
+        "ws_reconnect_count": _market_stream._ws_connect_count,
     }
 
 
