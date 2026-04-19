@@ -4877,8 +4877,8 @@ function showError(msg) {
 <!-- 응원 입력 패널 -->
 <div id="cheer-panel">
   <div id="cheer-panel-title">✨ 응원의 한 줄</div>
-  <div id="cheer-count-hint"><span id="cheer-cur">0</span> / 250</div>
-  <textarea id="cheer-input" maxlength="250" placeholder="응원 메시지를 입력해주세요 (최대 250자)"></textarea>
+  <div id="cheer-count-hint"><span id="cheer-cur">0</span> / 80</div>
+  <textarea id="cheer-input" maxlength="80" placeholder="응원 메시지를 입력해주세요 (최대 80자)"></textarea>
   <button id="cheer-send" onclick="submitCheer()">화면에 띄우기 🚀</button>
   <div id="cheer-feedback"></div>
 </div>
@@ -4898,6 +4898,7 @@ function showError(msg) {
 
   // 이미 화면에 띄운 ID 추적 (중복 방지)
   const _seen = new Set();
+  const _pageLoadTs = Math.floor(Date.now() / 1000); // 페이지 로드 시각 (초)
 
   // 레인 관리 — 수직 위치 충돌 최소화
   const LANE_COUNT  = 12;
@@ -4951,6 +4952,8 @@ function showError(msg) {
       list.forEach(c => {
         if (_seen.has(c.id)) return;
         _seen.add(c.id);
+        // 페이지 로드 이전 메시지는 seen에만 등록하고 발사 안 함
+        if ((c.ts || 0) <= _pageLoadTs) return;
         const color = COLORS[Math.floor(Math.random() * COLORS.length)];
         fireBullet(c.text, color);
       });
@@ -4997,7 +5000,7 @@ function showError(msg) {
 
     const text = inp.value.trim();
     if (!text) { fb.style.color = '#DC2626'; fb.textContent = '내용을 입력해주세요.'; return; }
-    if (text.length > 250) { fb.style.color = '#DC2626'; fb.textContent = '250자를 초과했습니다.'; return; }
+    if (text.length > 80) { fb.style.color = '#DC2626'; fb.textContent = '80자를 초과했습니다.'; return; }
 
     send.disabled = true;
     fb.style.color = '#78716C'; fb.textContent = '전송 중…';

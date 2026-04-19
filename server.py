@@ -1975,8 +1975,9 @@ async def performance_endpoint(days: int = 30):
 # ══════════════════════════════════════════════
 import collections as _collections
 
-_CHEER_MAX_LEN  = 250       # 글자수 제한
+_CHEER_MAX_LEN  = 80        # 글자수 제한
 _CHEER_MAX_KEEP = 200       # 메모리에 보관할 최대 개수
+_CHEER_TTL_SEC  = 1800      # 30분 지난 메시지 자동 제거
 
 _cheer_store: _collections.deque = _collections.deque(maxlen=_CHEER_MAX_KEEP)
 _cheer_lock  = asyncio.Lock()
@@ -1988,9 +1989,11 @@ class CheerRequest(BaseModel):
 
 @app.get("/api/cheers")
 async def cheers_list():
-    """최근 응원 댓글 반환 (오래된 순)."""
+    """최근 응원 댓글 반환 — 30분 이내 메시지만."""
+    cutoff = int(time.time()) - _CHEER_TTL_SEC
     async with _cheer_lock:
-        return {"cheers": list(_cheer_store)}
+        fresh = [c for c in _cheer_store if c["ts"] >= cutoff]
+    return {"cheers": fresh}
 
 
 @app.post("/api/cheers")
