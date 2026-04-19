@@ -1968,6 +1968,8 @@ function applyMarketData(data, source = "market") {
     });
     state.price = data.price;
     applyLiveBtcPositionMarks(data.price);
+    // 차트 마지막 캔들 close/high/low를 현재가로 인플레이스 업데이트
+    patchLastCandlePrice(data.price);
   }
 
   if (data.last_update) {
@@ -3332,6 +3334,34 @@ function switchTab(tf) {
   });
   renderCurrentChart();
   renderFib(getActiveFib(), state.price, state.currentTf);
+}
+
+/**
+ * price 이벤트 수신 시 현재 표시 중인 차트의 마지막 캔들 close/high/low를
+ * 서버에서 완전한 market 업데이트가 오기 전에 즉시 반영한다.
+ * ECharts setOption(notMerge:false)로 캔들스틱 시리즈만 교체 → 저비용.
+ */
+function patchLastCandlePrice(newPrice) {
+  const tf = state.currentTf;
+  const chart = state.charts[tf];
+  if (!chart || !chart.candles || !chart.candles.length) return;
+
+  const last = chart.candles[chart.candles.length - 1];
+  if (!last) return;
+
+  // candle format: [open, close, low, high]
+  last[1] = newPrice;                                  // close
+  if (newPrice < last[2]) last[2] = newPrice;          // 신규 저가
+  if (newPrice > last[3]) last[3] = newPrice;          // 신규 고가
+
+  // 차트 인스턴스가 살아있으면 캔들스틱 시리즈만 교체 (지표 등 나머지 불변)
+  const inst = state.chartInstance;
+  if (inst && !inst.isDisposed()) {
+    inst.setOption({ series: [{ data: chart.candles }] }, {
+      notMerge: false,
+      lazyUpdate: true,
+    });
+  }
 }
 
 function renderCurrentChart() {

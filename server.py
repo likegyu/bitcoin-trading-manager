@@ -622,28 +622,33 @@ class MarketStreamManager:
         self._market_flush_task = asyncio.create_task(self._flush_market_update())
 
     async def _periodic_price_tick(self):
-        """매 1초마다 현재 가격을 클라이언트에 브로드캐스트."""
+        """1초 주기 가격 브로드캐스트 — aggTrade 이벤트가 없는 저활동 구간 대비 fallback."""
         while not self._stopped:
             await asyncio.sleep(1.0)
             if self._stopped:
                 break
             async with self._lock:
-                if self._price is None:
-                    continue
-                payload = {
-                    "price": self._price,
-                    "last_update": self._last_update,
-                }
-            await self._broadcast({"type": "price", "data": payload})
+                price = self._price
+                last_update = self._last_update
+            if price is None:
+                continue
+            await self._broadcast({"type": "price", "data": {
+                "price": price,
+                "last_update": last_update,
+            }})
 
     async def _flush_price_update(self):
-        await asyncio.sleep(0.25)
+        """aggTrade 수신 후 100ms 디바운스 — 최신 가격을 빠르게 브로드캐스트."""
+        await asyncio.sleep(0.10)
         async with self._lock:
-            payload = {
-                "price": self._price,
-                "last_update": self._last_update,
-            }
-        await self._broadcast({"type": "price", "data": payload})
+            price = self._price
+            last_update = self._last_update
+        if price is None:
+            return
+        await self._broadcast({"type": "price", "data": {
+            "price": price,
+            "last_update": last_update,
+        }})
 
     async def _flush_market_update(self):
         await asyncio.sleep(0.35)
