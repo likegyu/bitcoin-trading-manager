@@ -1063,33 +1063,69 @@ body {
 }
 
 /* 주인장 확성기 배너 */
+@keyframes owner-banner-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-16px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
 #owner-banner {
   display: none;
   position: fixed;
-  top: 0; left: 0; right: 0;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 9500;
-  background: linear-gradient(90deg, #92400E, #EA580C, #92400E);
-  background-size: 200% 100%;
-  animation: owner-banner-shine 3s linear infinite;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 800;
-  padding: 10px 20px;
-  text-align: center;
-  letter-spacing: 0.03em;
-  box-shadow: 0 2px 16px rgba(234,88,12,.5);
-  cursor: pointer;
+  background: #1C1917;
+  color: #F5F0EB;
+  border-radius: 14px;
+  padding: 12px 44px 12px 16px;
+  min-width: 260px;
+  max-width: min(540px, calc(100vw - 32px));
+  box-shadow: 0 8px 32px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.07);
+  display: none;
+  align-items: center;
+  gap: 10px;
 }
-#owner-banner.visible { display: block; }
+#owner-banner.visible {
+  display: flex;
+  animation: owner-banner-in .25s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+#owner-banner-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+#owner-banner-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+#owner-banner-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #EA580C;
+  text-transform: uppercase;
+}
+#owner-banner-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #F5F0EB;
+  line-height: 1.4;
+  word-break: keep-all;
+}
 #owner-banner-close {
-  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
-  font-size: 18px; cursor: pointer; opacity: .7;
+  position: absolute;
+  right: 12px; top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: #78716C;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color .15s, background .15s;
 }
-#owner-banner-close:hover { opacity: 1; }
-@keyframes owner-banner-shine {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
+#owner-banner-close:hover { color: #F5F0EB; background: rgba(255,255,255,.08); }
 
 /* 입력 패널 */
 #cheer-btn {
@@ -1155,6 +1191,53 @@ body {
 #cheer-feedback {
   font-size: 11px; margin-top: 6px; min-height: 14px; text-align: center;
 }
+
+/* 주인장 패널 */
+#owner-panel-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 9600;
+  align-items: center; justify-content: center;
+}
+#owner-panel-overlay.open { display: flex; }
+#owner-panel {
+  background: #fff; border-radius: 16px;
+  padding: 24px; width: 360px;
+  box-shadow: 0 8px 40px rgba(0,0,0,.2);
+  animation: fadein .15s ease;
+}
+#owner-panel h3 { font-size: 15px; font-weight: 800; margin-bottom: 16px; }
+#owner-panel input, #owner-panel textarea {
+  width: 100%; box-sizing: border-box;
+  border: 1.5px solid #E8DDD4; border-radius: 10px;
+  padding: 9px 12px; font-size: 13px; font-family: inherit;
+  outline: none; transition: border-color .15s; color: #1C1917;
+  margin-bottom: 10px;
+}
+#owner-panel input:focus, #owner-panel textarea:focus { border-color: #EA580C; }
+#owner-panel textarea { resize: none; height: 80px; }
+#owner-panel-btns { display: flex; gap: 8px; }
+#owner-panel-btns button {
+  flex: 1; padding: 9px; border: none; border-radius: 10px;
+  font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s;
+}
+#owner-send-btn { background: #EA580C; color: #fff; }
+#owner-send-btn:hover { background: #C2410C; }
+#owner-clear-btn { background: #F5F0EB; color: #78716C; }
+#owner-clear-btn:hover { background: #E8DDD4; }
+#owner-cancel-btn { background: #F5F0EB; color: #78716C; }
+#owner-cancel-btn:hover { background: #E8DDD4; }
+#owner-feedback { font-size: 11px; margin-top: 8px; text-align: center; min-height: 14px; }
+#owner-open-btn {
+  position: fixed; bottom: 22px; left: 22px;
+  z-index: 9100;
+  background: #1C1917; color: #fff;
+  border: none; border-radius: 999px;
+  padding: 8px 14px; font-size: 11px; font-weight: 700;
+  cursor: pointer; opacity: .35; transition: opacity .2s;
+}
+#owner-open-btn:hover { opacity: 1; }
 
 /* ══ bottom-section (히스토리/성과 위젯) ═══════ */
 .bottom-section {
@@ -4897,12 +4980,34 @@ function showError(msg) {
 
 <!-- 주인장 확성기 배너 -->
 <div id="owner-banner">
-  <span id="owner-banner-text"></span>
+  <span id="owner-banner-icon">📢</span>
+  <div id="owner-banner-body">
+    <span id="owner-banner-label">주인장</span>
+    <span id="owner-banner-text"></span>
+  </div>
   <span id="owner-banner-close" onclick="dismissOwnerBanner()">✕</span>
 </div>
 
 <!-- 니코동 응원 댓글 무대 -->
 <div id="cheer-stage"></div>
+
+<!-- 주인장 버튼 (좌하단, 반투명) -->
+<button id="owner-open-btn" onclick="openOwnerPanel()">👑 주인장</button>
+
+<!-- 주인장 패널 모달 -->
+<div id="owner-panel-overlay" onclick="closeOwnerPanelOnBg(event)">
+  <div id="owner-panel">
+    <h3>📢 주인장 확성기</h3>
+    <input type="password" id="owner-pw" placeholder="비밀번호" autocomplete="current-password">
+    <textarea id="owner-msg" maxlength="200" placeholder="전달할 메시지 (최대 200자)&#10;비워서 전송하면 현재 메시지가 삭제됩니다"></textarea>
+    <div id="owner-panel-btns">
+      <button id="owner-send-btn" onclick="submitOwnerMessage()">📢 띄우기</button>
+      <button id="owner-clear-btn" onclick="clearOwnerMessage()">🗑 삭제</button>
+      <button id="owner-cancel-btn" onclick="closeOwnerPanel()">취소</button>
+    </div>
+    <div id="owner-feedback"></div>
+  </div>
+</div>
 
 <!-- 응원 입력 버튼 -->
 <button id="cheer-btn" onclick="toggleCheerPanel()">
@@ -5000,19 +5105,19 @@ function showError(msg) {
   setInterval(fetchAndFire, 10000);
 
   // ── 주인장 확성기 ──
-  let _ownerLastTs = 0;
+  let _ownerLastTs    = 0;  // 마지막으로 발사한 메시지 ts
+  let _ownerDismissTs = 0;  // 사용자가 닫은 메시지 ts
 
   function fireOwnerBullet(text) {
     const stage = document.getElementById('cheer-stage');
     if (!stage) return;
-    // 여러 줄로 연속 발사 (3줄)
     [0, 1.5, 3].forEach(delay => {
       setTimeout(() => {
         const el = document.createElement('div');
         el.className = 'cheer-bullet';
         el.textContent = '📢 주인장: ' + text;
-        el.style.color    = '#FFD700';
-        el.style.fontSize = '20px';
+        el.style.color      = '#FFD700';
+        el.style.fontSize   = '20px';
         el.style.textShadow = '0 0 8px rgba(255,215,0,.8), 1px 1px 0 rgba(0,0,0,.6)';
         const stageH = window.innerHeight;
         el.style.top  = `${20 + Math.random() * (stageH * 0.6)}px`;
@@ -5028,13 +5133,15 @@ function showError(msg) {
     const banner = document.getElementById('owner-banner');
     const textEl = document.getElementById('owner-banner-text');
     if (!banner || !textEl) return;
-    textEl.textContent = '📢 주인장: ' + text;
+    textEl.textContent = text;
     banner.classList.add('visible');
   }
 
   window.dismissOwnerBanner = function() {
     const banner = document.getElementById('owner-banner');
-    if (banner) banner.classList.remove('visible');
+    if (!banner) return;
+    banner.classList.remove('visible');
+    _ownerDismissTs = _ownerLastTs; // 닫은 메시지 ts 기억
   };
 
   async function fetchOwnerMessage() {
@@ -5043,21 +5150,66 @@ function showError(msg) {
       if (!res.ok) return;
       const data = await res.json();
       const msg  = data.message;
-      if (!msg) { dismissOwnerBanner(); return; }
-      // 새 메시지인 경우만 발사
+      if (!msg) { dismissOwnerBanner(); _ownerLastTs = 0; _ownerDismissTs = 0; return; }
       if (msg.ts > _ownerLastTs) {
+        // 새 메시지 — 발사 + 배너
         _ownerLastTs = msg.ts;
+        _ownerDismissTs = 0; // 새 메시지면 닫기 이력 초기화
         showOwnerBanner(msg.text);
         fireOwnerBullet(msg.text);
-      } else {
-        // 기존 메시지면 배너만 유지 (총알 재발사 없음)
+      } else if (_ownerDismissTs < _ownerLastTs) {
+        // 닫지 않은 기존 메시지 — 배너만 유지
         showOwnerBanner(msg.text);
       }
+      // _ownerDismissTs >= _ownerLastTs 이면 사용자가 닫은 것 → 아무것도 안 함
     } catch (_) {}
   }
 
   fetchOwnerMessage();
   setInterval(fetchOwnerMessage, 10000);
+
+  // ── 주인장 패널 UI ──
+  window.openOwnerPanel = function() {
+    document.getElementById('owner-panel-overlay').classList.add('open');
+    document.getElementById('owner-pw').focus();
+  };
+  window.closeOwnerPanel = function() {
+    document.getElementById('owner-panel-overlay').classList.remove('open');
+    document.getElementById('owner-feedback').textContent = '';
+  };
+  window.closeOwnerPanelOnBg = function(e) {
+    if (e.target === document.getElementById('owner-panel-overlay')) closeOwnerPanel();
+  };
+
+  async function _sendOwnerMessage(text) {
+    const pw = document.getElementById('owner-pw').value;
+    const fb = document.getElementById('owner-feedback');
+    if (!pw) { fb.style.color = '#DC2626'; fb.textContent = '비밀번호를 입력해주세요.'; return; }
+    fb.style.color = '#78716C'; fb.textContent = '전송 중…';
+    try {
+      const res  = await fetch('/api/owner-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw, text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '오류');
+      fb.style.color = '#16A34A';
+      fb.textContent = data.cleared ? '✅ 메시지가 삭제됐습니다.' : '✅ 확성기를 울렸습니다!';
+      await fetchOwnerMessage();
+      setTimeout(closeOwnerPanel, 1200);
+    } catch(e) {
+      fb.style.color = '#DC2626'; fb.textContent = e.message || '전송 실패';
+    }
+  }
+
+  window.submitOwnerMessage = function() {
+    const text = document.getElementById('owner-msg').value.trim();
+    _sendOwnerMessage(text);
+  };
+  window.clearOwnerMessage = function() {
+    _sendOwnerMessage('');
+  };
 
   // ── UI 함수 (전역 노출) ──
   window.toggleCheerPanel = function() {
