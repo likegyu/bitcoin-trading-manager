@@ -596,10 +596,17 @@ class MarketStreamManager:
 
                 if event_type == "aggTrade":
                     self._trade_count += 1
+                    # _handle_trade는 빠른 딕셔너리 접근만 → await OK
                     await self._handle_trade(data)
                 elif event_type == "kline":
                     self._kline_count += 1
-                    await self._handle_kline(data.get("k", {}))
+                    # _handle_kline은 내부에서 asyncio.to_thread로 지표 계산(수 초)
+                    # await하면 그동안 WebSocket 루프가 멈춰 aggTrade 가격이 수 초 지연됨
+                    # → create_task로 백그라운드 실행, 루프는 즉시 다음 메시지로
+                    asyncio.create_task(
+                        self._handle_kline(data.get("k", {})),
+                        name=f"kline-{data.get('k', {}).get('i', '?')}",
+                    )
 
     async def _handle_trade(self, data: dict):
         price = _safe(data.get("p"))
