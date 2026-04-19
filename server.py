@@ -931,6 +931,7 @@ class AnalysisManager:
         self._job: dict | None = None
         self._task: asyncio.Task | None = None
         self._latest_result: dict | None = _load_latest_analysis()
+        self._latest_result_json: str | None = None  # deepcopy 방지용 JSON 캐시
         self._last_manual_started_at: float = _load_manual_cooldown_time()
 
     async def stop(self):
@@ -994,9 +995,14 @@ class AnalysisManager:
                 and self._job["status"] == "completed"
                 and self._job.get("result") is not None
             ):
-                response["result"] = copy.deepcopy(self._job["result"])
-            elif include_latest and self._latest_result is not None:
-                response["latest_result"] = copy.deepcopy(self._latest_result)
+                # deepcopy 대신 JSON 역직렬화 — 더 빠름
+                result_json = self._job.get("_result_json")
+                if result_json is None:
+                    result_json = json.dumps(self._job["result"], ensure_ascii=False)
+                    self._job["_result_json"] = result_json
+                response["result"] = json.loads(result_json)
+            elif include_latest and self._latest_result_json is not None:
+                response["latest_result"] = json.loads(self._latest_result_json)
             return response
 
     def _serialize_job(self, job: dict | None) -> dict | None:
@@ -1044,6 +1050,7 @@ class AnalysisManager:
             self._job["updated_at"] = completed_at
             self._job["completed_at"] = completed_at
             self._latest_result = copy.deepcopy(payload)
+            self._latest_result_json = json.dumps(self._latest_result, ensure_ascii=False)
 
         # ── 자동매매 훅 ─────────────────────────────────
         if _AUTO_TRADER_AVAILABLE and _auto_trader is not None:
