@@ -3625,8 +3625,6 @@ function renderMemoryTab(memories) {
     const ts = rec.timestamp || "—";
     const meta = rec.meta || {};
 
-    // 너무 길면 잘라서 표시
-    const trim = (s, n) => s.length <= n ? s : s.slice(0, n) + " …";
     const sigChip = meta.signal ? `<span class="report-chip">${escapeHtml(meta.signal)}</span>` : "";
     const confChip = (meta.confidence !== undefined && meta.confidence !== null)
       ? `<span class="report-chip">확신도 ${meta.confidence}%</span>` : "";
@@ -3639,11 +3637,11 @@ function renderMemoryTab(memories) {
           <span style="margin-left:auto;">${escapeHtml(ts)}</span>
         </div>
         ${(sigChip || confChip) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;">${sigChip}${confChip}</div>` : ""}
-        ${situation ? `<div class="memory-field"><span class="memory-field-label">상황</span><div class="agent-turn-body" style="display:inline;">${renderMarkdown(trim(situation, 500))}</div></div>` : ""}
-        ${advice ? `<div class="memory-field"><span class="memory-field-label">당시 조언</span><div class="agent-turn-body" style="display:inline;">${renderMarkdown(trim(advice, 400))}</div></div>` : ""}
+        ${situation ? `<div class="memory-field"><span class="memory-field-label">상황</span><div class="agent-turn-body" style="display:inline;">${renderMarkdown(situation)}</div></div>` : ""}
+        ${advice ? `<div class="memory-field"><span class="memory-field-label">당시 조언</span><div class="agent-turn-body" style="display:inline;">${renderMarkdown(advice)}</div></div>` : ""}
         <div class="memory-field">
           <span class="memory-field-label">실제 결과</span>
-          ${outcome ? `<div class="agent-turn-body" style="display:inline;">${renderMarkdown(trim(outcome, 400))}</div>` : '<span class="memory-outcome-missing">아직 리플렉션 미기록</span>'}
+          ${outcome ? `<div class="agent-turn-body" style="display:inline;">${renderMarkdown(outcome)}</div>` : '<span class="memory-outcome-missing">아직 리플렉션 미기록</span>'}
         </div>
       </div>`;
   }).join("");
