@@ -617,7 +617,7 @@ class MarketStreamManager:
                     await self._handle_trade(data)
                 elif event_type == "kline":
                     self._kline_count += 1
-                    self._enqueue_kline(data.get("k", {}))
+                    await self._enqueue_kline(data.get("k", {}))
 
     async def _handle_trade(self, data: dict):
         price = _safe(data.get("p"))
@@ -630,7 +630,7 @@ class MarketStreamManager:
 
         self._schedule_price_flush()
 
-    def _enqueue_kline(self, kline: dict):
+    async def _enqueue_kline(self, kline: dict):
         """
         확정 캔들(x=True)만 지표 재계산 큐에 넣는다.
 
