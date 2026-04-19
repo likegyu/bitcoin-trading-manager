@@ -1725,7 +1725,9 @@ function handleAnalysisStatusResponse(statusPayload = {}) {
   }
 
   if (latestResult && shouldApplyAnalysisPayload(latestResult)) {
-    applyResult(latestResult);
+    // latest_result 는 서버 디스크에서 불러온 캐시 — fromCache:true 로 stale 처리,
+    // persist:false 로 중복 알림/캐시 쓰기 방지
+    applyResult(latestResult, { fromCache: true, persist: false });
   }
 
   if (job && (job.status === "pending" || job.status === "running")) {
@@ -3983,6 +3985,7 @@ checkSetup();
 // 브라우저 알림
 // ══════════════════════════════════════════════
 let _lastNotifiedSignal = null;
+let _lastNotifiedTime   = null;  // 중복 알림 방지용 analysis_time 추적
 
 function _notifGranted() {
   return typeof Notification !== "undefined" && Notification.permission === "granted";
@@ -4100,17 +4103,26 @@ function updateNotifBtn() {
 
 function notifyAnalysisResult(data) {
   if (!_notifGranted() || localStorage.getItem("notif_off") === "1") return;
-  const sig = data.signal || null;
+  const sig  = data.signal || null;
   const conf = data.confidence ?? "";
-  const changed = sig && sig !== _lastNotifiedSignal;
+  const time = data.analysis_time || null;
+
+  if (!sig) return;
+
+  // 동일한 analysis_time 이면 중복 알림 방지
+  // (페이지 로드·탭 재활성화 시 같은 분석 결과가 다시 들어오는 경우 차단)
+  if (time && time === _lastNotifiedTime) return;
+
+  const changed  = sig !== _lastNotifiedSignal;
   const sigEmoji = { "매수": "▲", "매도": "▼", "홀드": "●" };
-  if (changed || sig === "매수" || sig === "매도") {
+
+  // 매수/매도는 새 분석일 때만 알림, 홀드는 신호가 바뀔 때만 알림
+  if (sig === "매수" || sig === "매도" || changed) {
     const emoji = sigEmoji[sig] || "";
-    const title = `${emoji} ${sig} 신호 (확신도 ${conf}%)`;
-    const summary = data.report_sections?.summary || "";
+    const body  = data.report_sections?.summary || "새 분석 완료";
     try {
       new Notification("BTC Signal Analyzer", {
-        body: summary ? `${summary}` : `새 분석 완료`,
+        body,
         tag: "signal",
       });
     } catch (e) {
@@ -4118,6 +4130,7 @@ function notifyAnalysisResult(data) {
       console.warn("[알림] Notification 생성 실패:", e);
     }
     _lastNotifiedSignal = sig;
+    _lastNotifiedTime   = time;
   }
 }
 
