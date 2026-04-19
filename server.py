@@ -618,23 +618,37 @@ class MarketStreamManager:
         self._schedule_price_flush()
 
     def _enqueue_kline(self, kline: dict):
-        """kline 이벤트를 받아 pending에 저장. 계산 중이 아니면 즉시 태스크 생성."""
+        """
+        확정 캔들(x=True)만 지표 재계산 큐에 넣는다.
+
+        진행 중 캔들(x=False)은 무시 — 이유:
+          1) RSI/MACD/BB 등 지표는 과거 확정 캔들 기준으로 계산되어
+             현재 캔들이 진행 중일 때 재계산해도 의미있는 변화가 없다.
+          2) 현재 캔들의 실시간 가격(close/high/low)은
+             프론트엔드 patchLastCandlePrice가 aggTrade 가격으로 직접 처리한다.
+          3) 초당 4회 지표 계산 → 이벤트 루프 과부하 → 실시간 가격 지연의 근본 원인.
+
+        확정 빈도: 15m=15분, 1h=1시간, 4h=4시간, 1d=1일 → 하루 총 수십 회.
+        """
         tf = kline.get("i")
         if tf not in TIMEFRAMES:
             return
-        # 최신 kline으로 덮어씀 — 계산 중에 여러 이벤트가 와도 최신 것만 사용
+        if not kline.get("x", False):
+            return  # 미확정 캔들 → 무시
+
+        # 확정 캔들: 계산 중에 또 확정이 오면 최신 것으로 덮어씀
         self._pending_kline[tf] = kline
         if not self._kline_running.get(tf, False):
             self._kline_running[tf] = True
             asyncio.create_task(self._process_kline(tf), name=f"kline-{tf}")
 
     async def _process_kline(self, tf: str):
-        """pending_kline을 소진할 때까지 지표 계산 반복. 완료 후 pending 없으면 종료."""
+        """확정 캔들에 대해 지표를 재계산하고 브로드캐스트. pending 소진까지 반복."""
         try:
             while True:
                 kline = self._pending_kline.pop(tf, None)
                 if kline is None:
-                    break  # 더 이상 처리할 데이터 없음
+                    break
 
                 timestamp = pd.to_datetime(int(kline["t"]), unit="ms")
                 row = {
@@ -664,7 +678,6 @@ class MarketStreamManager:
                 self._schedule_market_flush()
         finally:
             self._kline_running[tf] = False
-            # finally 이후 pending이 새로 생겼으면 즉시 재실행
             if self._pending_kline.get(tf):
                 self._kline_running[tf] = True
                 asyncio.create_task(self._process_kline(tf), name=f"kline-{tf}")
