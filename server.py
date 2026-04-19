@@ -621,6 +621,7 @@ class MarketStreamManager:
 
     async def _flush_market_update(self):
         await asyncio.sleep(0.35)
+        # 락 안에서는 데이터만 복사 — CPU 연산은 락 밖에서 스레드로 실행
         async with self._lock:
             dirty_tfs = set(self._dirty_tfs)
             full_refresh = self._needs_full_refresh
@@ -630,13 +631,19 @@ class MarketStreamManager:
             if not dirty_tfs and not full_refresh:
                 return
 
-            payload = build_market_payload(
-                self._tf_data,
-                self._price,
-                self._last_update,
-                chart_tfs=TIMEFRAMES if full_refresh else dirty_tfs,
-                include_overview=full_refresh,
-            )
+            tf_data_snapshot = dict(self._tf_data)
+            price_snapshot = self._price
+            last_update_snapshot = self._last_update
+
+        # build_market_payload 는 CPU 집약적 — 스레드풀에서 실행하여 이벤트 루프 비블로킹
+        payload = await asyncio.to_thread(
+            build_market_payload,
+            tf_data_snapshot,
+            price_snapshot,
+            last_update_snapshot,
+            chart_tfs=TIMEFRAMES if full_refresh else dirty_tfs,
+            include_overview=full_refresh,
+        )
 
         await self._broadcast({"type": "market", "data": payload})
 
