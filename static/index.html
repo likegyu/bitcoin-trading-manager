@@ -1003,23 +1003,26 @@ body {
   display: flex; align-items: center; gap: 8px;
   padding: 0 14px;
 }
-.hero-elapsed-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: #A8978A;
-  letter-spacing: 0.08em;
-}
 .hero-elapsed-value {
   font-size: 14px;
   font-weight: 800;
   color: #EA580C;
   font-variant-numeric: tabular-nums;
 }
-.hero-elapsed-sub {
-  font-size: 11px;
-  font-weight: 500;
+.hero-pnl-divider {
+  font-size: 12px;
+  color: #D6C9C0;
+  font-weight: 400;
+  margin: 0 2px;
+}
+.hero-challenge-pnl {
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
   color: #78716C;
 }
+.hero-challenge-pnl.pos { color: #16A34A; }
+.hero-challenge-pnl.neg { color: #DC2626; }
 /* 모바일: 히어로 티커 압축 */
 @media (max-width: 540px) {
   .hero-badge { padding: 0 10px; font-size: 9px; letter-spacing: 0.08em; }
@@ -1030,9 +1033,8 @@ body {
   .hero-cd-num { font-size: 12px; }
   .hero-cd-colon { margin: 0 2px 1px; font-size: 11px; }
   .hero-countdown { padding: 0 10px; }
-  .hero-elapsed-label { display: none; }
-  .hero-elapsed-sub { display: none; }
   .hero-elapsed-value { font-size: 13px; }
+  .hero-challenge-pnl { font-size: 12px; }
   .hero-started { padding: 0 10px; }
 }
 
@@ -1076,9 +1078,9 @@ body {
       <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-secs">--</span><span class="hero-cd-lbl">초</span></div>
     </div>
     <div id="hero-started" class="hero-started" style="display:none;">
-      <span class="hero-elapsed-label">진행 중</span>
       <span class="hero-elapsed-value" id="hcd-elapsed-val">D+0</span>
-      <span class="hero-elapsed-sub" id="hcd-elapsed-sub"></span>
+      <span class="hero-pnl-divider">|</span>
+      <span class="hero-challenge-pnl" id="hcd-challenge-pnl">—</span>
     </div>
   </div>
 
@@ -1970,8 +1972,8 @@ function applyMarketData(data, source = "market") {
     });
     state.price = data.price;
     applyLiveBtcPositionMarks(data.price);
-    // 차트 마지막 캔들 close/high/low를 현재가로 인플레이스 업데이트
-    patchLastCandlePrice(data.price);
+    // 마지막 캔들 실시간 업데이트: forming(Binance kline 기준) 우선, 없으면 aggTrade 가격
+    patchLastCandlePrice(data.price, data.forming || null);
   }
 
   if (data.last_update) {
@@ -2233,9 +2235,22 @@ function applyAccountData(data) {
   if (!data) return;
   state.account = data;
   renderAccountPanel(data);
+  updateChallengePnl(data);
   if (state.chartInstance || state.charts[state.currentTf]) {
     renderCurrentChart();
   }
+}
+
+function updateChallengePnl(account) {
+  const el = document.getElementById('hcd-challenge-pnl');
+  if (!el) return;
+  const CHALLENGE_START = 5000;
+  const wallet = Number(account && account.wallet_balance);
+  if (!Number.isFinite(wallet) || wallet <= 0) { el.textContent = '—'; el.className = 'hero-challenge-pnl'; return; }
+  const pnl = wallet - CHALLENGE_START;
+  const sign = pnl >= 0 ? '+' : '';
+  el.textContent = `${sign}$${pnl.toFixed(2)}`;
+  el.className = 'hero-challenge-pnl ' + (pnl >= 0 ? 'pos' : 'neg');
 }
 
 async function fetchAccount() {
@@ -3343,7 +3358,7 @@ function switchTab(tf) {
  * 서버에서 완전한 market 업데이트가 오기 전에 즉시 반영한다.
  * ECharts setOption(notMerge:false)로 캔들스틱 시리즈만 교체 → 저비용.
  */
-function patchLastCandlePrice(newPrice) {
+function patchLastCandlePrice(newPrice, forming) {
   const tf = state.currentTf;
   const chart = state.charts[tf];
   if (!chart || !chart.candles || !chart.candles.length) return;
@@ -3352,11 +3367,21 @@ function patchLastCandlePrice(newPrice) {
   if (!last) return;
 
   // candle format: [open, close, low, high]
-  last[1] = newPrice;                                  // close
-  if (newPrice < last[2]) last[2] = newPrice;          // 신규 저가
-  if (newPrice > last[3]) last[3] = newPrice;          // 신규 고가
+  // forming 데이터(Binance kline 기준 open/high/low/volume)가 있으면 우선 사용
+  const f = forming && forming[tf];
+  if (f) {
+    // open은 캔들 시작가로 고정 (last[0] 유지하되 forming.open으로 보정)
+    last[0] = f.open;
+    last[1] = f.close;
+    last[2] = f.low;
+    last[3] = f.high;
+  } else {
+    // forming 없으면 aggTrade 가격으로 close/high/low만 추적
+    last[1] = newPrice;
+    if (newPrice < last[2]) last[2] = newPrice;
+    if (newPrice > last[3]) last[3] = newPrice;
+  }
 
-  // 차트 인스턴스가 살아있으면 캔들스틱 시리즈만 교체 (지표 등 나머지 불변)
   const inst = state.chartInstance;
   if (inst && !inst.isDisposed()) {
     inst.setOption({ series: [{ data: chart.candles }] }, {
@@ -4717,13 +4742,9 @@ function showError(msg) {
         startedEl.style.display = 'block';
         const elapsed   = Math.abs(diff);
         const totalSecs = Math.floor(elapsed / 1000);
-        const elDays    = Math.floor(totalSecs / 86400);
-        const elHours   = Math.floor((totalSecs % 86400) / 3600);
-        const elMins    = Math.floor((totalSecs % 3600) / 60);
+        const elDays = Math.floor(totalSecs / 86400);
         const valEl = document.getElementById('hcd-elapsed-val');
-        const subEl = document.getElementById('hcd-elapsed-sub');
         if (valEl) valEl.textContent = `D+${elDays}`;
-        if (subEl) subEl.textContent = `${pad(elHours)}시간 ${pad(elMins)}분 경과`;
       }
       setTimeout(tickCountdown, 60000); // 1분마다 경과 시간 갱신
       return;
