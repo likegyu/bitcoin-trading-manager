@@ -587,10 +587,17 @@ class MarketStreamManager:
             "volume": float(kline["v"]),
         }
 
+        # CPU 연산(upsert + 지표계산)을 락 밖 스레드에서 실행
         async with self._lock:
             current = self._tf_data.get(tf)
-            updated = _upsert_ohlcv(current, timestamp, row)
-            updated = add_all_indicators(updated)
+
+        def _compute():
+            up = _upsert_ohlcv(current, timestamp, row)
+            return add_all_indicators(up)
+
+        updated = await asyncio.to_thread(_compute)
+
+        async with self._lock:
             self._tf_data[tf] = updated
             self._price = row["close"]
             self._last_update = _now_label()
