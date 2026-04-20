@@ -3005,55 +3005,68 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
   const positions = getRelevantChartPositions();
   if (!positions.length) return [];
 
-  const selected = [];
-  positions.forEach(pos => {
-    if (selected.length >= 3) return;
+  const guides = [];
 
-    const entry = Number(pos.entry_price);
-    if (!Number.isFinite(entry)) return;
-
-    const tooClose = occupied.some(price => Math.abs(entry - price) < minGap);
-    if (tooClose) return;
-
-    const isShort = pos.side === "숏";
-    const color = isShort ? C.bear : C.bull;
-    selected.push({
-      name: `${isShort ? "SHORT" : "LONG"} ${pos.symbol} ${formatUsd(entry, 0)}`,
-      yAxis: entry,
-      lineStyle: { color, width: 1.2, type: "dotted", opacity: 0.9 },
+  // 라인 추가 헬퍼 — minGap 체크 없이 항상 추가 (TP/SL/Liq는 중요해서 생략하지 않음)
+  function addGuide(price, label, color, lineType = "dashed", width = 1.2, bgAlpha = "CC") {
+    if (!Number.isFinite(price) || price <= 0) return;
+    guides.push({
+      name: label,
+      yAxis: price,
+      lineStyle: { color, width, type: lineType, opacity: 0.85 },
       label: {
         show: true,
         color: "#FFFFFF",
-        backgroundColor: color,
+        backgroundColor: color + bgAlpha,
         borderRadius: 4,
         padding: [3, 6],
+        fontSize: 11,
       },
     });
-    occupied.push(entry);
-  });
-
-  if (!selected.length) {
-    const fallback = positions[0];
-    const entry = Number(fallback?.entry_price);
-    if (Number.isFinite(entry)) {
-      const isShort = fallback.side === "숏";
-      const color = isShort ? C.bear : C.bull;
-      return [{
-        name: `${isShort ? "SHORT" : "LONG"} ${fallback.symbol} ${formatUsd(entry, 0)}`,
-        yAxis: entry,
-        lineStyle: { color, width: 1.2, type: "dotted", opacity: 0.9 },
-        label: {
-          show: true,
-          color: "#FFFFFF",
-          backgroundColor: color,
-          borderRadius: 4,
-          padding: [3, 6],
-        },
-      }];
-    }
+    occupied.push(price);
   }
 
-  return selected;
+  positions.forEach(pos => {
+    const entry = Number(pos.entry_price);
+    const liq   = Number(pos.liquidation_price);
+    const tp    = Number(pos.tp_price);
+    const sl    = Number(pos.sl_price);
+    const isShort = pos.side === "숏";
+    const entryColor = isShort ? C.bear : C.bull;
+
+    // 진입가
+    if (Number.isFinite(entry) && entry > 0) {
+      addGuide(entry,
+        `${isShort ? "SHORT" : "LONG"} ${pos.symbol} ${formatUsd(entry, 0)}`,
+        entryColor, "dotted", 1.5, "FF");
+    }
+
+    // TP (초록 점선)
+    if (Number.isFinite(tp) && tp > 0) {
+      addGuide(tp, `TP ${formatUsd(tp, 0)}`, "#16A34A", "dashed", 1.2, "DD");
+    }
+
+    // SL (빨간 점선)
+    if (Number.isFinite(sl) && sl > 0) {
+      addGuide(sl, `SL ${formatUsd(sl, 0)}`, "#DC2626", "dashed", 1.2, "DD");
+    }
+
+    // 청산가 (주황 점선)
+    if (Number.isFinite(liq) && liq > 0) {
+      addGuide(liq, `LIQ ${formatUsd(liq, 0)}`, "#EA580C", "dashed", 1, "BB");
+    }
+  });
+
+  // 미체결 지정가 주문 (파란 점선)
+  const openOrders = state.account?.open_orders || [];
+  openOrders.forEach(o => {
+    const price = Number(o.price);
+    if (!Number.isFinite(price) || price <= 0) return;
+    const sideLabel = o.side === "BUY" ? "매수" : "매도";
+    addGuide(price, `ORDER ${sideLabel} ${formatUsd(price, 0)}`, "#0284C7", "dotted", 1, "BB");
+  });
+
+  return guides;
 }
 
 function buildPriceGuides(chart, viewport) {
