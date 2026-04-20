@@ -4632,10 +4632,8 @@ function syncBottomHeight() {
 // 패널 높이가 바뀔 수 있는 시점마다 재계산
 window.addEventListener('load', syncBottomHeight);
 window.addEventListener('resize', () => {
-  // 리사이즈 중에는 즉시 height 해제 (auto로 흘러가게)
-  const bs = document.querySelector('.bottom-section');
-  if (bs) { bs.style.height = ''; bs.style.maxHeight = ''; }
   // 리사이즈가 완전히 멈춘 뒤 재계산 (150ms debounce)
+  // height를 즉시 초기화하면 스크롤이 사라지고 전체 목록이 펼쳐지므로 제거
   clearTimeout(window._syncBhTimer);
   window._syncBhTimer = setTimeout(syncBottomHeight, 150);
 });
