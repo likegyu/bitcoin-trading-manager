@@ -98,7 +98,11 @@ FIB_COLORS = {
 }
 
 app = FastAPI()
-_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+# 분석(Claude API) + 데이터 fetch가 동시에 실행될 수 있도록 워커 수 충분히 확보
+# 기본 4개는 분석 1건만으로 전부 포화 → CPU 코어 × 4 또는 최소 16
+_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(16, (os.cpu_count() or 4) * 4)
+)
 CHART_WINDOW = 120
 BASE_OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
 ACCOUNT_STREAM_WS_BASE = "wss://fstream.binance.com/ws"
@@ -1314,7 +1318,7 @@ class AnalysisManager:
             if _macro_snapshot.is_ready():
                 macro_snapshot = await _macro_snapshot.get_snapshot()
             else:
-                macro_snapshot = await loop.run_in_executor(_executor, fetch_macro_context)
+                macro_snapshot = await asyncio.to_thread(fetch_macro_context)
 
             await self._set_step(job_id, 2)
 
@@ -1692,9 +1696,9 @@ async def reflect_endpoint():
     loop = asyncio.get_event_loop()
     import datetime as _dt
 
-    # 현재가 수집 (단일 호출)
+    # 현재가 수집 (단일 호출) — 분석 executor 와 분리하여 경쟁 방지
     try:
-        price_now = await loop.run_in_executor(_executor, fetch_current_price, DEFAULT_SYMBOL)
+        price_now = await asyncio.to_thread(fetch_current_price, DEFAULT_SYMBOL)
     except Exception as exc:
         return {"ok": False, "error": f"가격 수집 실패 — {exc}"}
 
@@ -1804,8 +1808,7 @@ async def macro_endpoint():
     if _macro_snapshot.is_ready():
         data = await _macro_snapshot.get_snapshot()
     else:
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(_executor, fetch_macro_context)
+        data = await asyncio.to_thread(fetch_macro_context)
     # JSON 직렬화 가능하도록 None 포함 dict 그대로 반환
     return data
 
@@ -1815,8 +1818,7 @@ async def account_endpoint():
     if _account_stream.is_ready():
         data = await _account_stream.get_snapshot()
     else:
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(_executor, _build_account_payload)
+        data = await asyncio.to_thread(_build_account_payload)
     return data
 
 
