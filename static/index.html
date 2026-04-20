@@ -56,6 +56,21 @@ body {
 .btn-analyze:hover:not(:disabled) { background: #C2410C; }
 .btn-analyze:disabled { background: #F0C4AD; cursor: not-allowed; }
 
+/* ══ 알림 버튼 ═════════════════════════════════ */
+#notif-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid #E8DDD4;
+  background: #FFFFFF; font-size: 11px; font-weight: 700; color: #57534E;
+  cursor: pointer; transition: background .15s, border-color .15s;
+  white-space: nowrap;
+}
+#notif-btn:hover { background: #F5F0EB; border-color: #D6C9C0; }
+#notif-btn.on { background: #F0FDF4; border-color: #86EFAC; color: #166534; }
+#notif-btn .notif-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor; display: inline-block;
+}
+
 /* ══ 도네이션 ══════════════════════════════════ */
 .btn-donate {
   background: none; border: 1px solid #E8DDD4; border-radius: 10px;
@@ -1430,6 +1445,10 @@ body {
         <span class="status-dot" style="background:#A8978A;"></span>
         <span id="connections-text">— 명</span>
       </div>
+      <button id="notif-btn" onclick="toggleNotif()" title="시그널 알림">
+        <span class="notif-dot"></span>
+        <span id="notif-btn-text">알림 OFF</span>
+      </button>
       <a id="chzzk-link" class="chzzk-link" href="https://chzzk.naver.com/dabfd093bbc4d701cef7ed0a5a2c2f2e" target="_blank" rel="noopener">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#00FFA3"/><path d="M7 7h10v2H7V7zm0 4h7v2H7v-2zm0 4h10v2H7v-2z" fill="#000"/></svg>
         <span class="chzzk-label">CHZZK</span>
@@ -1443,7 +1462,7 @@ body {
         <div class="donate-sub">USDT (TRC20 / Tron 네트워크)</div>
         <div class="donate-addr-wrap">
           <span class="donate-addr">TLobHcQzcaniNLBimNrgpoU7jw2iyQpoe5</span>
-          <button class="donate-copy-btn" onclick="copyDonateAddr()">복사</button>
+          <button class="donate-copy-btn" onclick="copyDonateAddr(event)">복사</button>
         </div>
         <div class="donate-copied" id="donate-copied">✓ 복사됐습니다!</div>
       </div>
@@ -4259,23 +4278,103 @@ checkSetup();
 // ══════════════════════════════════════════════
 // 브라우저 알림
 // ══════════════════════════════════════════════
-function notifyAnalysisResult(_data) { /* 알림 기능 제거 */ }
+// ══ 시그널 알림 ════════════════════════════════
+const NOTIF_MIN_CONF = 65; // 알림 발송 최소 확신도
+let _lastNotifTime = null;
+
+function _notifSupported() {
+  return typeof Notification !== 'undefined' && typeof Notification.requestPermission === 'function';
+}
+function _notifOn() {
+  return _notifSupported()
+    && Notification.permission === 'granted'
+    && localStorage.getItem('notif_off') !== '1';
+}
+
+function updateNotifBtn() {
+  const btn  = document.getElementById('notif-btn');
+  const text = document.getElementById('notif-btn-text');
+  if (!btn || !text) return;
+  if (!_notifSupported() || location.protocol !== 'https:') {
+    btn.style.display = 'none'; return;
+  }
+  const on = _notifOn();
+  btn.classList.toggle('on', on);
+  text.textContent = on ? '알림 ON' : '알림 OFF';
+  btn.title = on ? '알림 켜짐 — 클릭하면 끔' : '클릭하면 알림 켬';
+}
+
+function toggleNotif() {
+  if (!_notifSupported()) return;
+  if (Notification.permission === 'granted') {
+    const off = localStorage.getItem('notif_off') === '1';
+    if (off) localStorage.removeItem('notif_off');
+    else     localStorage.setItem('notif_off', '1');
+    updateNotifBtn();
+    return;
+  }
+  if (Notification.permission === 'denied') { return; }
+  Notification.requestPermission().then(p => {
+    if (p === 'granted') localStorage.removeItem('notif_off');
+    updateNotifBtn();
+  });
+}
+
+function notifyAnalysisResult(data) {
+  if (!_notifOn()) return;
+  const conf   = Number(data.confidence);
+  const signal = data.signal; // "매수" | "매도" | "홀드"
+  const time   = data.analysis_time || null;
+
+  if (!signal || signal === '홀드') return;
+  if (!Number.isFinite(conf) || conf < NOTIF_MIN_CONF) return;
+  if (time && time === _lastNotifTime) return; // 중복 방지
+
+  _lastNotifTime = time;
+  const dir = signal === '매수' ? '🔼 상방' : '🔽 하방';
+  try {
+    new Notification(`BTC 시그널 — ${dir}`, {
+      body: `확신도 ${conf}%  |  ${data.report_sections?.summary || '새 분석 완료'}`,
+      tag: 'btc-signal',
+    });
+  } catch (e) { /* ignore */ }
+}
+
+updateNotifBtn();
 
 // ══ 도네이션 팝업 ══════════════════════════════
 function toggleDonate(e) {
   e.stopPropagation();
   document.getElementById('donate-popup').classList.toggle('open');
 }
-function copyDonateAddr() {
+function copyDonateAddr(e) {
+  e.stopPropagation();
+  const btn = e.currentTarget;
   navigator.clipboard.writeText('TLobHcQzcaniNLBimNrgpoU7jw2iyQpoe5').then(() => {
     const el = document.getElementById('donate-copied');
     el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 2000);
+    btn.textContent = '✓ 복사됨';
+    setTimeout(() => {
+      el.style.display = 'none';
+      btn.textContent = '복사';
+    }, 2000);
+  }).catch(() => {
+    // clipboard API 실패 시 fallback
+    const ta = document.createElement('textarea');
+    ta.value = 'TLobHcQzcaniNLBimNrgpoU7jw2iyQpoe5';
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    const el = document.getElementById('donate-copied');
+    el.style.display = 'block';
+    btn.textContent = '✓ 복사됨';
+    setTimeout(() => { el.style.display = 'none'; btn.textContent = '복사'; }, 2000);
   });
 }
-document.addEventListener('click', () => {
+document.addEventListener('click', (e) => {
   const p = document.getElementById('donate-popup');
-  if (p) p.classList.remove('open');
+  if (p && !p.closest('div').contains(e.target)) p.classList.remove('open');
 });
 
 // ══════════════════════════════════════════════
