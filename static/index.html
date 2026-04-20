@@ -933,25 +933,32 @@ body {
 
 /* ══ Chzzk 링크 ══════════════════════════════ */
 .chzzk-link {
-  display: inline-flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 14px 7px 10px;
+  background: #0F1010;
+  border-radius: 10px;
   text-decoration: none;
   flex-shrink: 0;
-  opacity: .75;
-  transition: opacity .15s;
+  transition: background .15s;
 }
-.chzzk-link:hover { opacity: 1; }
+.chzzk-link:hover { background: #1e2020; }
 .chzzk-label {
-  font-size: 11px; font-weight: 700; color: #57534E;
-  letter-spacing: 0.05em;
+  font-size: 15px; font-weight: 800; color: #00FFA3;
+  letter-spacing: 0.04em;
 }
 .chzzk-live-badge {
-  font-size: 10px; font-weight: 700;
-  color: #FF3B30;
-  animation: live-pulse 1.8s ease-in-out infinite;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #FF3B30;
+  color: #fff;
+  font-size: 10px; font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  animation: live-pulse 1.6s ease-in-out infinite;
 }
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
-  50%       { opacity: .4; }
+  50%       { opacity: .5; }
 }
 
 /* ══ 히어로 티커 바 ══════════════════════════ */
@@ -1406,9 +1413,9 @@ body {
       </div>
       <button id="notif-btn" class="notif-btn" onclick="toggleNotifications()" title="브라우저 알림">알림</button>
       <a id="chzzk-link" class="chzzk-link" href="https://chzzk.naver.com/dabfd093bbc4d701cef7ed0a5a2c2f2e" target="_blank" rel="noopener">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#00FFA3"/><path d="M7 7h10v2H7V7zm0 4h7v2H7v-2zm0 4h10v2H7v-2z" fill="#000"/></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#00FFA3"/><path d="M7 7h10v2H7V7zm0 4h7v2H7v-2zm0 4h10v2H7v-2z" fill="#000"/></svg>
         <span class="chzzk-label">CHZZK</span>
-        <span id="chzzk-live-badge" class="chzzk-live-badge" style="display:none;">● LIVE</span>
+        <span id="chzzk-live-badge" class="chzzk-live-badge" style="display:none;">LIVE</span>
       </a>
     </div>
     <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
