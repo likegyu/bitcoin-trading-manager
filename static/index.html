@@ -1303,20 +1303,6 @@ body {
       <span class="chzzk-label">CHZZK</span>
       <span id="chzzk-live-badge" class="chzzk-live-badge" style="display:none;">LIVE</span>
     </a>
-    <div class="hero-countdown" id="hero-countdown">
-      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-days">--</span><span class="hero-cd-lbl">일</span></div>
-      <div class="hero-cd-colon">:</div>
-      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-hours">--</span><span class="hero-cd-lbl">시간</span></div>
-      <div class="hero-cd-colon">:</div>
-      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-mins">--</span><span class="hero-cd-lbl">분</span></div>
-      <div class="hero-cd-colon">:</div>
-      <div class="hero-cd-unit"><span class="hero-cd-num" id="hcd-secs">--</span><span class="hero-cd-lbl">초</span></div>
-    </div>
-    <div id="hero-started" class="hero-started" style="display:none;">
-      <span class="hero-elapsed-value" id="hcd-elapsed-val">D+0</span>
-      <span class="hero-pnl-divider">|</span>
-      <span class="hero-challenge-pnl" id="hcd-challenge-pnl">—</span>
-    </div>
   </div>
 
   <!-- 셋업 모달 -->
@@ -2470,23 +2456,11 @@ function applyAccountData(data) {
   if (!data) return;
   state.account = data;
   renderAccountPanel(data);
-  updateChallengePnl(data);
   if (state.chartInstance || state.charts[state.currentTf]) {
     renderCurrentChart();
   }
 }
 
-function updateChallengePnl(account) {
-  const el = document.getElementById('hcd-challenge-pnl');
-  if (!el) return;
-  const CHALLENGE_START = 5000;
-  const wallet = Number(account && account.wallet_balance);
-  if (!Number.isFinite(wallet) || wallet <= 0) { el.textContent = '—'; el.className = 'hero-challenge-pnl'; return; }
-  const pnl = wallet - CHALLENGE_START;
-  const sign = pnl >= 0 ? '+' : '';
-  el.textContent = `${sign}$${pnl.toFixed(2)}`;
-  el.className = 'hero-challenge-pnl ' + (pnl >= 0 ? 'pos' : 'neg');
-}
 
 async function fetchAccount() {
   try {
@@ -4957,59 +4931,6 @@ function showError(msg) {
   setInterval(fetchConnections, POLL_MS);
 })();
 
-// 히어로 카운트다운 — 2026년 4월 19일 오전 10:00 KST
-// ══════════════════════════════════════════════
-(function() {
-  const TARGET = new Date('2026-04-19T22:00:00+09:00').getTime();
-
-  function pad(n) { return String(n).padStart(2, '0'); }
-
-  function tickCountdown() {
-    const now  = Date.now();
-    const diff = TARGET - now;
-
-    const countdownEl = document.getElementById('hero-countdown');
-    const startedEl   = document.getElementById('hero-started');
-
-    if (diff <= 0) {
-      if (countdownEl) countdownEl.style.display = 'none';
-      if (startedEl) {
-        startedEl.style.display = 'block';
-        const elapsed   = Math.abs(diff);
-        const totalSecs = Math.floor(elapsed / 1000);
-        const elDays = Math.floor(totalSecs / 86400);
-        const valEl = document.getElementById('hcd-elapsed-val');
-        if (valEl) valEl.textContent = `D+${elDays}`;
-      }
-      setTimeout(tickCountdown, 60000); // 1분마다 경과 시간 갱신
-      return;
-    }
-
-    const totalSecs = Math.floor(diff / 1000);
-    const days  = Math.floor(totalSecs / 86400);
-    const hours = Math.floor((totalSecs % 86400) / 3600);
-    const mins  = Math.floor((totalSecs % 3600) / 60);
-    const secs  = totalSecs % 60;
-
-    const d = document.getElementById('hcd-days');
-    const h = document.getElementById('hcd-hours');
-    const m = document.getElementById('hcd-mins');
-    const s = document.getElementById('hcd-secs');
-
-    if (d) d.textContent = days;
-    if (h) h.textContent = pad(hours);
-    if (m) m.textContent = pad(mins);
-    if (s) s.textContent = pad(secs);
-
-    setTimeout(tickCountdown, 1000);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', tickCountdown);
-  } else {
-    tickCountdown();
-  }
-})();
 </script>
 
 <!-- 주인장 확성기 배너 -->
