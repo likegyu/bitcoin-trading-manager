@@ -2060,6 +2060,26 @@ async def cheers_post(body: CheerRequest, request: Request):
     return {"ok": True, "id": entry["id"]}
 
 
+@app.get("/api/chzzk/live")
+async def chzzk_live():
+    """치지직 채널 라이브 상태 확인."""
+    CHANNEL_ID = "dabfd093bbc4d701cef7ed0a5a2c2f2e"
+    url = f"https://api.chzzk.naver.com/service/v2/channels/{CHANNEL_ID}/live-detail"
+
+    def _fetch():
+        import requests as _req
+        resp = _req.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        return resp.json()
+
+    try:
+        data   = await asyncio.to_thread(_fetch)
+        status = data.get("content", {}).get("status", "")
+        is_live = status == "OPEN"
+        return {"live": is_live, "status": status}
+    except Exception as exc:
+        return {"live": False, "error": str(exc)}
+
+
 @app.get("/")
 async def root():
     html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
