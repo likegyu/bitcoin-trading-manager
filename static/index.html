@@ -926,32 +926,21 @@ body {
 
 /* ══ Chzzk 링크 ══════════════════════════════ */
 .chzzk-link {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 7px 14px 7px 10px;
-  background: #0F1010;
-  border-radius: 10px;
-  text-decoration: none;
-  flex-shrink: 0;
-  transition: background .15s;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid #E8DDD4;
+  background: #FFFFFF; font-size: 11px; font-weight: 700; color: #57534E;
+  text-decoration: none; flex-shrink: 0;
+  transition: border-color .15s, background .15s;
 }
-.chzzk-link:hover { background: #1e2020; }
-.chzzk-label {
-  font-size: 15px; font-weight: 800; color: #00FFA3;
-  letter-spacing: 0.04em;
-}
+.chzzk-link:hover { background: #F5F0EB; border-color: #D6C9C0; }
+.chzzk-label { font-size: 11px; font-weight: 700; color: #57534E; }
 .chzzk-live-badge {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: #FF3B30;
-  color: #fff;
-  font-size: 10px; font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 10px; font-weight: 800; color: #DC2626;
   animation: live-pulse 1.6s ease-in-out infinite;
 }
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
-  50%       { opacity: .5; }
+  50%       { opacity: .35; }
 }
 
 /* ══ 히어로 티커 바 ══════════════════════════ */
@@ -1405,9 +1394,9 @@ body {
         <span id="connections-text">— 명</span>
       </div>
       <a id="chzzk-link" class="chzzk-link" href="https://chzzk.naver.com/dabfd093bbc4d701cef7ed0a5a2c2f2e" target="_blank" rel="noopener">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#00FFA3"/><path d="M7 7h10v2H7V7zm0 4h7v2H7v-2zm0 4h10v2H7v-2z" fill="#000"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#00FFA3"/><path d="M7 7h10v2H7V7zm0 4h7v2H7v-2zm0 4h10v2H7v-2z" fill="#000"/></svg>
         <span class="chzzk-label">CHZZK</span>
-        <span id="chzzk-live-badge" class="chzzk-live-badge" style="display:none;">LIVE</span>
+        <span id="chzzk-live-badge" class="chzzk-live-badge" style="display:none;">● LIVE</span>
       </a>
     </div>
     <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
@@ -4952,8 +4941,20 @@ function showError(msg) {
       if (!res.ok) return;
       const data = await res.json();
       const badge = document.getElementById('chzzk-live-badge');
+      const link  = document.getElementById('chzzk-link');
       if (!badge) return;
-      badge.style.display = data.live ? 'inline-block' : 'none';
+      badge.style.display = data.live ? 'inline' : 'none';
+      if (link) {
+        if (data.live) {
+          link.style.background    = '#F0FDF4';
+          link.style.borderColor   = '#86EFAC';
+          link.querySelector('.chzzk-label').style.color = '#166534';
+        } else {
+          link.style.background    = '';
+          link.style.borderColor   = '';
+          link.querySelector('.chzzk-label').style.color = '';
+        }
+      }
     } catch (_) {}
   }
   fetchChzzkLive();
@@ -4978,12 +4979,22 @@ function showError(msg) {
     if (!pw) { fb.style.color = '#DC2626'; fb.textContent = '비밀번호를 입력해주세요.'; return; }
     fb.style.color = '#78716C'; fb.textContent = '전송 중…';
     try {
-      const res  = await fetch('/api/owner-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pw, text }),
-      });
-      const data = await res.json();
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 8000);
+      let res, data;
+      try {
+        res  = await fetch('/api/owner-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw, text }),
+          signal: ctrl.signal,
+        });
+        data = await res.json();
+      } catch (fe) {
+        clearTimeout(tid);
+        throw new Error(fe.name === 'AbortError' ? '서버 응답 없음 (시간 초과)' : '네트워크 오류');
+      }
+      clearTimeout(tid);
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '오류');
       fb.style.color = '#16A34A';
       fb.textContent = data.cleared ? '✅ 메시지가 삭제됐습니다.' : '✅ 확성기를 울렸습니다!';
@@ -5044,12 +5055,22 @@ function showError(msg) {
     fb.style.color = '#78716C'; fb.textContent = '전송 중…';
 
     try {
-      const res  = await fetch('/api/cheers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json();
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 8000);
+      let res, data;
+      try {
+        res  = await fetch('/api/cheers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+          signal: ctrl.signal,
+        });
+        data = await res.json();
+      } catch (fe) {
+        clearTimeout(tid);
+        throw new Error(fe.name === 'AbortError' ? '서버 응답 없음 (시간 초과)' : '네트워크 오류');
+      }
+      clearTimeout(tid);
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '오류');
 
       // 즉시 화면에 발사
