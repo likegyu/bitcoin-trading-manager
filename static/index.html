@@ -757,14 +757,7 @@ body {
   .live-pos-label { font-size: 9px; }
 }
 
-/* ══ 알림 버튼 ═════════════════════════════ */
-.notif-btn {
-  background: #F5F0EB; border: 1px solid #E8DDD4; border-radius: 8px;
-  padding: 6px 11px; cursor: pointer; font-size: 15px; line-height: 1;
-  color: #78716C; transition: background .15s, border-color .15s;
-}
-.notif-btn:hover { background: #EDE8E0; }
-.notif-btn.on { background: #FFF7ED; border-color: #FDBA74; }
+/* ══ 알림 버튼 (제거됨) ══ */
 
 /* ══ 자동 분석 ═════════════════════════════ */
 .auto-analyze-section {
@@ -1411,7 +1404,6 @@ body {
         <span class="status-dot" style="background:#A8978A;"></span>
         <span id="connections-text">— 명</span>
       </div>
-      <button id="notif-btn" class="notif-btn" onclick="toggleNotifications()" title="브라우저 알림">알림</button>
       <a id="chzzk-link" class="chzzk-link" href="https://chzzk.naver.com/dabfd093bbc4d701cef7ed0a5a2c2f2e" target="_blank" rel="noopener">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#00FFA3"/><path d="M7 7h10v2H7V7zm0 4h7v2H7v-2zm0 4h10v2H7v-2z" fill="#000"/></svg>
         <span class="chzzk-label">CHZZK</span>
@@ -4229,158 +4221,7 @@ checkSetup();
 // ══════════════════════════════════════════════
 // 브라우저 알림
 // ══════════════════════════════════════════════
-let _lastNotifiedSignal = null;
-let _lastNotifiedTime   = null;  // 중복 알림 방지용 analysis_time 추적
-
-function _notifGranted() {
-  return typeof Notification !== "undefined" && Notification.permission === "granted";
-}
-
-// Safari에서 알림이 지원되는지 체크
-function _notifSupported() {
-  if (typeof Notification === "undefined") return false;
-  if (typeof Notification.requestPermission !== "function") return false;
-  return true;
-}
-
-function _isSafari() {
-  return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-}
-
-// ★ 핵심: async/await 없이 동기적으로 requestPermission 호출
-// Safari는 클릭 핸들러 안에서 동기적으로 호출해야 권한 팝업이 뜸
-// 브라우저 팝업(alert) 없이 페이지 내 토스트로 안내
-function _notifToast(msg, duration = 5000) {
-  let toast = document.getElementById("notif-toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "notif-toast";
-    toast.style.cssText = [
-      "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);",
-      "background:#292524;color:#FAF8F5;font-size:13px;font-weight:500;",
-      "padding:11px 18px;border-radius:10px;z-index:9999;",
-      "max-width:360px;text-align:center;line-height:1.5;",
-      "box-shadow:0 4px 16px rgba(0,0,0,.25);",
-      "transition:opacity .25s;",
-    ].join("");
-    document.body.appendChild(toast);
-  }
-  toast.textContent = msg;
-  toast.style.opacity = "1";
-  clearTimeout(toast._hideTimer);
-  toast._hideTimer = setTimeout(() => { toast.style.opacity = "0"; }, duration);
-}
-
-function toggleNotifications() {
-  if (!_notifSupported()) {
-    if (_isSafari()) {
-      _notifToast("Safari 설정 → 웹사이트 → 알림에서 이 사이트를 '허용'으로 변경해주세요.");
-    } else {
-      _notifToast("이 브라우저는 알림을 지원하지 않습니다.");
-    }
-    return;
-  }
-
-  if (Notification.permission === "granted") {
-    // 이미 허용 → ON/OFF 토글
-    const isOff = localStorage.getItem("notif_off") === "1";
-    if (isOff) {
-      localStorage.removeItem("notif_off");
-    } else {
-      localStorage.setItem("notif_off", "1");
-    }
-    updateNotifBtn();
-    return;
-  }
-
-  if (Notification.permission === "denied") {
-    if (_isSafari()) {
-      _notifToast("알림이 차단됨 — Safari 설정 → 웹사이트 → 알림에서 이 사이트를 '허용'으로 변경해주세요.");
-    } else {
-      _notifToast("알림이 차단됨 — 브라우저 설정에서 이 사이트의 알림을 허용해주세요.");
-    }
-    return;
-  }
-
-  // default 상태 → 권한 요청 (사용자가 직접 벨 버튼을 눌렀을 때만)
-  localStorage.removeItem("notif_off");
-
-  function _onPermResult(perm) {
-    if (perm === "granted") {
-      try {
-        new Notification("BTC Signal Analyzer", { body: "알림이 활성화되었습니다." });
-      } catch (e) { /* Safari 일부 버전 오류 무시 */ }
-    } else if (perm === "denied") {
-      _notifToast("알림 권한이 거부됨 — Safari 설정 → 웹사이트 → 알림에서 수동으로 허용해주세요.");
-    }
-    updateNotifBtn();
-  }
-
-  try {
-    const result = Notification.requestPermission(_onPermResult);
-    if (result && typeof result.then === "function") {
-      result.then(_onPermResult).catch(() => updateNotifBtn());
-    }
-  } catch (e) {
-    console.warn("[알림] requestPermission 실패:", e);
-    updateNotifBtn();
-  }
-}
-
-function updateNotifBtn() {
-  const btn = document.getElementById("notif-btn");
-  if (!btn) return;
-  // HTTP 접속이거나 브라우저가 알림을 아예 지원하지 않으면 버튼 숨김
-  const isHttps = location.protocol === "https:";
-  const supported = _notifSupported();
-  if (!isHttps || !supported) {
-    btn.style.display = "none";
-    return;
-  }
-  btn.style.display = "";
-  const off = localStorage.getItem("notif_off") === "1";
-  const granted = _notifGranted();
-  const active = granted && !off;
-  btn.classList.toggle("on", active);
-  btn.title = active ? "알림 ON (클릭하면 끔)" : "알림 OFF (클릭하면 켬)";
-  btn.textContent = active ? "알림ON" : "알림OFF";
-}
-
-function notifyAnalysisResult(data) {
-  if (!_notifGranted() || localStorage.getItem("notif_off") === "1") return;
-  const sig  = data.signal || null;
-  const conf = data.confidence ?? "";
-  const time = data.analysis_time || null;
-
-  if (!sig) return;
-
-  // 동일한 analysis_time 이면 중복 알림 방지
-  // (페이지 로드·탭 재활성화 시 같은 분석 결과가 다시 들어오는 경우 차단)
-  if (time && time === _lastNotifiedTime) return;
-
-  const changed  = sig !== _lastNotifiedSignal;
-  const sigEmoji = { "매수": "▲", "매도": "▼", "홀드": "●" };
-
-  // 매수/매도는 새 분석일 때만 알림, 홀드는 신호가 바뀔 때만 알림
-  if (sig === "매수" || sig === "매도" || changed) {
-    const emoji = sigEmoji[sig] || "";
-    const body  = data.report_sections?.summary || "새 분석 완료";
-    try {
-      new Notification("BTC Signal Analyzer", {
-        body,
-        tag: "signal",
-      });
-    } catch (e) {
-      // Safari에서 Notification 생성 오류 무시 (권한은 있지만 생성 실패하는 케이스)
-      console.warn("[알림] Notification 생성 실패:", e);
-    }
-    _lastNotifiedSignal = sig;
-    _lastNotifiedTime   = time;
-  }
-}
-
-// 초기화
-updateNotifBtn();
+function notifyAnalysisResult(_data) { /* 알림 기능 제거 */ }
 
 // ══════════════════════════════════════════════
 // 자동 주기 분석 — 서버 사이드 스케줄 기반
