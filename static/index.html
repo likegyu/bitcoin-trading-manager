@@ -88,6 +88,15 @@ body {
   animation: fadein .15s ease;
 }
 #donate-popup.open { display: block; }
+@media (max-width: 600px) {
+  #donate-popup {
+    position: fixed;
+    top: 70px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
+}
 .donate-title { font-size: 13px; font-weight: 700; color: #1C1917; margin-bottom: 4px; }
 .donate-sub { font-size: 11px; color: #A8978A; margin-bottom: 12px; }
 .donate-addr-wrap {
