@@ -56,6 +56,43 @@ body {
 .btn-analyze:hover:not(:disabled) { background: #C2410C; }
 .btn-analyze:disabled { background: #F0C4AD; cursor: not-allowed; }
 
+/* ══ 도네이션 ══════════════════════════════════ */
+.btn-donate {
+  background: none; border: 1px solid #E8DDD4; border-radius: 10px;
+  padding: 8px 14px; font-size: 13px; font-weight: 600; color: #78716C;
+  cursor: pointer; white-space: nowrap; transition: border-color .15s, color .15s;
+}
+.btn-donate:hover { border-color: #A8978A; color: #1C1917; }
+#donate-popup {
+  display: none;
+  position: absolute; top: calc(100% + 8px); right: 0;
+  background: #fff; border: 1px solid #E8DDD4; border-radius: 14px;
+  padding: 16px; width: 300px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.1);
+  z-index: 500;
+  animation: fadein .15s ease;
+}
+#donate-popup.open { display: block; }
+.donate-title { font-size: 13px; font-weight: 700; color: #1C1917; margin-bottom: 4px; }
+.donate-sub { font-size: 11px; color: #A8978A; margin-bottom: 12px; }
+.donate-addr-wrap {
+  display: flex; align-items: center; gap: 6px;
+  background: #FAF8F5; border: 1px solid #E8DDD4; border-radius: 8px;
+  padding: 8px 10px;
+}
+.donate-addr {
+  font-size: 11px; font-family: monospace; color: #57534E;
+  word-break: break-all; flex: 1;
+}
+.donate-copy-btn {
+  flex-shrink: 0; background: #1C1917; color: #fff;
+  border: none; border-radius: 6px; padding: 5px 10px;
+  font-size: 11px; font-weight: 700; cursor: pointer;
+  transition: background .15s;
+}
+.donate-copy-btn:hover { background: #44403C; }
+.donate-copied { color: #16A34A; font-size: 11px; font-weight: 600; margin-top: 6px; display: none; }
+
 /* ══ 로딩 오버레이 ════════════════════════════ */
 @keyframes spin   { to { transform: rotate(360deg); } }
 @keyframes fadein { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
@@ -1398,6 +1435,18 @@ body {
         <span class="chzzk-label">CHZZK</span>
         <span id="chzzk-live-badge" class="chzzk-live-badge" style="display:none;">● LIVE</span>
       </a>
+    </div>
+    <div style="position:relative;">
+      <button class="btn-donate" onclick="toggleDonate(event)">☕ 도네이션</button>
+      <div id="donate-popup">
+        <div class="donate-title">☕ 커피 한 잔 사주세요</div>
+        <div class="donate-sub">USDT (TRC20 / Tron 네트워크)</div>
+        <div class="donate-addr-wrap">
+          <span class="donate-addr">TLobHcQzcaniNLBimNrgpoU7jw2iyQpoe5</span>
+          <button class="donate-copy-btn" onclick="copyDonateAddr()">복사</button>
+        </div>
+        <div class="donate-copied" id="donate-copied">✓ 복사됐습니다!</div>
+      </div>
     </div>
     <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
   </div>
@@ -4211,6 +4260,23 @@ checkSetup();
 // 브라우저 알림
 // ══════════════════════════════════════════════
 function notifyAnalysisResult(_data) { /* 알림 기능 제거 */ }
+
+// ══ 도네이션 팝업 ══════════════════════════════
+function toggleDonate(e) {
+  e.stopPropagation();
+  document.getElementById('donate-popup').classList.toggle('open');
+}
+function copyDonateAddr() {
+  navigator.clipboard.writeText('TLobHcQzcaniNLBimNrgpoU7jw2iyQpoe5').then(() => {
+    const el = document.getElementById('donate-copied');
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 2000);
+  });
+}
+document.addEventListener('click', () => {
+  const p = document.getElementById('donate-popup');
+  if (p) p.classList.remove('open');
+});
 
 // ══════════════════════════════════════════════
 // 자동 주기 분석 — 서버 사이드 스케줄 기반
