@@ -2089,6 +2089,36 @@ async def root():
         return HTMLResponse(f.read())
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(BASE_DIR, "static", "favicon.ico"), media_type="image/x-icon")
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon_svg():
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(BASE_DIR, "static", "favicon.svg"), media_type="image/svg+xml")
+
+@app.get("/favicon-32x32.png", include_in_schema=False)
+async def favicon_32():
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(BASE_DIR, "static", "favicon-32x32.png"), media_type="image/png")
+
+@app.get("/favicon-16x16.png", include_in_schema=False)
+async def favicon_16():
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(BASE_DIR, "static", "favicon-16x16.png"), media_type="image/png")
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+async def apple_touch_icon():
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(BASE_DIR, "static", "apple-touch-icon.png"), media_type="image/png")
+
+@app.get("/og-image.png", include_in_schema=False)
+async def og_image():
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(BASE_DIR, "static", "og-image.png"), media_type="image/png")
+
 @app.get("/robots.txt", include_in_schema=False)
 async def robots():
     from fastapi.responses import PlainTextResponse
