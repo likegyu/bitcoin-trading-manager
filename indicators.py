@@ -82,6 +82,129 @@ def add_atr(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     return df
 
 
+# ── VWAP (Volume Weighted Average Price) ─────
+def add_vwap(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    앵커드 VWAP: 각 UTC 날짜(자정)를 기준점으로 삼아 일중 누적 VWAP 계산.
+    인덱스가 DatetimeTZ이면 date()로 날짜 분리, 아닌 경우 전체를 하나로 처리.
+
+    - vwap      : 당일 앵커 기준 VWAP
+    - vwap_dev  : 현재가의 VWAP 대비 괴리율(%) — 양수=VWAP 위, 음수=VWAP 아래
+    """
+    typical = (df["high"] + df["low"] + df["close"]) / 3
+
+    try:
+        # DatetimeIndex인 경우 UTC 날짜별 그루핑
+        if isinstance(df.index, pd.DatetimeIndex):
+            dates = df.index.normalize()  # 일 단위 절사 (시간 0으로)
+        else:
+            # 타임스탬프 컬럼이 없으면 전체를 하나의 세션으로 처리
+            dates = pd.Series(["session"] * len(df), index=df.index)
+
+        vwap_vals = np.empty(len(df))
+        vwap_vals[:] = np.nan
+
+        for date_key in pd.unique(dates):
+            mask = dates == date_key
+            tp_day  = typical[mask]
+            vol_day = df["volume"][mask]
+            cum_tp_vol = (tp_day * vol_day).cumsum()
+            cum_vol    = vol_day.cumsum().replace(0, np.nan)
+            vwap_day   = cum_tp_vol / cum_vol
+            idx_pos    = np.where(mask)[0]
+            vwap_vals[idx_pos] = vwap_day.values
+
+        df["vwap"] = vwap_vals
+        df["vwap_dev"] = (df["close"] - df["vwap"]) / df["vwap"] * 100
+    except Exception:
+        df["vwap"]     = np.nan
+        df["vwap_dev"] = np.nan
+
+    return df
+
+
+# ── Supertrend ────────────────────────────────
+def add_supertrend(
+    df: pd.DataFrame,
+    period: int = 10,
+    multiplier: float = 3.0,
+) -> pd.DataFrame:
+    """
+    Supertrend 지표 (ATR 기반 추세 추종).
+
+    - supertrend        : Supertrend 밴드 레벨
+    - supertrend_dir    : 1=상승(매수), -1=하락(매도)
+    - supertrend_signal : 방향 변화 시 'BUY'/'SELL', 그 외 None
+
+    ATR이 이미 계산되어 있어야 함 (add_atr 선행 필요).
+    """
+    if "atr" not in df.columns:
+        df = add_atr(df, period)
+
+    hl2    = (df["high"] + df["low"]) / 2
+    upper  = hl2 + multiplier * df["atr"]
+    lower  = hl2 - multiplier * df["atr"]
+
+    n   = len(df)
+    st  = np.full(n, np.nan)
+    dir_ = np.full(n, 1, dtype=int)   # 1=상승, -1=하락
+
+    # 첫 유효 ATR 위치 탐색
+    first_valid = df["atr"].first_valid_index()
+    if first_valid is None:
+        df["supertrend"]        = np.nan
+        df["supertrend_dir"]    = np.nan
+        df["supertrend_signal"] = None
+        return df
+
+    start = df.index.get_loc(first_valid)
+
+    # 첫 봉 초기화
+    close_arr  = df["close"].values
+    upper_arr  = upper.values
+    lower_arr  = lower.values
+
+    final_upper = upper_arr.copy()
+    final_lower = lower_arr.copy()
+
+    for i in range(start + 1, n):
+        # Final Upper Band
+        if upper_arr[i] < final_upper[i - 1] or close_arr[i - 1] > final_upper[i - 1]:
+            final_upper[i] = upper_arr[i]
+        else:
+            final_upper[i] = final_upper[i - 1]
+
+        # Final Lower Band
+        if lower_arr[i] > final_lower[i - 1] or close_arr[i - 1] < final_lower[i - 1]:
+            final_lower[i] = lower_arr[i]
+        else:
+            final_lower[i] = final_lower[i - 1]
+
+        # Direction
+        if dir_[i - 1] == -1 and close_arr[i] > final_upper[i]:
+            dir_[i] = 1
+        elif dir_[i - 1] == 1 and close_arr[i] < final_lower[i]:
+            dir_[i] = -1
+        else:
+            dir_[i] = dir_[i - 1]
+
+        # Supertrend value
+        st[i] = final_lower[i] if dir_[i] == 1 else final_upper[i]
+
+    df["supertrend"]     = st
+    df["supertrend_dir"] = dir_.astype(float)
+    df["supertrend_dir"] = df["supertrend_dir"].where(df.index >= df.index[start])
+
+    # 신호: 방향 전환 시점만 표시
+    dir_series = pd.Series(dir_, index=df.index)
+    signal = pd.Series([None] * n, index=df.index, dtype=object)
+    signal[(dir_series == 1) & (dir_series.shift(1) == -1)] = "BUY"
+    signal[(dir_series == -1) & (dir_series.shift(1) == 1)] = "SELL"
+    df["supertrend_signal"] = signal
+
+    return df
+
+
 def fib_window_for_tf(tf: str) -> int:
     return FIB_SWING_WINDOWS.get(tf, 5)
 
@@ -223,6 +346,8 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = add_volume_ma(df)
     # add_stochastic 제거 — summarize_indicators에서 사용하지 않음 (연산 낭비)
     df = add_atr(df)
+    df = add_vwap(df)
+    df = add_supertrend(df)   # ATR 이후에 호출 (내부에서 ATR 재사용)
     return df
 
 
@@ -303,6 +428,26 @@ def summarize_indicators(tf: str, df: pd.DataFrame) -> str:
         if tf == "5m" else f"=== [{tf}] ==="
     )
 
+    # ── VWAP 표시값 계산 ──
+    vwap_val = last.get("vwap", np.nan)
+    vwap_dev = last.get("vwap_dev", np.nan)
+    if not np.isnan(vwap_val) and not np.isnan(vwap_dev):
+        vwap_pos = "위" if vwap_dev >= 0 else "아래"
+        vwap_str = f"${vwap_val:,.2f} (현재가 VWAP {vwap_pos} {abs(vwap_dev):.2f}%)"
+    else:
+        vwap_str = "N/A"
+
+    # ── Supertrend 표시값 계산 ──
+    st_val = last.get("supertrend", np.nan)
+    st_dir = last.get("supertrend_dir", np.nan)
+    st_signal = last.get("supertrend_signal", None)
+    if not np.isnan(st_val) and not np.isnan(st_dir):
+        st_dir_str = "상승(매수)" if st_dir == 1 else "하락(매도)"
+        st_signal_str = f" ⚡신호: {st_signal}" if st_signal else ""
+        supertrend_str = f"${st_val:,.2f}  방향: {st_dir_str}{st_signal_str}"
+    else:
+        supertrend_str = "N/A"
+
     lines = [
         tf_header,
         f"현재가: ${price:,.2f}",
@@ -317,6 +462,8 @@ def summarize_indicators(tf: str, df: pd.DataFrame) -> str:
         f"SMA200: ${last['sma_200']:,.2f}",
         f"SMA50: ${last['sma_50']:,.2f}",
         f"EMA9: ${last['ema_9']:,.2f}",
+        f"VWAP(일중): {vwap_str}",
+        f"Supertrend(10,3): {supertrend_str}",
         f"ATR(14): ${last['atr']:.2f}",
         f"거래량: {last['volume']:,.0f} / 거래량MA20: {last['volume_ma']:,.0f}",
     ]

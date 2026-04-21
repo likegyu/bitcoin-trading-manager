@@ -180,6 +180,77 @@ def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> di
     }
 
 
+# ── 전통 시장 지표 (yfinance) ─────────────────────────────────
+
+def _fetch_traditional_markets() -> dict:
+    """
+    yfinance로 전통 시장 지표 수집:
+      - ^GSPC  : S&P 500
+      - ^IXIC  : 나스닥 컴포지트
+      - ^VIX   : CBOE 변동성 지수
+      - GC=F   : 금 선물 (USD/oz)
+
+    반환 구조:
+      {
+        "SPX":  {"price": float, "chg_pct": float, "prev_close": float},
+        "NDX":  {...},
+        "VIX":  {"price": float, "chg_pct": float},
+        "GOLD": {"price": float, "chg_pct": float},
+        "error": str | None,
+      }
+    """
+    result: dict = {
+        "SPX": None, "NDX": None, "VIX": None, "GOLD": None, "error": None,
+    }
+    try:
+        import yfinance as yf  # 런타임 임포트 — 설치 안 됐을 때 전체 모듈 블로킹 방지
+
+        tickers_map = {
+            "^GSPC": "SPX",
+            "^IXIC": "NDX",
+            "^VIX":  "VIX",
+            "GC=F":  "GOLD",
+        }
+
+        # period="5d"로 충분 — 하루 종가 2개(전일·최신)만 필요
+        data = yf.download(
+            list(tickers_map.keys()),
+            period="5d",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+        )
+
+        close_df = data.get("Close")
+        if close_df is None or close_df.empty:
+            result["error"] = "yfinance 데이터 없음"
+            return result
+
+        for ticker, key in tickers_map.items():
+            try:
+                series = close_df[ticker].dropna()
+                if len(series) < 2:
+                    continue
+                price      = float(series.iloc[-1])
+                prev_close = float(series.iloc[-2])
+                chg_pct    = (price - prev_close) / prev_close * 100
+                result[key] = {
+                    "price":      round(price, 2),
+                    "prev_close": round(prev_close, 2),
+                    "chg_pct":    round(chg_pct, 2),
+                }
+            except Exception:
+                continue
+
+    except ImportError:
+        result["error"] = "yfinance 미설치 — pip install yfinance"
+    except Exception as e:
+        result["error"] = str(e)[:120]
+
+    return result
+
+
 # ── CoinGecko BTC 도미넌스 ───────────────────────────────────
 
 def _fetch_btc_dominance() -> Optional[float]:
@@ -286,6 +357,9 @@ def fetch_macro_context() -> dict:
         "zscore20": None,
         "regime":   None,
     }
+
+    # 전통 시장 (yfinance) — 별도 키로 저장 (format_macro_context에서 별도 섹션 출력)
+    result["_trad_markets"] = _fetch_traditional_markets()
 
     attach_macro_history_summary(result)
     return result
@@ -406,6 +480,35 @@ def format_macro_context(macro: dict) -> str:
                 if line.startswith("관찰 구간:"):
                     continue
                 lines.append(f"      {line}")
+
+    # ── 전통 시장 섹션 ───────────────────────────────────────────
+    trad = macro.get("_trad_markets") or {}
+    trad_error = trad.get("error")
+    trad_labels = {
+        "SPX":  ("S&P 500",  ""),
+        "NDX":  ("나스닥",   ""),
+        "VIX":  ("VIX",      "  ※ 20 미만=저변동 / 20~30=경계 / 30+=공포"),
+        "GOLD": ("금(USD/oz)", ""),
+    }
+    trad_lines = []
+    for key, (label, note) in trad_labels.items():
+        d = trad.get(key)
+        if d:
+            arrow = "▲" if d["chg_pct"] >= 0 else "▼"
+            trad_lines.append(
+                f"  {label}: ${d['price']:,.2f}  {arrow}{d['chg_pct']:+.2f}%{note}"
+            )
+    if trad_lines:
+        lines.append("[전통 시장]  ※ 전일 종가 기준 — 미국 장 마감 이후 갱신")
+        lines.extend(trad_lines)
+        lines.append(
+            "  ※ 해석 참고: SPX/NDX↓+BTC↓ = 리스크오프 동조. "
+            "VIX↑(30+) = 공포 구간. "
+            "Gold↑+BTC↑ = 인플레이션 헤지 동조 또는 달러 약세 테마. "
+            "SPX↑+BTC↓ = BTC 개별 약세(알트·레버리지 청산 등)."
+        )
+    elif trad_error:
+        lines.append(f"[전통 시장]: 수집 실패 — {trad_error}")
 
     if not FRED_API_KEY:
         lines.append("  ※ FRED API 키 미설정 — 금리·달러 데이터 비활성")

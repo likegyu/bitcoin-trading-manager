@@ -129,26 +129,43 @@ def _fetch_binance(symbol: str, ctx: dict) -> None:
     except Exception:
         ctx["oi_change_24h_pct"] = None
 
-    # ── 테이커 매수/매도 비율 (최근 4h 히스토리) ──
-    # 단일 값은 1.0 주변 노이즈를 시그널로 오인할 수 있어 4회 히스토리로 추세 확인
+    # ── 테이커 매수/매도 비율 (최근 24h 히스토리 + CVD) ──
+    # 4h → 24h로 확장: CVD 방향 편향 계산을 위해 더 긴 구간 필요
     try:
         r = _http.get(
             f"{BINANCE_FUTURES_URL}/futures/data/takerlongshortRatio",
-            params={"symbol": symbol, "period": "1h", "limit": 4}, timeout=5,
+            params={"symbol": symbol, "period": "1h", "limit": 24}, timeout=5,
         )
         r.raise_for_status()
         data = r.json()
         if data:
-            ctx["taker_history"] = [
+            taker_hist = [
                 {"ratio": float(d["buySellRatio"]),
                  "buy":   float(d["buyVol"]),
                  "sell":  float(d["sellVol"])}
                 for d in data
             ]
+            ctx["taker_history"] = taker_hist
+
+            # ── CVD (Cumulative Volume Delta) ────────
+            # CVD = 누적(매수 테이커량 - 매도 테이커량)
+            # 양수 편향: 매수 우세 / 음수 편향: 매도 우세
+            cvd_series = []
+            cumulative = 0.0
+            for h in taker_hist:
+                delta = h["buy"] - h["sell"]
+                cumulative += delta
+                cvd_series.append(round(cumulative, 2))
+
+            ctx["cvd_series"]  = cvd_series          # 24h 시계열 (오래된→최근)
+            ctx["cvd_current"] = cvd_series[-1]       # 최종 누적값
+            ctx["cvd_4h"]      = sum(                 # 최근 4h 델타 (단기 모멘텀)
+                h["buy"] - h["sell"] for h in taker_hist[-4:]
+            )
         else:
-            ctx["taker_history"] = None
+            ctx["taker_history"] = ctx["cvd_series"] = ctx["cvd_current"] = ctx["cvd_4h"] = None
     except Exception:
-        ctx["taker_history"] = None
+        ctx["taker_history"] = ctx["cvd_series"] = ctx["cvd_current"] = ctx["cvd_4h"] = None
 
 
 # ══════════════════════════════════════════════
@@ -280,6 +297,46 @@ def _fetch_deribit(btc_price: float, ctx: dict) -> None:
 
 
 # ══════════════════════════════════════════════
+# Fear & Greed Index (Alternative.me)
+# ══════════════════════════════════════════════
+
+def _fetch_fear_greed(ctx: dict) -> None:
+    """
+    Alternative.me Crypto Fear & Greed Index 수집.
+    0~24: 극도의 공포 / 25~49: 공포 / 50~74: 탐욕 / 75~100: 극도의 탐욕
+    키 없음, 무료.
+    """
+    try:
+        r = _http.get(
+            "https://api.alternative.me/fng/?limit=3&format=json",
+            timeout=8,
+        )
+        r.raise_for_status()
+        data = r.json().get("data", [])
+        if not data:
+            ctx["fear_greed"] = ctx["fear_greed_label"] = None
+            ctx["fear_greed_history"] = None
+            return
+
+        # 최신값
+        ctx["fear_greed"]       = int(data[0]["value"])
+        ctx["fear_greed_label"] = data[0]["value_classification"]
+
+        # 최근 3일 히스토리 (오래된→최신 순)
+        history = []
+        for d in reversed(data):
+            history.append({
+                "value": int(d["value"]),
+                "label": d["value_classification"],
+            })
+        ctx["fear_greed_history"] = history
+
+    except Exception:
+        ctx["fear_greed"] = ctx["fear_greed_label"] = None
+        ctx["fear_greed_history"] = None
+
+
+# ══════════════════════════════════════════════
 # 공개 인터페이스
 # ══════════════════════════════════════════════
 
@@ -293,6 +350,7 @@ def fetch_market_context(symbol: str = DEFAULT_SYMBOL) -> dict:
     _fetch_binance(symbol, ctx)
     _fetch_top_trader_ratios(symbol, ctx)
     _fetch_liquidation_events(symbol, ctx)
+    _fetch_fear_greed(ctx)
 
     btc_price = ctx.get("mark_price") or ctx.get("index_price") or 80000.0
     _fetch_deribit(btc_price, ctx)
@@ -324,14 +382,37 @@ def format_market_context(ctx: dict) -> str:
         history_str = " → ".join(f"{v:+.4f}%" for v in ctx["funding_history"])
         lines.append(f"  펀딩비 최근 8회(24h): {history_str}")
 
-    # ── 테이커 매수/매도 비율 (4h 히스토리 — 오래된 순 → 최근 순) ──
+    # ── 테이커 매수/매도 비율 + CVD (24h 히스토리) ──
     taker_hist = ctx.get("taker_history")
     if taker_hist:
-        ratio_str = " → ".join(f"{d['ratio']:.3f}" for d in taker_hist)
+        # 비율 히스토리는 최근 6h만 표시 (24h 전체는 장황)
+        recent6 = taker_hist[-6:] if len(taker_hist) >= 6 else taker_hist
+        ratio_str = " → ".join(f"{d['ratio']:.3f}" for d in recent6)
         last = taker_hist[-1]
         lines.append(
-            f"  테이커 매수/매도 비율(4h): {ratio_str}  "
+            f"  테이커 매수/매도 비율(최근 6h): {ratio_str}  "
             f"(최근: 매수 {last['buy']:,.1f} BTC / 매도 {last['sell']:,.1f} BTC)"
+        )
+
+    # ── CVD (Cumulative Volume Delta, 24h 기준) ──
+    if ctx.get("cvd_current") is not None:
+        cvd_24h  = ctx["cvd_current"]
+        cvd_4h   = ctx.get("cvd_4h", 0) or 0
+        cvd_dir  = "매수 우세" if cvd_24h > 0 else "매도 우세"
+        cvd4_dir = "매수 강화" if cvd_4h > 0 else "매도 강화"
+        # 시계열 6개 샘플(오래된→최근) — 방향 전환 시점 파악용
+        series = ctx.get("cvd_series") or []
+        # 6h 간격으로 샘플링 (24개 중 4개 + 최신)
+        sample_idx = [0, 6, 12, 18, -1]
+        samples = [series[i] for i in sample_idx if abs(i) < len(series)]
+        sample_str = " → ".join(f"{v:+,.0f}" for v in samples)
+        lines.append(
+            f"  CVD 24h 누적 델타: {cvd_24h:+,.1f} BTC ({cvd_dir}) / "
+            f"최근 4h 델타: {cvd_4h:+,.1f} BTC ({cvd4_dir})"
+        )
+        lines.append(
+            f"  CVD 추이(24h 샘플): {sample_str}  "
+            f"※ 테이커 거래량 기반 — 방향 편향 참고, 절대값보다 추세 변화에 주목"
         )
 
     # ── 오픈 인터레스트 ──────────────────────────
@@ -364,6 +445,22 @@ def format_market_context(ctx: dict) -> str:
             )
         else:
             lines.append("  강제청산: 최근 4시간 없음")
+
+    # ── Fear & Greed Index ───────────────────────
+    if ctx.get("fear_greed") is not None:
+        fg_val   = ctx["fear_greed"]
+        fg_label = ctx.get("fear_greed_label", "")
+        hist     = ctx.get("fear_greed_history")
+        hist_str = ""
+        if hist and len(hist) >= 2:
+            hist_str = " → ".join(f"{h['value']}({h['label']})" for h in hist)
+            hist_str = f"  최근 3일: {hist_str}"
+        lines.append(
+            f"  Fear & Greed Index: {fg_val} ({fg_label})"
+            f"  ※ 0=극도공포 25=공포 50=탐욕 75=극도탐욕 — 극단값에서 역발상 신호 참고"
+        )
+        if hist_str:
+            lines.append(f" {hist_str}")
 
     # ── Deribit 옵션 ─────────────────────────────
     if ctx.get("dvol") is not None:
