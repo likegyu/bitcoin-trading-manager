@@ -3,7 +3,68 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BTC 트레이딩 대시보드</title>
+
+<!-- ══ Primary SEO ══════════════════════════════════════════════ -->
+<title>BTC 실시간 트레이딩 대시보드 | AI 비트코인 매매 신호 분석 — BitSwipe</title>
+<meta name="description" content="Claude AI가 분석한 비트코인(BTC) 실시간 매매 신호, RSI·MACD·피보나치 기술적 분석, 선물 포지션 관리까지 한 화면에서 확인하세요. 무료 BTC 트레이딩 대시보드.">
+<meta name="keywords" content="비트코인 트레이딩, BTC 매매 신호, 비트코인 기술적 분석, AI 트레이딩, 암호화폐 대시보드, 선물 포지션, RSI, MACD, 피보나치, BitSwipe">
+<meta name="author" content="BitSwipe">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://bitswipe.xyz/">
+
+<!-- ══ Open Graph (SNS 공유) ═══════════════════════════════════ -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="BTC 실시간 트레이딩 대시보드 | AI 비트코인 매매 신호 — BitSwipe">
+<meta property="og:description" content="Claude AI가 분석한 비트코인 실시간 매매 신호와 기술적 지표를 한 화면에서 확인하세요.">
+<meta property="og:url" content="https://bitswipe.xyz/">
+<meta property="og:site_name" content="BitSwipe">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:image" content="https://bitswipe.xyz/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="BitSwipe BTC 트레이딩 대시보드 스크린샷">
+
+<!-- ══ Twitter Card ════════════════════════════════════════════ -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="BTC 실시간 트레이딩 대시보드 | AI 비트코인 매매 신호 — BitSwipe">
+<meta name="twitter:description" content="Claude AI가 분석한 비트코인 실시간 매매 신호와 기술적 지표를 한 화면에서 확인하세요.">
+<meta name="twitter:image" content="https://bitswipe.xyz/og-image.png">
+
+<!-- ══ JSON-LD 구조화 데이터 ═══════════════════════════════════ -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "BitSwipe — BTC 트레이딩 대시보드",
+  "url": "https://bitswipe.xyz/",
+  "description": "Claude AI 기반 비트코인 실시간 매매 신호 분석 대시보드. RSI, MACD, 피보나치 기술적 분석 및 선물 포지션 관리 제공.",
+  "applicationCategory": "FinanceApplication",
+  "operatingSystem": "All",
+  "browserRequirements": "Requires JavaScript",
+  "inLanguage": "ko-KR",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "KRW"
+  },
+  "about": {
+    "@type": "Thing",
+    "name": "Bitcoin",
+    "sameAs": "https://en.wikipedia.org/wiki/Bitcoin"
+  },
+  "creator": {
+    "@type": "Person",
+    "name": "BitSwipe"
+  }
+}
+</script>
+
+<!-- ══ 성능 힌트 ═══════════════════════════════════════════════ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="dns-prefetch" href="https://api.binance.com">
+<link rel="dns-prefetch" href="https://fapi.binance.com">
+
 <!-- ECharts for multi-pane trading chart rendering -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -27,7 +88,7 @@ body {
   border-bottom: 1px solid #E8DDD4;
   margin-bottom: 18px;
 }
-.header-title { font-size: 26px; font-weight: 800; color: #1C1917; line-height: 1; }
+.header-title { font-size: 26px; font-weight: 800; color: #1C1917; line-height: 1; margin: 0; }
 .header-pair  { font-size: 13px; color: #A8978A; font-weight: 500; margin-left: 2px; }
 .header-price { font-size: 28px; font-weight: 800; color: #EA580C; letter-spacing: -.5px; }
 .header-meta {
@@ -1435,9 +1496,9 @@ body {
   <div id="error-banner" class="error-banner" role="alert" aria-live="assertive"></div>
 
   <!-- 헤더 -->
-  <div class="header">
+  <header class="header" role="banner">
     <div>
-      <span id="header-base" class="header-title">BTC</span>
+      <h1 id="header-base" class="header-title">BTC</h1>
       <span id="header-quote" class="header-pair">/ USDT</span>
     </div>
     <div id="header-price" class="header-price"></div>
@@ -1481,7 +1542,7 @@ body {
       </div>
     </div>
     <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
-  </div>
+  </header>
 
   <!-- 시그널 + 지표 카드 행 -->
   <div class="cards-row">

@@ -2089,6 +2089,22 @@ async def root():
         return HTMLResponse(f.read())
 
 
+@app.get("/robots.txt", include_in_schema=False)
+async def robots():
+    from fastapi.responses import PlainTextResponse
+    path = os.path.join(os.path.dirname(__file__), "static", "robots.txt")
+    with open(path, encoding="utf-8") as f:
+        return PlainTextResponse(f.read())
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def sitemap():
+    from fastapi.responses import Response as _Resp
+    path = os.path.join(os.path.dirname(__file__), "static", "sitemap.xml")
+    with open(path, encoding="utf-8") as f:
+        return _Resp(content=f.read(), media_type="application/xml")
+
+
 # ══════════════════════════════════════════════
 # 자동매매 API
 # ══════════════════════════════════════════════
