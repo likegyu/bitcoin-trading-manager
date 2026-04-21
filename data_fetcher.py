@@ -4,6 +4,7 @@
 import requests
 import pandas as pd
 from config import BINANCE_FUTURES_URL, CANDLE_LIMIT
+from http_client import _session as _http  # 프록시 환경변수 무시 세션
 
 
 def fetch_ohlcv(symbol: str, interval: str, limit: int = CANDLE_LIMIT) -> pd.DataFrame:
@@ -23,7 +24,7 @@ def fetch_ohlcv(symbol: str, interval: str, limit: int = CANDLE_LIMIT) -> pd.Dat
     url = f"{BINANCE_FUTURES_URL}/fapi/v1/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
 
-    resp = requests.get(url, params=params, timeout=10)
+    resp = _http.get(url, params=params, timeout=10)
     resp.raise_for_status()
     raw = resp.json()
 
@@ -44,6 +45,6 @@ def fetch_ohlcv(symbol: str, interval: str, limit: int = CANDLE_LIMIT) -> pd.Dat
 def fetch_current_price(symbol: str) -> float:
     """USDⓈ-M Futures 현재 체결가 반환."""
     url = f"{BINANCE_FUTURES_URL}/fapi/v1/ticker/price"
-    resp = requests.get(url, params={"symbol": symbol}, timeout=5)
+    resp = _http.get(url, params={"symbol": symbol}, timeout=5)
     resp.raise_for_status()
     return float(resp.json()["price"])

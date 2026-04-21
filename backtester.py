@@ -21,6 +21,7 @@ from typing import Optional
 import requests
 
 import config as _cfg
+from http_client import _session as _http  # 프록시 환경변수 무시 세션
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def _fetch_klines(symbol: str, start_ms: int, limit: int = MAX_CANDLES) -> list[
         "limit":     limit,
     }
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = _http.get(url, params=params, timeout=10)
         resp.raise_for_status()
         raw = resp.json()
         return [

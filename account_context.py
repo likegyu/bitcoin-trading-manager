@@ -11,6 +11,7 @@ from datetime import timezone
 from typing import Optional
 from urllib.parse import urlsplit
 import config as _cfg
+from http_client import _session as _http  # 프록시 환경변수 무시 세션
 from account_history import attach_account_context_summary
 from time_utils import start_of_kst_day
 
@@ -62,7 +63,7 @@ def _api_key_headers() -> dict:
 def open_user_data_stream() -> str:
     """USDⓈ-M Futures user data stream listenKey 생성/연장."""
     try:
-        r = requests.post(
+        r = _http.post(
             f"{_cfg.BINANCE_FUTURES_URL}/fapi/v1/listenKey",
             headers=_api_key_headers(),
             timeout=8,
@@ -80,7 +81,7 @@ def open_user_data_stream() -> str:
 
 def keepalive_user_data_stream() -> str:
     """활성 user data stream listenKey TTL 연장."""
-    r = requests.put(
+    r = _http.put(
         f"{_cfg.BINANCE_FUTURES_URL}/fapi/v1/listenKey",
         headers=_api_key_headers(),
         timeout=8,
@@ -91,7 +92,7 @@ def keepalive_user_data_stream() -> str:
 
 def close_user_data_stream() -> None:
     """활성 user data stream 종료."""
-    r = requests.delete(
+    r = _http.delete(
         f"{_cfg.BINANCE_FUTURES_URL}/fapi/v1/listenKey",
         headers=_api_key_headers(),
         timeout=8,
@@ -109,7 +110,7 @@ def _signed_get(endpoint: str, params: dict) -> dict:
     sig = hmac.new(
         _cfg.BINANCE_SECRET_KEY.encode(), query.encode(), hashlib.sha256
     ).hexdigest()
-    r = requests.get(
+    r = _http.get(
         f"{_cfg.BINANCE_FUTURES_URL}{endpoint}",
         params={**params, "signature": sig},
         headers={"X-MBX-APIKEY": _cfg.BINANCE_API_KEY},
@@ -349,6 +350,69 @@ def fetch_account_context(symbol: Optional[str] = None) -> dict:
         ctx["leverage_display"] = "조회 실패"
         ctx["leverage_mode"] = "error"
         ctx["position_error"] = _safe_error_message(exc)
+
+    # ── 미체결 주문 (TP / SL / 지정가) ─────────────────
+    try:
+        raw_orders = _signed_get("/fapi/v1/openOrders", {"timestamp": int(_time.time() * 1000)})
+        open_orders = []
+        for o in (raw_orders if isinstance(raw_orders, list) else []):
+            stop_price = float(o.get("stopPrice", 0) or 0)
+            limit_price = float(o.get("price", 0) or 0)
+            price = stop_price if stop_price > 0 else limit_price
+            if price <= 0:
+                continue
+            open_orders.append({
+                "symbol":      o.get("symbol", ""),
+                "order_id":    o.get("orderId"),
+                "type":        o.get("type", ""),
+                "side":        o.get("side", ""),
+                "price":       price,
+                "qty":         float(o.get("origQty", 0) or 0),
+                "reduce_only": bool(o.get("reduceOnly", False)),
+            })
+
+        # 포지션에 TP / SL 매칭
+        # TP: TAKE_PROFIT_MARKET, TAKE_PROFIT, 또는 reduce-only LIMIT (롱이면 높은 가격, 숏이면 낮은 가격)
+        TP_TYPES = {"TAKE_PROFIT_MARKET", "TAKE_PROFIT"}
+        SL_TYPES = {"STOP_MARKET", "STOP"}
+        matched_order_ids: set = set()
+        if ctx.get("open_positions"):
+            for pos in ctx["open_positions"]:
+                sym = pos["symbol"]
+                entry = pos["entry_price"]
+                close_side = "SELL" if pos["side"] == "롱" else "BUY"
+                sym_orders = [o for o in open_orders if o["symbol"] == sym
+                              and o["reduce_only"] and o["side"] == close_side]
+
+                # 표준 TP/SL 오더 타입 먼저 매칭
+                tp_order = next((o for o in sym_orders if o["type"] in TP_TYPES), None)
+                sl_order = next((o for o in sym_orders if o["type"] in SL_TYPES), None)
+
+                # reduce-only LIMIT 오더 → 진입가보다 유리한 방향이면 TP, 불리한 방향이면 SL
+                if tp_order is None or sl_order is None:
+                    for o in sym_orders:
+                        if o["type"] != "LIMIT":
+                            continue
+                        p = o["price"]
+                        is_tp_side = (close_side == "SELL" and p > entry) or \
+                                     (close_side == "BUY"  and p < entry)
+                        if is_tp_side and tp_order is None:
+                            tp_order = o
+                        elif not is_tp_side and sl_order is None:
+                            sl_order = o
+
+                pos["tp_price"] = tp_order["price"] if tp_order else None
+                pos["sl_price"] = sl_order["price"] if sl_order else None
+                for o in (tp_order, sl_order):
+                    if o:
+                        matched_order_ids.add(o["order_id"])
+
+        # TP/SL로 이미 매칭된 것 제외한 나머지 오더 전체 노출 (LIMIT, 미체결 진입 등)
+        ctx["open_orders"] = [o for o in open_orders if o["order_id"] not in matched_order_ids]
+        ctx["order_error"] = None
+    except Exception as exc:
+        ctx["open_orders"] = []
+        ctx["order_error"] = _safe_error_message(exc)
 
     # ── 오늘 손익: 실현 손익 + 펀딩비 (KST 00:00 기준) ──
     try:

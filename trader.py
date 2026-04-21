@@ -23,6 +23,7 @@ from urllib.parse import urlencode
 import requests
 
 import config as _cfg
+from http_client import _session as _http  # 프록시 환경변수 무시 세션
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ def set_leverage(symbol: str, leverage: int) -> dict:
         logger.info("[DRY-RUN] set_leverage %s x%d", symbol, leverage)
         return {"symbol": symbol, "leverage": leverage, "dry_run": True}
     params = _signed_params({"symbol": symbol, "leverage": leverage})
-    resp = requests.post(
+    resp = _http.post(
         f"{FUTURES_BASE}/fapi/v1/leverage",
         params=params,
         headers=_headers(),
@@ -97,7 +98,7 @@ def get_position(symbol: str) -> Optional[dict]:
     포지션이 없으면 None, 있으면 positionAmt / entryPrice / leverage 등 포함.
     """
     params = _signed_params({"symbol": symbol})
-    resp = requests.get(
+    resp = _http.get(
         f"{FUTURES_BASE}/fapi/v2/positionRisk",
         params=params,
         headers=_headers(),
@@ -114,7 +115,7 @@ def get_position(symbol: str) -> Optional[dict]:
 def get_account_balance(asset: str = "USDT") -> float:
     """선물 계좌 가용 잔고 (availableBalance) 반환. 실패 시 0.0."""
     params = _signed_params({})
-    resp = requests.get(
+    resp = _http.get(
         f"{FUTURES_BASE}/fapi/v2/balance",
         params=params,
         headers=_headers(),
@@ -164,7 +165,7 @@ def place_market_order(
         params["reduceOnly"] = "true"
 
     signed = _signed_params(params)
-    resp = requests.post(
+    resp = _http.post(
         f"{FUTURES_BASE}/fapi/v1/order",
         params=signed,
         headers=_headers(),
@@ -211,7 +212,7 @@ def place_stop_order(
         "workingType": "MARK_PRICE",
     }
     signed = _signed_params(params)
-    resp = requests.post(
+    resp = _http.post(
         f"{FUTURES_BASE}/fapi/v1/order",
         params=signed,
         headers=_headers(),
@@ -229,7 +230,7 @@ def cancel_all_open_orders(symbol: str) -> dict:
         logger.info("[DRY-RUN] cancel_all_open_orders %s", symbol)
         return {"symbol": symbol, "dry_run": True}
     params = _signed_params({"symbol": symbol})
-    resp = requests.delete(
+    resp = _http.delete(
         f"{FUTURES_BASE}/fapi/v1/allOpenOrders",
         params=params,
         headers=_headers(),
@@ -268,7 +269,7 @@ def get_lot_step_size(symbol: str) -> float:
     if symbol in _step_size_cache:
         return _step_size_cache[symbol]
     try:
-        resp = requests.get(
+        resp = _http.get(
             f"{FUTURES_BASE}/fapi/v1/exchangeInfo", timeout=10
         )
         resp.raise_for_status()

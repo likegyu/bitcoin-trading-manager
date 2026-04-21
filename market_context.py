@@ -12,6 +12,7 @@ import requests
 from datetime import datetime, timezone
 from config import BINANCE_FUTURES_URL, BINANCE_API_KEY, BINANCE_SECRET_KEY, DEFAULT_SYMBOL
 from time_utils import format_kst
+from http_client import _session as _http  # 프록시 환경변수 무시 세션
 
 
 def _signed_get(url: str, params: dict) -> requests.Response:
@@ -21,7 +22,7 @@ def _signed_get(url: str, params: dict) -> requests.Response:
     sig = hmac.new(
         BINANCE_SECRET_KEY.encode(), query.encode(), hashlib.sha256
     ).hexdigest()
-    return requests.get(
+    return _http.get(
         url,
         params={**params, "signature": sig},
         headers={"X-MBX-APIKEY": BINANCE_API_KEY},
@@ -73,7 +74,7 @@ def _fetch_binance(symbol: str, ctx: dict) -> None:
 
     # ── 펀딩비 현재 + 마크가격 ──────────────────
     try:
-        r = requests.get(
+        r = _http.get(
             f"{BINANCE_FUTURES_URL}/fapi/v1/premiumIndex",
             params={"symbol": symbol}, timeout=5,
         )
@@ -89,7 +90,7 @@ def _fetch_binance(symbol: str, ctx: dict) -> None:
 
     # ── 펀딩비 히스토리 (최근 8회 ≈ 24시간) ────
     try:
-        r = requests.get(
+        r = _http.get(
             f"{BINANCE_FUTURES_URL}/fapi/v1/fundingRate",
             params={"symbol": symbol, "limit": 8}, timeout=5,
         )
@@ -102,7 +103,7 @@ def _fetch_binance(symbol: str, ctx: dict) -> None:
 
     # ── 오픈 인터레스트 (현재) ──────────────────
     try:
-        r = requests.get(
+        r = _http.get(
             f"{BINANCE_FUTURES_URL}/fapi/v1/openInterest",
             params={"symbol": symbol}, timeout=5,
         )
@@ -113,7 +114,7 @@ def _fetch_binance(symbol: str, ctx: dict) -> None:
 
     # ── OI 24h 변화율 ───────────────────────────
     try:
-        r = requests.get(
+        r = _http.get(
             f"{BINANCE_FUTURES_URL}/futures/data/openInterestHist",
             params={"symbol": symbol, "period": "1h", "limit": 25}, timeout=5,
         )
@@ -131,7 +132,7 @@ def _fetch_binance(symbol: str, ctx: dict) -> None:
     # ── 테이커 매수/매도 비율 (최근 4h 히스토리) ──
     # 단일 값은 1.0 주변 노이즈를 시그널로 오인할 수 있어 4회 히스토리로 추세 확인
     try:
-        r = requests.get(
+        r = _http.get(
             f"{BINANCE_FUTURES_URL}/futures/data/takerlongshortRatio",
             params={"symbol": symbol, "period": "1h", "limit": 4}, timeout=5,
         )
@@ -162,7 +163,7 @@ def _fetch_top_trader_ratios(symbol: str, ctx: dict) -> None:
     계좌 수 기반 비율(topLongShortAccountRatio)과 혼동 주의 — 실제값 검증 권장.
     """
     try:
-        r = requests.get(
+        r = _http.get(
             f"{BINANCE_FUTURES_URL}/futures/data/topLongShortPositionRatio",
             params={"symbol": symbol, "period": "1h", "limit": 1}, timeout=5,
         )
@@ -190,7 +191,7 @@ def _fetch_deribit(btc_price: float, ctx: dict) -> None:
 
     # ── DVOL ────────────────────────────────────
     try:
-        r = requests.get(
+        r = _http.get(
             "https://www.deribit.com/api/v2/public/get_index_price",
             params={"index_name": "btcdvol_usdc"}, timeout=8,
         )
@@ -201,7 +202,7 @@ def _fetch_deribit(btc_price: float, ctx: dict) -> None:
 
     # ── 25-delta 스큐 ────────────────────────────
     try:
-        r = requests.get(
+        r = _http.get(
             "https://www.deribit.com/api/v2/public/get_book_summary_by_currency",
             params={"currency": "BTC", "kind": "option"}, timeout=12,
         )

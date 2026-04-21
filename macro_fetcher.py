@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from config import FRED_API_KEY
 from macro_history import attach_macro_history_summary
+from http_client import _session as _http  # 프록시 환경변수 무시 세션
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
@@ -37,7 +38,7 @@ def _fetch_fred(series_id: str, days: int = 60) -> Optional[pd.Series]:
         return None
     try:
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        r = requests.get(
+        r = _http.get(
             FRED_BASE,
             params={
                 "series_id":        series_id,
@@ -187,7 +188,7 @@ def _fetch_btc_dominance() -> Optional[float]:
     키 불필요.
     """
     try:
-        r = requests.get(
+        r = _http.get(
             "https://api.coingecko.com/api/v3/global",
             timeout=10,
         )
@@ -206,7 +207,7 @@ def _fetch_stablecoins() -> dict:
     """
     out = {"stable_total_b": None, "usdt_b": None, "usdt_dom": None}
     try:
-        r = requests.get(
+        r = _http.get(
             "https://stablecoins.llama.fi/stablecoins?includePrices=true",
             timeout=12,
         )
