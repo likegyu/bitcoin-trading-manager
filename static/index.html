@@ -3007,9 +3007,8 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
 
   const guides = [];
 
-  // 라인 추가 헬퍼
-  // labelPos: "end"(우측) | "start"(좌측) — NOW 라인과 겹치지 않게 조정
-  function addGuide(price, label, color, lineType, width, labelPos) {
+  // 라인 추가 헬퍼 — fib 라인과 동일한 형식 사용 (position/formatter는 전역 markLine 설정에 위임)
+  function addGuide(price, label, color, lineType, width) {
     if (!Number.isFinite(price) || price <= 0) return;
     guides.push({
       name: label,
@@ -3017,14 +3016,10 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
       lineStyle: { color, width: width || 1.2, type: lineType || "dashed", opacity: 0.9 },
       label: {
         show: true,
-        position: labelPos || "insideEndTop",
-        formatter: () => label,
         color: "#FFFFFF",
         backgroundColor: color,
         borderRadius: 4,
         padding: [3, 6],
-        fontSize: 11,
-        distance: 10,
       },
     });
     occupied.push(price);
@@ -3038,32 +3033,32 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
     const isShort = pos.side === "숏";
     const entryColor = isShort ? C.bear : C.bull;
 
-    // 진입가 — 라벨을 왼쪽에 배치해 NOW 라인과 겹침 방지
+    // 진입가
     if (Number.isFinite(entry) && entry > 0) {
       addGuide(
         entry,
         `${isShort ? "SHORT" : "LONG"} ${pos.symbol} ${formatUsd(entry, 0)}`,
-        entryColor, "dashed", 1.5, "insideStartTop"
+        entryColor, "dashed", 1.5
       );
     }
 
-    // TP (초록 점선, 오른쪽 라벨)
+    // TP
     if (Number.isFinite(tp) && tp > 0) {
-      addGuide(tp, `TP ${formatUsd(tp, 0)}`, "#16A34A", "dashed", 1.2, "insideEndTop");
+      addGuide(tp, `TP ${formatUsd(tp, 0)}`, "#16A34A", "dashed", 1.2);
     }
 
-    // SL (빨간 점선, 오른쪽 라벨)
+    // SL
     if (Number.isFinite(sl) && sl > 0) {
-      addGuide(sl, `SL ${formatUsd(sl, 0)}`, "#DC2626", "dashed", 1.2, "insideEndTop");
+      addGuide(sl, `SL ${formatUsd(sl, 0)}`, "#DC2626", "dashed", 1.2);
     }
 
-    // 청산가 (주황 점선, 오른쪽 라벨)
+    // 청산가
     if (Number.isFinite(liq) && liq > 0) {
-      addGuide(liq, `LIQ ${formatUsd(liq, 0)}`, "#EA580C", "dashed", 1, "insideEndTop");
+      addGuide(liq, `LIQ ${formatUsd(liq, 0)}`, "#EA580C", "dashed", 1);
     }
   });
 
-  // 미체결 주문 (TP/SL 매칭된 것 제외한 나머지 — 지정가 진입, 미체결 청산 등)
+  // 미체결 주문 (TP/SL 매칭된 것 제외한 나머지)
   const openOrders = (state.account?.open_orders || [])
     .filter(o => isBtcPositionSymbol(o.symbol));
   openOrders.forEach(o => {
@@ -3073,7 +3068,7 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
     const isReduce = o.reduce_only;
     const typeShort = o.type.replace("_MARKET", "").replace("TAKE_PROFIT", "TP").replace("STOP", "SL");
     const label = `${isReduce ? typeShort : "ORDER"} ${sideLabel} ${formatUsd(price, 0)}`;
-    addGuide(price, label, "#0284C7", "dashed", 1, "insideEndTop");
+    addGuide(price, label, "#0284C7", "dashed", 1);
   });
 
   return guides;
