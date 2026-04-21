@@ -3057,13 +3057,17 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
     }
   });
 
-  // 미체결 지정가 주문 (파란 점선)
-  const openOrders = state.account?.open_orders || [];
+  // 미체결 주문 (TP/SL 매칭된 것 제외한 나머지 — 지정가 진입, 미체결 청산 등)
+  const openOrders = (state.account?.open_orders || [])
+    .filter(o => isBtcPositionSymbol(o.symbol));
   openOrders.forEach(o => {
     const price = Number(o.price);
     if (!Number.isFinite(price) || price <= 0) return;
     const sideLabel = o.side === "BUY" ? "매수" : "매도";
-    addGuide(price, `ORDER ${sideLabel} ${formatUsd(price, 0)}`, "#0284C7", "dotted", 1, "BB");
+    const isReduce = o.reduce_only;
+    const typeShort = o.type.replace("_MARKET", "").replace("TAKE_PROFIT", "TP").replace("STOP", "SL");
+    const label = `${isReduce ? typeShort : "ORDER"} ${sideLabel} ${formatUsd(price, 0)}`;
+    addGuide(price, label, "#0284C7", "dotted", 1, "BB");
   });
 
   return guides;
