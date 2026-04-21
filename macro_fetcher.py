@@ -222,8 +222,13 @@ def _fetch_traditional_markets() -> dict:
             threads=False,
         )
 
-        close_df = data.get("Close")
-        if close_df is None or close_df.empty:
+        # MultiIndex DataFrame — data.get() 은 MultiIndex에서 None 반환하므로 직접 접근
+        try:
+            close_df = data["Close"]
+        except KeyError:
+            result["error"] = "yfinance Close 컬럼 없음"
+            return result
+        if close_df is None or (hasattr(close_df, "empty") and close_df.empty):
             result["error"] = "yfinance 데이터 없음"
             return result
 
