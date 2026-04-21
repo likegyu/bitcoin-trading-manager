@@ -3007,20 +3007,24 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
 
   const guides = [];
 
-  // 라인 추가 헬퍼 — minGap 체크 없이 항상 추가 (TP/SL/Liq는 중요해서 생략하지 않음)
-  function addGuide(price, label, color, lineType = "dashed", width = 1.2, bgAlpha = "CC") {
+  // 라인 추가 헬퍼
+  // labelPos: "end"(우측) | "start"(좌측) — NOW 라인과 겹치지 않게 조정
+  function addGuide(price, label, color, lineType, width, labelPos) {
     if (!Number.isFinite(price) || price <= 0) return;
     guides.push({
       name: label,
       yAxis: price,
-      lineStyle: { color, width, type: lineType, opacity: 0.85 },
+      lineStyle: { color, width: width || 1.2, type: lineType || "dashed", opacity: 0.9 },
       label: {
         show: true,
+        position: labelPos || "insideEndTop",
+        formatter: () => label,
         color: "#FFFFFF",
-        backgroundColor: color + bgAlpha,
+        backgroundColor: color,
         borderRadius: 4,
         padding: [3, 6],
         fontSize: 11,
+        distance: 10,
       },
     });
     occupied.push(price);
@@ -3034,26 +3038,28 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
     const isShort = pos.side === "숏";
     const entryColor = isShort ? C.bear : C.bull;
 
-    // 진입가
+    // 진입가 — 라벨을 왼쪽에 배치해 NOW 라인과 겹침 방지
     if (Number.isFinite(entry) && entry > 0) {
-      addGuide(entry,
+      addGuide(
+        entry,
         `${isShort ? "SHORT" : "LONG"} ${pos.symbol} ${formatUsd(entry, 0)}`,
-        entryColor, "dotted", 1.5, "FF");
+        entryColor, "dashed", 1.5, "insideStartTop"
+      );
     }
 
-    // TP (초록 점선)
+    // TP (초록 점선, 오른쪽 라벨)
     if (Number.isFinite(tp) && tp > 0) {
-      addGuide(tp, `TP ${formatUsd(tp, 0)}`, "#16A34A", "dashed", 1.2, "DD");
+      addGuide(tp, `TP ${formatUsd(tp, 0)}`, "#16A34A", "dashed", 1.2, "insideEndTop");
     }
 
-    // SL (빨간 점선)
+    // SL (빨간 점선, 오른쪽 라벨)
     if (Number.isFinite(sl) && sl > 0) {
-      addGuide(sl, `SL ${formatUsd(sl, 0)}`, "#DC2626", "dashed", 1.2, "DD");
+      addGuide(sl, `SL ${formatUsd(sl, 0)}`, "#DC2626", "dashed", 1.2, "insideEndTop");
     }
 
-    // 청산가 (주황 점선)
+    // 청산가 (주황 점선, 오른쪽 라벨)
     if (Number.isFinite(liq) && liq > 0) {
-      addGuide(liq, `LIQ ${formatUsd(liq, 0)}`, "#EA580C", "dashed", 1, "BB");
+      addGuide(liq, `LIQ ${formatUsd(liq, 0)}`, "#EA580C", "dashed", 1, "insideEndTop");
     }
   });
 
@@ -3067,7 +3073,7 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
     const isReduce = o.reduce_only;
     const typeShort = o.type.replace("_MARKET", "").replace("TAKE_PROFIT", "TP").replace("STOP", "SL");
     const label = `${isReduce ? typeShort : "ORDER"} ${sideLabel} ${formatUsd(price, 0)}`;
-    addGuide(price, label, "#0284C7", "dotted", 1, "BB");
+    addGuide(price, label, "#0284C7", "dashed", 1, "insideEndTop");
   });
 
   return guides;
