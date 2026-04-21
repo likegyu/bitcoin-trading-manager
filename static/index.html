@@ -1906,6 +1906,7 @@ const state = {
   tradingSignal: null,
   fibs:         {},
   price:        null,
+  forming:      null,  // { "5m": {open,close,low,high}, ... } — 최신 kline forming 데이터
   account:      null,
   symbol:       null,
   pairLabel:    null,
@@ -2312,6 +2313,7 @@ function applyMarketData(data, source = "market") {
       maximumFractionDigits: 2,
     });
     state.price = data.price;
+    if (data.forming) state.forming = data.forming;  // forming 보존 — 차트 교체 후 재패치에 사용
     applyLiveBtcPositionMarks(data.price);
     // 마지막 캔들 실시간 업데이트: forming(Binance kline 기준) 우선, 없으면 aggTrade 가격
     patchLastCandlePrice(data.price, data.forming || null);
@@ -3806,6 +3808,20 @@ function renderCurrentChart() {
 
   state.chartInstance = chart;
   state.renderedTf = tf;
+
+  // 렌더 직전 항상 실시간 가격 반영 — 어떤 경로로 호출되든 스냅샷 flash 방지
+  if (state.price != null && chartData.candles?.length) {
+    const last = chartData.candles[chartData.candles.length - 1];
+    const f = state.forming && state.forming[tf];
+    if (f) {
+      last[0] = f.open; last[1] = f.close; last[2] = f.low; last[3] = f.high;
+    } else {
+      last[1] = state.price;
+      if (state.price < last[2]) last[2] = state.price;
+      if (state.price > last[3]) last[3] = state.price;
+    }
+  }
+
   chart.setOption(buildChartOption(chartData, tf, state.chartViewport[tf]), {
     notMerge: true,
     lazyUpdate: true,
