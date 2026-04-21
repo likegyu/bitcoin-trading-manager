@@ -2345,7 +2345,7 @@ function applyMarketData(data, source = "market") {
     });
     state.charts = nextCharts;
     if (incomingCharts[state.currentTf] || !state.charts[state.currentTf]) {
-      renderCurrentChart();
+      scheduleRenderCurrentChart();
     }
   }
 
@@ -2567,12 +2567,28 @@ function renderMetricCards(ind) {
 // ══════════════════════════════════════════════
 // 계좌 / 포지션
 // ══════════════════════════════════════════════
+// 포지션/오더 변경 여부 비교용 — 변한 경우에만 차트 markLine 재구성
+function _accountGuideFingerprint(account) {
+  if (!account) return "";
+  const pos = (account.open_positions || []).map(p =>
+    `${p.symbol}:${p.entry_price}:${p.tp_price}:${p.sl_price}:${p.liquidation_price}`
+  ).join("|");
+  const ord = (account.open_orders || []).map(o =>
+    `${o.symbol}:${o.price}:${o.type}:${o.side}`
+  ).join("|");
+  return pos + "##" + ord;
+}
+
 function applyAccountData(data) {
   if (!data) return;
+  const prevFingerprint = _accountGuideFingerprint(state.account);
   state.account = data;
   renderAccountPanel(data);
-  if (state.chartInstance || state.charts[state.currentTf]) {
-    renderCurrentChart();
+  // 포지션·오더가 실제로 바뀐 경우에만 차트 markLine 재구성
+  // 잔고·PnL 갱신만이면 차트를 다시 그릴 필요 없음 → flickering 방지
+  const nextFingerprint = _accountGuideFingerprint(data);
+  if ((state.chartInstance || state.charts[state.currentTf]) && prevFingerprint !== nextFingerprint) {
+    scheduleRenderCurrentChart();
   }
 }
 
@@ -3691,7 +3707,7 @@ function switchTab(tf) {
   document.querySelectorAll(".tab-btn").forEach(b => {
     b.classList.toggle("active", b.dataset.tf === tf);
   });
-  renderCurrentChart();
+  scheduleRenderCurrentChart(true);  // 탭 전환은 즉시
   renderFib(getActiveFib(), state.price, state.currentTf);
 }
 
@@ -3731,6 +3747,22 @@ function patchLastCandlePrice(newPrice, forming) {
       lazyUpdate: true,
     });
   }
+}
+
+// renderCurrentChart debounce — 짧은 시간 안에 여러 번 호출돼도 한 번만 실행
+// patchLastCandlePrice(notMerge:false)와 renderCurrentChart(notMerge:true)의 충돌 방지
+let _renderChartTimer = null;
+function scheduleRenderCurrentChart(immediate = false) {
+  if (immediate) {
+    if (_renderChartTimer) { clearTimeout(_renderChartTimer); _renderChartTimer = null; }
+    renderCurrentChart();
+    return;
+  }
+  if (_renderChartTimer) return;  // 이미 예약됨 — 중복 방지
+  _renderChartTimer = setTimeout(() => {
+    _renderChartTimer = null;
+    renderCurrentChart();
+  }, 50);  // 50ms 안에 들어온 중복 요청은 1회로 합침
 }
 
 function renderCurrentChart() {
@@ -4313,8 +4345,8 @@ async function checkSetup() {
   try {
     const res  = await fetch("/api/setup/status");
     const data = await res.json();
-    // 3개 키 중 하나라도 없으면 모달 표시
-    if (!data.claude || !data.binance || !data.fred) {
+    // Claude·Binance 키가 없을 때만 모달 표시 (FRED는 선택 사항)
+    if (!data.claude || !data.binance) {
       document.getElementById("setup-overlay").classList.add("visible");
     }
   } catch (e) { /* 서버 응답 실패 시 무시 */ }

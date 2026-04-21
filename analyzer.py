@@ -596,20 +596,30 @@ def analyze_with_claude(
     # thinking 완전 비활성화 — 최종 분석은 이미 debate/judge/risk 블록이 reasoning을 제공하므로
     # adaptive thinking은 수만 토큰을 소모해 비용을 크게 높임. 구조화 출력에는 불필요.
 
-    # 529 과부하 대비 지수 백오프 재시도 (최대 4회: 10s → 20s → 40s → 80s)
+    # 529/429 과부하 대비 지수 백오프 재시도 (최대 4회: 10s → 20s → 40s → 80s)
     max_retries = 4
     wait = 10
+    message = None
     for attempt in range(max_retries):
         try:
             message = client.messages.create(**request_kwargs)
             break
 
         except anthropic.APIStatusError as e:
-            if e.status_code == 529 and attempt < max_retries - 1:
+            if e.status_code in (429, 529) and attempt < max_retries - 1:
                 time.sleep(wait)
                 wait *= 2  # 10 → 20 → 40 → 80초
             else:
                 raise
+
+    # 응답 타입 방어 검사 — SDK 버전이나 API 오류로 인해 예상 외 타입이 반환될 수 있음
+    if message is None:
+        raise RuntimeError("Anthropic API 응답 없음 (모든 재시도 소진)")
+    if not hasattr(message, "content") or not isinstance(message.content, list):
+        raise RuntimeError(
+            f"Anthropic API 응답 형식 오류 — 타입: {type(message).__name__}, "
+            f"content: {getattr(message, 'content', '(없음)')!r:.200}"
+        )
 
     # 응답 블록에서 텍스트만 추출 (thinking 블록 제외)
     raw_text = next(

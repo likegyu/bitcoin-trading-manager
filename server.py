@@ -1353,6 +1353,8 @@ class AnalysisManager:
             await self._fail(job_id, "분석 작업이 취소되었습니다.", status="cancelled")
             raise
         except Exception as exc:
+            import traceback as _tb
+            _tb.print_exc()          # 서버 로그에 full stack trace 출력
             await self._fail(job_id, str(exc))
 
 

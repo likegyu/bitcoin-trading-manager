@@ -163,6 +163,10 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )
+            if not hasattr(msg, "content") or not isinstance(msg.content, list):
+                raise RuntimeError(
+                    f"API 응답 형식 오류 — {type(msg).__name__}: {msg!r:.200}"
+                )
             return next((b.text for b in msg.content if b.type == "text"), "").strip()
         except anthropic.APIStatusError as e:
             if e.status_code in (429, 529) and attempt < max_retries - 1:
