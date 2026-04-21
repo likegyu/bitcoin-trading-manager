@@ -1657,8 +1657,14 @@ async def schedule_set(body: ScheduleSetRequest):
 
 
 @app.post("/api/analyze")
-async def analyze_start():
-    job, started = await _analysis_manager.start_job()
+async def analyze_start(password: str | None = None):
+    # 주인장 패스워드가 제공됐지만 틀린 경우 403
+    if password and password != runtime_config.OWNER_PASSWORD:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+    # 패스워드가 맞으면 쿨다운 우회
+    bypass = bool(password and password == runtime_config.OWNER_PASSWORD)
+    job, started = await _analysis_manager.start_job(bypass_cooldown=bypass)
     return {"job": job, "started": started}
 
 

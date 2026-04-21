@@ -5098,6 +5098,8 @@ function showError(msg) {
       <button id="owner-clear-btn" onclick="clearOwnerMessage()">🗑 삭제</button>
       <button id="owner-cancel-btn" onclick="closeOwnerPanel()">취소</button>
     </div>
+    <hr style="border:none;border-top:1px solid #e5ded6;margin:12px 0">
+    <button id="owner-analyze-btn" onclick="ownerRunAnalysis()" style="width:100%;padding:8px;background:#1C1917;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">⚡ 분석 즉시 실행 (쿨다운 무시)</button>
     <div id="owner-feedback"></div>
   </div>
 </div>
@@ -5338,6 +5340,37 @@ function showError(msg) {
   };
   window.clearOwnerMessage = function() {
     _sendOwnerMessage('');
+  };
+
+  window.ownerRunAnalysis = async function() {
+    const pw = document.getElementById('owner-pw').value;
+    const fb = document.getElementById('owner-feedback');
+    if (!pw) { fb.textContent = '비밀번호를 입력하세요.'; return; }
+    const btn = document.getElementById('owner-analyze-btn');
+    btn.disabled = true;
+    btn.textContent = '분석 중...';
+    fb.textContent = '';
+    try {
+      const res = await fetch(`/api/analyze?password=${encodeURIComponent(pw)}`, {
+        method: 'POST', keepalive: true,
+      });
+      const data = await res.json();
+      if (res.status === 403) {
+        fb.textContent = '비밀번호가 틀렸습니다.';
+      } else if (res.ok) {
+        fb.textContent = '분석이 시작됐습니다!';
+        closeOwnerPanel();
+        // 일반 분석 폴링 시작
+        if (data.job) { setAnalysisRunning(data.job); queueAnalysisPoll(250); }
+      } else {
+        fb.textContent = '오류: ' + (data?.detail || res.status);
+      }
+    } catch(e) {
+      fb.textContent = '네트워크 오류: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⚡ 분석 즉시 실행 (쿨다운 무시)';
+    }
   };
 
   // ── UI 함수 (전역 노출) ──
