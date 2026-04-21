@@ -1974,7 +1974,12 @@ window.addEventListener("DOMContentLoaded", () => {
     if (state.chartInstance) state.chartInstance.resize();
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) syncAnalysisStatus({ includeLatest: true });
+    if (!document.hidden) {
+      // 데스크톱 복귀 후 syncAnalysisStatus 가 캐시 차트를 덮어쓰기 전에
+      // 현재 실시간 가격을 즉시 재패치 — visibilitychange 직후 flicker 방지
+      if (state.price != null) patchLastCandlePrice(state.price, state.forming || null);
+      syncAnalysisStatus({ includeLatest: true });
+    }
   });
   if (state.autoOn) startMarketStream();
 });
@@ -2344,6 +2349,11 @@ function applyMarketData(data, source = "market") {
       }
     });
     state.charts = nextCharts;
+    // 서버 스냅샷으로 교체 직후 현재 실시간 가격을 즉시 반영 — flicker 방지
+    // patchLastCandlePrice 가 나중에 돌기 전에 미리 덮어써서 un-patched 캔들이 렌더되는 것을 막는다
+    if (state.price != null && incomingCharts[state.currentTf]) {
+      patchLastCandlePrice(state.price, state.forming || null);
+    }
     if (incomingCharts[state.currentTf] || !state.charts[state.currentTf]) {
       scheduleRenderCurrentChart();
     }
