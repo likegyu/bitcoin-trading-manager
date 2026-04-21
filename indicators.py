@@ -205,6 +205,38 @@ def add_supertrend(
     return df
 
 
+# ── 실현변동성 (Realized Volatility) ─────────
+# TF별 캔들 수 → 연환산 계수
+_RV_ANNUALIZE = {
+    "1d":  252,
+    "4h":  252 * 6,
+    "1h":  252 * 24,
+    "15m": 252 * 96,
+    "5m":  252 * 288,
+}
+
+def add_realized_vol(df: pd.DataFrame, tf: str = "1d", period: int = 20) -> pd.DataFrame:
+    """
+    로그 수익률 표준편차 기반 연환산 실현변동성(Realized Volatility).
+
+    rv_{period}d : period 봉 기준 연환산 RV (%)
+    rv_7d        : 7봉 기준 단기 RV (%)  — DVOL과 비교하기 위한 단기 창
+
+    DVOL(내재변동성)과 비교:
+      RV > DVOL : IV 할인 → 옵션 매수 유리 / 변동성 확대 예상
+      RV < DVOL : IV 프리미엄 → 방향 불확실성 높게 pricing 중
+    """
+    ann_factor = _RV_ANNUALIZE.get(tf, 252)
+    log_ret    = np.log(df["close"] / df["close"].shift(1))
+
+    rv_long = log_ret.rolling(period).std() * np.sqrt(ann_factor) * 100
+    rv_short = log_ret.rolling(7).std()     * np.sqrt(ann_factor) * 100
+
+    df[f"rv_{period}"] = rv_long.round(2)
+    df["rv_7"]         = rv_short.round(2)
+    return df
+
+
 def fib_window_for_tf(tf: str) -> int:
     return FIB_SWING_WINDOWS.get(tf, 5)
 
@@ -338,7 +370,7 @@ def fibonacci_swing_levels(
 
 
 # ── 모든 지표 한번에 ──────────────────────────
-def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def add_all_indicators(df: pd.DataFrame, tf: str = "1d") -> pd.DataFrame:
     df = add_rsi(df)
     df = add_macd(df)
     df = add_bollinger(df)
@@ -348,6 +380,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = add_atr(df)
     df = add_vwap(df)
     df = add_supertrend(df)   # ATR 이후에 호출 (내부에서 ATR 재사용)
+    df = add_realized_vol(df, tf=tf)
     return df
 
 
@@ -428,6 +461,16 @@ def summarize_indicators(tf: str, df: pd.DataFrame) -> str:
         if tf == "5m" else f"=== [{tf}] ==="
     )
 
+    # ── 실현변동성 표시값 계산 ──
+    rv20 = last.get("rv_20", np.nan)
+    rv7  = last.get("rv_7",  np.nan)
+    if not np.isnan(rv20) and not np.isnan(rv7):
+        rv_str = f"RV20: {rv20:.1f}%  RV7: {rv7:.1f}%  (연환산 — DVOL과 비교 시 IV 프리미엄/디스카운트 판단)"
+    elif not np.isnan(rv20):
+        rv_str = f"RV20: {rv20:.1f}%  (연환산)"
+    else:
+        rv_str = "N/A"
+
     # ── VWAP 표시값 계산 ──
     vwap_val = last.get("vwap", np.nan)
     vwap_dev = last.get("vwap_dev", np.nan)
@@ -464,6 +507,7 @@ def summarize_indicators(tf: str, df: pd.DataFrame) -> str:
         f"EMA9: ${last['ema_9']:,.2f}",
         f"VWAP(일중): {vwap_str}",
         f"Supertrend(10,3): {supertrend_str}",
+        f"실현변동성: {rv_str}",
         f"ATR(14): ${last['atr']:.2f}",
         f"거래량: {last['volume']:,.0f} / 거래량MA20: {last['volume_ma']:,.0f}",
     ]

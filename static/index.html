@@ -822,6 +822,7 @@ body {
   .sig-badge { flex: 1 1 100%; }
   .metric-card { flex: 1 1 calc(33.333% - 7px); min-width: 170px; }
   .macro-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #trad-row, #sentiment-row { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
 }
 
 @media (max-width: 900px) {
@@ -842,6 +843,7 @@ body {
   .header-price { font-size: 22px; }
   .card-value { font-size: 18px; }
   .macro-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #trad-row, #sentiment-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .macro-card { min-height: 92px; }
   .macro-card .card-value { font-size: 17px; }
   .main-grid { gap: 12px; }
@@ -1625,6 +1627,73 @@ body {
     </div>
   </div>
 
+  <!-- 전통 시장 카드 행 -->
+  <div class="macro-section-label">전통 시장</div>
+  <div class="macro-row" id="trad-row" style="grid-template-columns:repeat(5,minmax(0,1fr));">
+    <div class="macro-card" id="trad-SPX">
+      <div class="card-label">S&amp;P 500</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+    </div>
+    <div class="macro-card" id="trad-NDX">
+      <div class="card-label">나스닥</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+    </div>
+    <div class="macro-card" id="trad-VIX">
+      <div class="card-label">VIX</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">20미만=안정 / 30+=공포</div>
+    </div>
+    <div class="macro-card" id="trad-GOLD">
+      <div class="card-label">금 (USD/oz)</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+    </div>
+    <div class="macro-card" id="trad-ETHBTC">
+      <div class="card-label">ETH/BTC</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">↑알트 강세 / ↓BTC 단독</div>
+    </div>
+  </div>
+
+  <!-- 시장 심리 카드 행 -->
+  <div class="macro-section-label">시장 심리</div>
+  <div class="macro-row" id="sentiment-row" style="grid-template-columns:repeat(5,minmax(0,1fr));">
+    <div class="macro-card" id="sent-feargreed">
+      <div class="card-label">Fear &amp; Greed</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">0=극공포 100=극탐욕</div>
+    </div>
+    <div class="macro-card" id="sent-funding">
+      <div class="card-label">펀딩비</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">양수=롱과열 / 음수=숏과열</div>
+    </div>
+    <div class="macro-card" id="sent-cvd">
+      <div class="card-label">CVD 4h</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">테이커 누적 델타</div>
+    </div>
+    <div class="macro-card" id="sent-ob">
+      <div class="card-label">오더북 불균형</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">top20 bid/(bid+ask)</div>
+    </div>
+    <div class="macro-card" id="sent-oi">
+      <div class="card-label">OI 합산</div>
+      <div class="card-value" style="color:#A8978A;">—</div>
+      <div class="card-sub" style="color:#A8978A;">로딩 중</div>
+      <div class="card-note">Binance + Bybit</div>
+    </div>
+  </div>
+
   <!-- 메인 그리드 -->
   <div class="main-grid">
 
@@ -2344,19 +2413,31 @@ function applyMarketData(data, source = "market") {
   const hasChartPatch = Object.keys(incomingCharts).length > 0;
   if (hasChartPatch) {
     const nextCharts = Object.assign({}, state.charts);
+    let needsFullRender = false;
+
     Object.entries(incomingCharts).forEach(([tf, chartPayload]) => {
+      const prev = state.charts[tf];
+      // 캔들 개수가 바뀐 경우(새 캔들 형성)만 풀 리빌드 필요
+      // 개수가 같으면 마지막 캔들만 달라진 것 → patchLastCandlePrice 로 충분
+      if (!prev || !prev.candles ||
+          (chartPayload.candles && chartPayload.candles.length !== prev.candles.length)) {
+        needsFullRender = true;
+      }
       nextCharts[tf] = chartPayload;
       if (Object.prototype.hasOwnProperty.call(chartPayload, "fib")) {
         state.fibs[tf] = chartPayload.fib;
       }
     });
+
     state.charts = nextCharts;
-    // 서버 스냅샷으로 교체 직후 현재 실시간 가격을 즉시 반영 — flicker 방지
-    // patchLastCandlePrice 가 나중에 돌기 전에 미리 덮어써서 un-patched 캔들이 렌더되는 것을 막는다
+
+    // 스냅샷 교체 후 항상 실시간 가격 즉시 재패치
     if (state.price != null && incomingCharts[state.currentTf]) {
       patchLastCandlePrice(state.price, state.forming || null);
     }
-    if (incomingCharts[state.currentTf] || !state.charts[state.currentTf]) {
+
+    // 풀 리빌드는 캔들 구조가 바뀐 경우만 — 주기적 스냅샷 브로드캐스트엔 패치만 씀
+    if (needsFullRender && (incomingCharts[state.currentTf] || !state.charts[state.currentTf])) {
       scheduleRenderCurrentChart();
     }
   }
@@ -5025,8 +5106,12 @@ async function fetchMacro() {
     const data = await res.json();
     Object.entries(data).forEach(([key, d]) => {
       if (String(key).startsWith("_")) return;
+      if (key === "eth_btc" || key === "trad_markets") return; // 전용 렌더러로 처리
       renderMacroCard(key, d);
     });
+    // 전통 시장 & ETH/BTC 렌더
+    if (data.trad_markets) renderTradMarkets(data.trad_markets);
+    if (data.eth_btc)      renderEthBtc(data.eth_btc);
   } catch (e) {
     // 실패 시 카드 유지 (로딩 중 상태)
   }
@@ -5035,6 +5120,159 @@ async function fetchMacro() {
 // 페이지 로드 시 + 1시간 간격 갱신
 fetchMacro();
 setInterval(fetchMacro, 60 * 60 * 1000);
+
+// ══════════════════════════════════════════════
+// 전통 시장 카드 렌더러
+// ══════════════════════════════════════════════
+function _tradColor(chgPct) {
+  if (chgPct === null || chgPct === undefined) return C.muted;
+  return Number(chgPct) >= 0 ? C.bull : C.bear;
+}
+
+function renderTradCard(id, price, chgPct, priceDecimals = 2) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const vEl  = el.querySelector(".card-value");
+  const sEl  = el.querySelector(".card-sub");
+  if (price === null || price === undefined) {
+    vEl.textContent = "—"; vEl.style.color = C.muted;
+    sEl.textContent = "데이터 없음"; sEl.style.color = C.muted;
+    return;
+  }
+  const chg = Number(chgPct);
+  const arrow = chg >= 0 ? "▲" : "▼";
+  vEl.textContent = price.toLocaleString("en-US", { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals });
+  vEl.style.color = _tradColor(chgPct);
+  sEl.textContent = `${arrow}${Math.abs(chg).toFixed(2)}%`;
+  sEl.style.color = _tradColor(chgPct);
+}
+
+function renderTradMarkets(tm) {
+  if (!tm) return;
+  const spx  = tm.SPX;
+  const ndx  = tm.NDX;
+  const vix  = tm.VIX;
+  const gold = tm.GOLD;
+  if (spx)  renderTradCard("trad-SPX",  spx.price,  spx.chg_pct,  0);
+  if (ndx)  renderTradCard("trad-NDX",  ndx.price,  ndx.chg_pct,  0);
+  if (gold) renderTradCard("trad-GOLD", gold.price, gold.chg_pct, 0);
+  // VIX: 값이 클수록 공포 — 30 이상은 빨간색
+  if (vix) {
+    const el = document.getElementById("trad-VIX");
+    if (el) {
+      const v = vix.price;
+      const chg = vix.chg_pct;
+      const color = v >= 30 ? C.bear : v >= 20 ? "#D97706" : C.bull;
+      el.querySelector(".card-value").textContent = v.toFixed(1);
+      el.querySelector(".card-value").style.color = color;
+      const arrow = chg >= 0 ? "▲" : "▼";
+      el.querySelector(".card-sub").textContent = `${arrow}${Math.abs(chg).toFixed(2)}%`;
+      el.querySelector(".card-sub").style.color = color;
+    }
+  }
+}
+
+function renderEthBtc(eb) {
+  const el = document.getElementById("trad-ETHBTC");
+  if (!el || !eb || eb.eth_btc === null) return;
+  const ratio = eb.eth_btc;
+  const chg   = eb.ratio_chg_24h;
+  const color = chg === null ? C.txt : (chg >= 0 ? C.bull : C.bear);
+  el.querySelector(".card-value").textContent = ratio.toFixed(5);
+  el.querySelector(".card-value").style.color = color;
+  if (chg !== null) {
+    const arrow = chg >= 0 ? "▲" : "▼";
+    el.querySelector(".card-sub").textContent = `${arrow}${Math.abs(chg).toFixed(2)}% (24h)`;
+    el.querySelector(".card-sub").style.color = color;
+  }
+}
+
+// ══════════════════════════════════════════════
+// 시장 심리 카드 렌더러
+// ══════════════════════════════════════════════
+function renderFearGreed(val, label) {
+  const el = document.getElementById("sent-feargreed");
+  if (!el) return;
+  let color;
+  if      (val <= 24) color = "#DC2626";
+  else if (val <= 49) color = "#EA580C";
+  else if (val <= 74) color = "#78716C";
+  else if (val <= 89) color = "#16A34A";
+  else                color = "#15803D";
+  el.querySelector(".card-value").textContent = val;
+  el.querySelector(".card-value").style.color = color;
+  el.querySelector(".card-sub").textContent   = label || "—";
+  el.querySelector(".card-sub").style.color   = color;
+}
+
+function renderFundingCard(rate) {
+  const el = document.getElementById("sent-funding");
+  if (!el) return;
+  const r = Number(rate);
+  const color = r > 0.02 ? C.bear : r < -0.02 ? C.bull : C.txt;
+  el.querySelector(".card-value").textContent = (r >= 0 ? "+" : "") + r.toFixed(4) + "%";
+  el.querySelector(".card-value").style.color = color;
+  el.querySelector(".card-sub").textContent   = r > 0.05 ? "롱 과열" : r < -0.05 ? "숏 과열" : "중립";
+  el.querySelector(".card-sub").style.color   = color;
+}
+
+function renderCvdCard(cvd4h) {
+  const el = document.getElementById("sent-cvd");
+  if (!el) return;
+  const v = Number(cvd4h);
+  const color = v > 0 ? C.bull : C.bear;
+  el.querySelector(".card-value").textContent = (v >= 0 ? "+" : "") + v.toFixed(0) + " BTC";
+  el.querySelector(".card-value").style.color = color;
+  el.querySelector(".card-sub").textContent   = v > 0 ? "매수 우세" : "매도 우세";
+  el.querySelector(".card-sub").style.color   = color;
+}
+
+function renderObCard(imbalance) {
+  const el = document.getElementById("sent-ob");
+  if (!el) return;
+  const v = Number(imbalance);
+  const pct = (v * 100).toFixed(1);
+  const color = v > 0.60 ? C.bull : v < 0.40 ? C.bear : C.txt;
+  const label = v > 0.60 ? "매수 우세" : v < 0.40 ? "매도 우세" : "균형";
+  el.querySelector(".card-value").textContent = pct + "%";
+  el.querySelector(".card-value").style.color = color;
+  el.querySelector(".card-sub").textContent   = label;
+  el.querySelector(".card-sub").style.color   = color;
+}
+
+function renderOiCard(combined, binance) {
+  const el = document.getElementById("sent-oi");
+  if (!el) return;
+  const val = combined ?? binance;
+  if (val === null || val === undefined) return;
+  const k = (Number(val) / 1000).toFixed(1);
+  el.querySelector(".card-value").textContent = k + "K BTC";
+  el.querySelector(".card-value").style.color = C.txt;
+  el.querySelector(".card-sub").textContent   = combined ? "Binance+Bybit" : "Binance only";
+  el.querySelector(".card-sub").style.color   = C.muted;
+}
+
+async function fetchSentiment() {
+  try {
+    const res = await fetch("/api/market-sentiment");
+    const d   = await res.json();
+    if (d.fear_greed !== null && d.fear_greed !== undefined)
+      renderFearGreed(d.fear_greed, d.fear_greed_label);
+    if (d.funding_rate !== null && d.funding_rate !== undefined)
+      renderFundingCard(d.funding_rate);
+    if (d.cvd_4h !== null && d.cvd_4h !== undefined)
+      renderCvdCard(d.cvd_4h);
+    if (d.ob_imbalance !== null && d.ob_imbalance !== undefined)
+      renderObCard(d.ob_imbalance);
+    renderOiCard(d.combined_oi, d.open_interest);
+  } catch(e) {
+    // 실패 시 카드 유지
+  }
+}
+
+// 페이지 로드 시 + 5분 간격 갱신
+fetchSentiment();
+setInterval(fetchSentiment, 5 * 60 * 1000);
 
 // ══════════════════════════════════════════════
 // 에러

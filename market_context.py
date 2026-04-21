@@ -297,6 +297,92 @@ def _fetch_deribit(btc_price: float, ctx: dict) -> None:
 
 
 # ══════════════════════════════════════════════
+# 오더북 불균형 (Bid-Ask Imbalance)
+# ══════════════════════════════════════════════
+
+def _fetch_orderbook_imbalance(symbol: str, ctx: dict) -> None:
+    """
+    Binance Futures depth API로 상위 20레벨 호가 잔량 비율 계산.
+
+    imbalance = 총매수잔량 / (총매수잔량 + 총매도잔량)
+      > 0.60 : 매수 우세 (bid-heavy)
+      < 0.40 : 매도 우세 (ask-heavy)
+      0.40~0.60 : 균형
+
+    ※ 스냅샷 시점 기준 — 대형 지정가 취소 시 즉시 변동. 단기 확인용.
+    """
+    try:
+        r = _http.get(
+            f"{BINANCE_FUTURES_URL}/fapi/v1/depth",
+            params={"symbol": symbol, "limit": 20},
+            timeout=5,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        bid_qty = sum(float(b[1]) for b in data.get("bids", []))
+        ask_qty = sum(float(a[1]) for a in data.get("asks", []))
+        total   = bid_qty + ask_qty
+
+        if total > 0:
+            ctx["ob_bid_qty"]    = round(bid_qty, 2)
+            ctx["ob_ask_qty"]    = round(ask_qty, 2)
+            ctx["ob_imbalance"]  = round(bid_qty / total, 4)   # 0.0 ~ 1.0
+        else:
+            ctx["ob_bid_qty"] = ctx["ob_ask_qty"] = ctx["ob_imbalance"] = None
+
+    except Exception:
+        ctx["ob_bid_qty"] = ctx["ob_ask_qty"] = ctx["ob_imbalance"] = None
+
+
+# ══════════════════════════════════════════════
+# Bybit OI (멀티 거래소 OI 합산)
+# ══════════════════════════════════════════════
+
+def _fetch_bybit_oi(ctx: dict, symbol: str = "BTCUSDT") -> None:
+    """
+    Bybit v5 API로 BTC 선물 OI(계약수) 수집 후 BTC 단위로 변환.
+    Bybit BTCUSDT 선물 1계약 = 1 USDT (inverse 아님, linear).
+    OI(USDT) / mark_price ≈ OI(BTC).
+
+    Binance OI와 합산해 시장 전체 레버리지 규모를 파악.
+    """
+    try:
+        r = _http.get(
+            "https://api.bybit.com/v5/market/open-interest",
+            params={
+                "category":     "linear",
+                "symbol":       symbol,
+                "intervalTime": "1h",
+                "limit":        1,
+            },
+            timeout=6,
+        )
+        r.raise_for_status()
+        result = r.json().get("result", {})
+        items  = result.get("list", [])
+        if not items:
+            ctx["bybit_oi"] = ctx["combined_oi"] = None
+            return
+
+        oi_usdt    = float(items[0]["openInterest"])
+        mark_price = ctx.get("mark_price") or ctx.get("index_price") or 80000.0
+        bybit_oi_btc = oi_usdt / mark_price
+
+        ctx["bybit_oi"] = round(bybit_oi_btc, 1)
+
+        # 합산 OI
+        binance_oi = ctx.get("open_interest")
+        if binance_oi is not None:
+            ctx["combined_oi"] = round(binance_oi + bybit_oi_btc, 1)
+        else:
+            ctx["combined_oi"] = None
+
+    except Exception:
+        ctx["bybit_oi"] = ctx["combined_oi"] = None
+
+
+# ══════════════════════════════════════════════
 # Fear & Greed Index (Alternative.me)
 # ══════════════════════════════════════════════
 
@@ -350,6 +436,8 @@ def fetch_market_context(symbol: str = DEFAULT_SYMBOL) -> dict:
     _fetch_binance(symbol, ctx)
     _fetch_top_trader_ratios(symbol, ctx)
     _fetch_liquidation_events(symbol, ctx)
+    _fetch_orderbook_imbalance(symbol, ctx)
+    _fetch_bybit_oi(ctx, symbol)
     _fetch_fear_greed(ctx)
 
     btc_price = ctx.get("mark_price") or ctx.get("index_price") or 80000.0
@@ -415,11 +503,35 @@ def format_market_context(ctx: dict) -> str:
             f"※ 테이커 거래량 기반 — 방향 편향 참고, 절대값보다 추세 변화에 주목"
         )
 
+    # ── 오더북 불균형 ────────────────────────────
+    if ctx.get("ob_imbalance") is not None:
+        imb   = ctx["ob_imbalance"]
+        bid_q = ctx.get("ob_bid_qty", 0)
+        ask_q = ctx.get("ob_ask_qty", 0)
+        if imb > 0.60:
+            imb_label = "매수 우세(bid-heavy)"
+        elif imb < 0.40:
+            imb_label = "매도 우세(ask-heavy)"
+        else:
+            imb_label = "균형"
+        lines.append(
+            f"  오더북 불균형(top20): {imb:.3f} ({imb_label})  "
+            f"매수잔량 {bid_q:,.1f} BTC / 매도잔량 {ask_q:,.1f} BTC"
+            f"  ※ 스냅샷 — 대형 호가 취소 시 즉시 변동, 단기 방향 편향 참고"
+        )
+
     # ── 오픈 인터레스트 ──────────────────────────
     if ctx.get("open_interest") is not None:
-        lines.append(f"  오픈 인터레스트: {ctx['open_interest']:,.1f} BTC")
+        lines.append(f"  오픈 인터레스트 Binance: {ctx['open_interest']:,.1f} BTC")
+        if ctx.get("bybit_oi") is not None:
+            lines.append(f"  오픈 인터레스트 Bybit:   {ctx['bybit_oi']:,.1f} BTC")
+        if ctx.get("combined_oi") is not None:
+            lines.append(
+                f"  오픈 인터레스트 합산(Binance+Bybit): {ctx['combined_oi']:,.1f} BTC"
+                f"  ※ 주요 2개 거래소 기준 — 시장 전체 레버리지 규모 근사"
+            )
         if ctx.get("oi_change_24h_pct") is not None:
-            lines.append(f"  OI 24h 변화: {ctx['oi_change_24h_pct']:+.2f}%")
+            lines.append(f"  Binance OI 24h 변화: {ctx['oi_change_24h_pct']:+.2f}%")
 
     # ── 톱 트레이더 롱/숏 비율 ──
     # ※ Binance API 필드명(longAccount)이 포지션·계좌 엔드포인트 양쪽에 혼용됨 — 해석 시 주의
@@ -464,7 +576,10 @@ def format_market_context(ctx: dict) -> str:
 
     # ── Deribit 옵션 ─────────────────────────────
     if ctx.get("dvol") is not None:
-        lines.append(f"  DVOL (내재변동성 지수): {ctx['dvol']:.1f}")
+        lines.append(
+            f"  DVOL (내재변동성 지수): {ctx['dvol']:.1f}"
+            f"  ※ 실현변동성(RV)은 각 TF 지표 섹션 참조 — RV>DVOL: IV 할인(변동성 확대 예상) / RV<DVOL: IV 프리미엄(불확실성 과대반영)"
+        )
 
     if ctx.get("skew_25d") is not None:
         skew      = ctx["skew_25d"]

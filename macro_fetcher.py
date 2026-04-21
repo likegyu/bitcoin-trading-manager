@@ -269,6 +269,64 @@ def _fetch_btc_dominance() -> Optional[float]:
         return None
 
 
+# ── ETH/BTC 비율 ─────────────────────────────────────────────
+
+def _fetch_eth_btc_ratio() -> dict:
+    """
+    CoinGecko에서 ETH·BTC USD 가격을 수집해 ETH/BTC 비율과 24h 변화율을 계산.
+    키 불필요.
+
+    반환:
+      {
+        "eth_usd": float,
+        "btc_usd": float,
+        "eth_btc": float,          # ETH/BTC 비율
+        "eth_chg_24h": float,      # ETH USD 24h 변화율(%)
+        "btc_chg_24h": float,      # BTC USD 24h 변화율(%)
+        "ratio_chg_24h": float,    # ETH/BTC 비율 24h 변화율(%)
+        "error": str | None,
+      }
+    """
+    result: dict = {k: None for k in ("eth_usd","btc_usd","eth_btc","eth_chg_24h","btc_chg_24h","ratio_chg_24h","error")}
+    try:
+        r = _http.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={
+                "ids":            "bitcoin,ethereum",
+                "vs_currencies":  "usd",
+                "include_24hr_change": "true",
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        btc_usd      = float(data["bitcoin"]["usd"])
+        eth_usd      = float(data["ethereum"]["usd"])
+        btc_chg      = float(data["bitcoin"].get("usd_24h_change", 0) or 0)
+        eth_chg      = float(data["ethereum"].get("usd_24h_change", 0) or 0)
+        eth_btc      = eth_usd / btc_usd if btc_usd > 0 else None
+
+        # ETH/BTC 비율의 24h 변화율 = (1 + eth_chg/100) / (1 + btc_chg/100) - 1
+        if btc_chg is not None and eth_chg is not None:
+            ratio_chg = ((1 + eth_chg / 100) / (1 + btc_chg / 100) - 1) * 100
+        else:
+            ratio_chg = None
+
+        result.update({
+            "eth_usd":       round(eth_usd, 2),
+            "btc_usd":       round(btc_usd, 2),
+            "eth_btc":       round(eth_btc, 6) if eth_btc else None,
+            "eth_chg_24h":   round(eth_chg, 2),
+            "btc_chg_24h":   round(btc_chg, 2),
+            "ratio_chg_24h": round(ratio_chg, 2) if ratio_chg is not None else None,
+            "error":         None,
+        })
+    except Exception as e:
+        result["error"] = str(e)[:80]
+    return result
+
+
 # ── DefiLlama 스테이블코인 ────────────────────────────────────
 
 def _fetch_stablecoins() -> dict:
@@ -357,6 +415,9 @@ def fetch_macro_context() -> dict:
         "zscore20": None,
         "regime":   None,
     }
+
+    # ETH/BTC 비율
+    result["_eth_btc"] = _fetch_eth_btc_ratio()
 
     # 전통 시장 (yfinance) — 별도 키로 저장 (format_macro_context에서 별도 섹션 출력)
     result["_trad_markets"] = _fetch_traditional_markets()
@@ -480,6 +541,30 @@ def format_macro_context(macro: dict) -> str:
                 if line.startswith("관찰 구간:"):
                     continue
                 lines.append(f"      {line}")
+
+    # ── ETH/BTC 비율 섹션 ────────────────────────────────────────
+    eb = macro.get("_eth_btc") or {}
+    if eb.get("eth_btc") is not None:
+        ratio     = eb["eth_btc"]
+        ratio_chg = eb.get("ratio_chg_24h")
+        eth_chg   = eb.get("eth_chg_24h")
+        btc_chg   = eb.get("btc_chg_24h")
+        chg_str   = f"  24h 비율변화 {ratio_chg:+.2f}%" if ratio_chg is not None else ""
+        price_str = ""
+        if eb.get("eth_usd") and eb.get("btc_usd"):
+            price_str = (
+                f"  (ETH ${eb['eth_usd']:,.0f} {eth_chg:+.1f}% / "
+                f"BTC ${eb['btc_usd']:,.0f} {btc_chg:+.1f}%)"
+            )
+        lines.append(
+            f"  ETH/BTC 비율: {ratio:.6f}{chg_str}{price_str}"
+        )
+        lines.append(
+            "  ※ 해석: 비율↑ = ETH 상대 강세(알트 시즌 가능성) / 비율↓ = BTC 단독 강세 또는 리스크오프. "
+            "BTC 도미넌스와 함께 순환 방향 확인."
+        )
+    elif eb.get("error"):
+        lines.append(f"  ETH/BTC 비율: 수집 실패 — {eb['error']}")
 
     # ── 전통 시장 섹션 ───────────────────────────────────────────
     trad = macro.get("_trad_markets") or {}

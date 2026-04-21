@@ -271,7 +271,7 @@ def _fetch_all(symbol: str) -> dict:
     result = {}
     for tf in TIMEFRAMES:
         df = fetch_ohlcv(symbol, tf)
-        df = add_all_indicators(df)
+        df = add_all_indicators(df, tf=tf)
         result[tf] = df
     return result
 
@@ -541,7 +541,7 @@ class MarketStreamManager:
                             "volume": float(k["v"]),
                         }
                         df = _upsert_ohlcv(df, ts, row)
-                    result[tf] = add_all_indicators(df)
+                    result[tf] = add_all_indicators(df, tf=tf)
                 except Exception:
                     result[tf] = snapshot[tf]  # 실패 시 원본 유지
             return result
@@ -697,9 +697,9 @@ class MarketStreamManager:
                 async with self._lock:
                     current = self._tf_data.get(tf)
 
-                def _compute(cur=current, ts=timestamp, r=row):
+                def _compute(cur=current, ts=timestamp, r=row, _tf=tf):
                     up = _upsert_ohlcv(cur, ts, r)
-                    return add_all_indicators(up)
+                    return add_all_indicators(up, tf=_tf)
 
                 updated = await asyncio.to_thread(_compute)
 
@@ -799,7 +799,7 @@ class MarketStreamManager:
                         }
                         df = _upsert_ohlcv(df, ts, row)
                     try:
-                        result[tf] = add_all_indicators(df)
+                        result[tf] = add_all_indicators(df, tf=tf)
                     except Exception:
                         result[tf] = df
                 return result
@@ -1812,13 +1812,37 @@ async def macro_endpoint():
     """
     거시경제 지표 JSON 반환.
     FRED (1시간 캐시) + DefiLlama + CoinGecko.
+    _eth_btc / _trad_markets 는 eth_btc / trad_markets 키로 노출.
     """
     if _macro_snapshot.is_ready():
         data = await _macro_snapshot.get_snapshot()
     else:
         data = await asyncio.to_thread(fetch_macro_context)
-    # JSON 직렬화 가능하도록 None 포함 dict 그대로 반환
-    return data
+    # _eth_btc, _trad_markets 를 공개 키로 포함
+    out = {k: v for k, v in data.items() if not str(k).startswith("_")}
+    out["eth_btc"]      = data.get("_eth_btc")
+    out["trad_markets"] = data.get("_trad_markets")
+    return out
+
+
+# ─── 시장 심리 스냅샷 캐시 (5분 TTL) ─────────────────────────
+_sentiment_cache: dict = {"data": None, "ts": 0.0}
+_SENTIMENT_TTL = 300  # 5분
+
+@app.get("/api/market-sentiment")
+async def market_sentiment_endpoint():
+    """
+    Fear & Greed, 펀딩비, CVD, 오더북 불균형, Bybit OI 등 실시간 심리 지표.
+    5분 캐시 적용.
+    """
+    import time as _t
+    now = _t.time()
+    if _sentiment_cache["data"] is None or now - _sentiment_cache["ts"] > _SENTIMENT_TTL:
+        from market_context import fetch_market_context
+        ctx = await asyncio.to_thread(fetch_market_context)
+        _sentiment_cache["data"] = ctx
+        _sentiment_cache["ts"]   = now
+    return _sentiment_cache["data"]
 
 
 @app.get("/api/account")
