@@ -2089,6 +2089,13 @@ async def root():
         return HTMLResponse(f.read())
 
 
+@app.get("/guide", include_in_schema=False)
+async def guide():
+    path = os.path.join(BASE_DIR, "static", "guide.html")
+    with open(path, encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon_ico():
     from fastapi.responses import FileResponse

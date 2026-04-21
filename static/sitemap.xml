@@ -8,4 +8,11 @@
     <priority>1.0</priority>
     <xhtml:link rel="alternate" hreflang="ko" href="https://bitswipe.xyz/"/>
   </url>
+  <url>
+    <loc>https://bitswipe.xyz/guide</loc>
+    <lastmod>2026-04-21</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://bitswipe.xyz/guide"/>
+  </url>
 </urlset>
