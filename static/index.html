@@ -3838,10 +3838,14 @@ function patchLastCandlePrice(newPrice, forming) {
     // lazyUpdate: false — 즉시 캔버스에 반영
     // Safari는 데스크톱 전환 시 rAF를 멈추기 때문에 lazyUpdate:true면 패치가
     // 캔버스에 그려지지 않은 채 스위치되어 복귀 시 구버전 캔들이 순간 보임
-    inst.setOption({ series: [{ data: chart.candles }] }, {
-      notMerge: false,
-      lazyUpdate: false,
-    });
+
+    // markLine(NOW 수평선) 실시간 동기화 — 가격 변화와 함께 선이 실시간으로 이동
+    inst.setOption({
+      series: [{
+        data: chart.candles,
+        markLine: { data: buildPriceGuides(chart, state.chartViewport[tf]) },
+      }],
+    }, { notMerge: false, lazyUpdate: false });
   }
 }
 
