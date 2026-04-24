@@ -223,13 +223,36 @@ button:disabled { cursor: not-allowed; }
 
 /* ══ Header ═══════════════════════════════════════════════════════ */
 .header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: var(--s-3);
-  flex-wrap: wrap;
+  column-gap: var(--s-5);
+  row-gap: var(--s-2);
   padding: var(--s-3) 0 var(--s-4);
   border-bottom: 1px solid var(--border);
   margin-bottom: var(--s-4);
+}
+.header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.header-symbol {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-shrink: 0;
+}
+.header-donate-wrap {
+  position: relative;
 }
 .header-title {
   font-size: 22px;
@@ -258,19 +281,21 @@ button:disabled { cursor: not-allowed; }
   margin-left: 4px;
 }
 .header-price {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 800;
   color: var(--accent);
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  min-width: 140px;
+  line-height: 1;
+  min-width: 120px;
 }
 .header-meta {
   display: flex;
   align-items: center;
   gap: var(--s-2);
   flex-wrap: wrap;
-  margin-left: auto;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 /* ══ Status chips ═════════════════════════════════════════════════ */
@@ -278,7 +303,8 @@ button:disabled { cursor: not-allowed; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  height: 28px;
+  padding: 0 10px;
   border-radius: var(--r-full);
   border: 1px solid var(--border);
   background: var(--bg-surface);
@@ -288,6 +314,7 @@ button:disabled { cursor: not-allowed; }
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   white-space: nowrap;
 }
+a.status-chip { cursor: pointer; }
 .status-chip:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text); }
 .status-chip.live    { background: var(--success-soft); border-color: var(--success-border); color: var(--success); }
 .status-chip.pending { background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn); }
@@ -306,14 +333,17 @@ button:disabled { cursor: not-allowed; }
 
 /* ══ Buttons ══════════════════════════════════════════════════════ */
 .btn-analyze {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: var(--accent);
   color: #1B1B1B;
   font-weight: 700;
-  font-size: 13.5px;
+  font-size: 13px;
   border: none;
   border-radius: var(--r-md);
-  padding: 10px 22px;
-  min-height: 40px;
+  padding: 0 18px;
+  height: 36px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
   white-space: nowrap;
@@ -321,13 +351,14 @@ button:disabled { cursor: not-allowed; }
 }
 .btn-analyze:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(247, 147, 26, 0.35); }
 .btn-analyze:active:not(:disabled) { transform: translateY(0); }
-.btn-analyze:disabled { background: var(--bg-surface-3); color: var(--text-dim); box-shadow: none; }
+.btn-analyze:disabled { background: var(--bg-surface-3); color: var(--text-dim); box-shadow: none; cursor: not-allowed; }
 
 #notif-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  height: 28px;
+  padding: 0 10px;
   border-radius: var(--r-full);
   border: 1px solid var(--border);
   background: var(--bg-surface);
@@ -336,6 +367,7 @@ button:disabled { cursor: not-allowed; }
   color: var(--text-muted);
   transition: all var(--dur-fast) var(--ease);
   white-space: nowrap;
+  cursor: pointer;
 }
 #notif-btn:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text); }
 #notif-btn.on { background: var(--success-soft); border-color: var(--success-border); color: var(--success); }
@@ -347,14 +379,19 @@ button:disabled { cursor: not-allowed; }
 
 /* ══ Donate ═══════════════════════════════════════════════════════ */
 .btn-donate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 8px 14px;
+  height: 36px;
+  padding: 0 14px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-muted);
   white-space: nowrap;
+  cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 .btn-donate:hover { border-color: var(--accent-border); color: var(--text); background: var(--accent-soft); }
@@ -2005,10 +2042,16 @@ button:disabled { cursor: not-allowed; }
 /* ≤900px — tablet */
 @media (max-width: 900px) {
   .page { padding: var(--s-3) var(--s-3) var(--s-6); }
-  .header { gap: var(--s-2); padding: var(--s-2) 0 var(--s-3); }
+  .header {
+    grid-template-columns: 1fr auto;
+    column-gap: var(--s-3);
+    padding: var(--s-2) 0 var(--s-3);
+  }
+  .header-brand { grid-column: 1 / -1; }
+  .header-meta { grid-column: 1 / -1; justify-content: flex-start; }
+  .header-actions { grid-column: 2; grid-row: 1; justify-self: end; }
   .header-title { font-size: 20px; }
-  .header-price { font-size: 22px; width: 100%; }
-  .header-meta { width: 100%; margin-left: 0; }
+  .header-price { font-size: 22px; }
   #chart-plot { height: 620px; }
   .chat-input-row { flex-direction: column; align-items: stretch; }
   .chat-btn-group { flex-direction: row; }
@@ -2024,7 +2067,10 @@ button:disabled { cursor: not-allowed; }
 @media (max-width: 768px) {
   .page { padding: var(--s-3) var(--s-2) var(--s-6); }
   .header-title { font-size: 18px; }
-  .header-price { font-size: 20px; }
+  .header-price { font-size: 20px; min-width: 0; }
+  .header-brand { gap: var(--s-2); }
+  .btn-analyze { padding: 0 14px; font-size: 12.5px; }
+  .btn-donate { padding: 0 12px; font-size: 12px; }
   .cards-row { grid-template-columns: 1fr 1fr; gap: var(--s-2); }
   .sig-badge { grid-column: 1 / -1; min-height: 80px; }
   .metric-card { min-height: 84px; }
@@ -2074,12 +2120,27 @@ button:disabled { cursor: not-allowed; }
 
 /* ≤540px — small mobile */
 @media (max-width: 540px) {
-  .header { flex-direction: column; align-items: stretch; gap: var(--s-2); }
-  .header > div:first-child { display: flex; align-items: baseline; gap: var(--s-2); }
-  .header-price { margin: 0; text-align: left; font-size: 22px; }
-  .header-meta { width: 100%; margin-left: 0; }
-  .header-meta .status-chip { flex: 0 0 auto; }
+  .header {
+    grid-template-columns: 1fr;
+    row-gap: var(--s-3);
+  }
+  .header-brand,
+  .header-meta,
+  .header-actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: stretch;
+    width: 100%;
+  }
+  .header-brand { justify-content: space-between; }
+  .header-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+  .header-donate-wrap { display: flex; }
+  .btn-donate,
   .btn-analyze { width: 100%; }
+  .header-meta { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; scrollbar-width: none; }
+  .header-meta::-webkit-scrollbar { display: none; }
+  .header-meta .status-chip,
+  .header-meta #notif-btn { flex: 0 0 auto; }
 
   .hero-badge { padding: 0 10px; font-size: 9px; letter-spacing: 0.08em; }
   .hero-title-prefix { display: none; }
@@ -2220,11 +2281,13 @@ button:disabled { cursor: not-allowed; }
 
   <!-- 헤더 -->
   <header class="header" role="banner">
-    <div>
-      <h1 id="header-base" class="header-title">BTC</h1>
-      <span id="header-quote" class="header-pair">/ USDT</span>
+    <div class="header-brand">
+      <div class="header-symbol">
+        <h1 id="header-base" class="header-title">BTC</h1>
+        <span id="header-quote" class="header-pair">/ USDT</span>
+      </div>
+      <div id="header-price" class="header-price"></div>
     </div>
-    <div id="header-price" class="header-price"></div>
     <div class="header-meta">
       <div id="market-status" class="status-chip pending" role="status" aria-live="polite">
         <span id="market-status-dot" class="status-dot"></span>
@@ -2256,19 +2319,21 @@ button:disabled { cursor: not-allowed; }
         <span id="chzzk-live-badge" class="chzzk-live-badge" style="display:none;">● LIVE</span>
       </a>
     </div>
-    <div style="position:relative;">
-      <button class="btn-donate" onclick="toggleDonate(event)">☕ 도네이션</button>
-      <div id="donate-popup">
-        <div class="donate-title">☕ 커피 한 잔 사주세요</div>
-        <div class="donate-sub">USDT (TRC20 / Tron 네트워크)</div>
-        <div class="donate-addr-wrap">
-          <span class="donate-addr">TLobHcQzcaniNLBimNrgpoU7jw2iyQpoe5</span>
-          <button class="donate-copy-btn" onclick="copyDonateAddr(event)">복사</button>
+    <div class="header-actions">
+      <div class="header-donate-wrap">
+        <button class="btn-donate" onclick="toggleDonate(event)">☕ 도네이션</button>
+        <div id="donate-popup">
+          <div class="donate-title">☕ 커피 한 잔 사주세요</div>
+          <div class="donate-sub">USDT (TRC20 / Tron 네트워크)</div>
+          <div class="donate-addr-wrap">
+            <span class="donate-addr">TLobHcQzcaniNLBimNrgpoU7jw2iyQpoe5</span>
+            <button class="donate-copy-btn" onclick="copyDonateAddr(event)">복사</button>
+          </div>
+          <div class="donate-copied" id="donate-copied">✓ 복사됐습니다!</div>
         </div>
-        <div class="donate-copied" id="donate-copied">✓ 복사됐습니다!</div>
       </div>
+      <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
     </div>
-    <button id="btn-analyze" class="btn-analyze" onclick="runAnalysis()">분석 시작 →</button>
   </header>
 
   <!-- 시그널 + 지표 카드 행 -->
@@ -2449,7 +2514,7 @@ button:disabled { cursor: not-allowed; }
       <!-- 멀티 에이전트 토론 (강세/약세 + 위험 분석 + 과거 회상) -->
       <div class="panel-card" id="agents-card" style="display:none;">
         <div class="panel-card-header">
-          <div class="panel-card-dot" style="background:#7C3AED;"></div>
+          <div class="panel-card-dot" style="background:#A78BFA;"></div>
           <span class="panel-card-label">멀티 에이전트 토론 · 메모리</span>
           <span id="agents-card-summary" style="margin-left:auto;font-size:10.5px;font-weight:600;color:var(--text-dim);letter-spacing:0;text-transform:none;"></span>
         </div>
@@ -2498,7 +2563,7 @@ button:disabled { cursor: not-allowed; }
       <!-- 피보나치 -->
       <div class="panel-card">
         <div class="panel-card-header">
-          <div class="panel-card-dot" style="background:#7C3AED;"></div>
+          <div class="panel-card-dot" style="background:#A78BFA;"></div>
           <span class="panel-card-label">피보나치 되돌림 <span id="fib-meta" style="font-weight:400;text-transform:none;letter-spacing:0;">(현재 TF swing 기준)</span></span>
         </div>
         <div class="panel-card-body" style="padding:0 16px 10px;">
@@ -3310,7 +3375,7 @@ function renderSignalBadge(signal, confidence) {
     );
     const alignMark = jAligned ? "[일치]" : "[불일치]";
     judgeBadgeHtml = `
-      <div class="card-sub" style="margin-top:5px;padding:3px 6px;background:#F5F0EB;border-radius:6px;font-size:10px;">
+      <div class="card-sub" style="margin-top:5px;padding:3px 6px;background:var(--bg-surface-2);border-radius:6px;font-size:10px;">
         ${alignMark} 심판: <span style="color:${jColor};font-weight:700">${jv}</span>
       </div>`;
   }
@@ -3930,7 +3995,7 @@ function buildPositionGuides(referencePrice, minGap, occupied = []) {
       lineStyle: { color, width: width || 1.2, type: lineType || "dashed", opacity: 0.9 },
       label: {
         show: true,
-        color: "#FFFFFF",
+        color: "#0B0E11",
         backgroundColor: color,
         borderRadius: 4,
         padding: [3, 6],
@@ -4011,7 +4076,7 @@ function buildPriceGuides(chart, viewport) {
       lineStyle: { color: priceColor, width: 1.2, type: "solid", opacity: 0.9 },
       label: {
         show: true,
-        color: "#FFFFFF",
+        color: "#0B0E11",
         backgroundColor: priceColor,
         borderRadius: 4,
         padding: [3, 6],
@@ -4028,7 +4093,7 @@ function buildPriceGuides(chart, viewport) {
       label: {
         show: true,
         color: level.color,
-        backgroundColor: "rgba(255,255,255,0.92)",
+        backgroundColor: "rgba(20,25,32,0.92)",
         borderColor: `${level.color}66`,
         borderWidth: 1,
         borderRadius: 4,
@@ -4122,7 +4187,7 @@ function buildChartOption(chart, tf, viewport) {
 
   return {
     animation: false,
-    backgroundColor: "#FDFBF8",
+    backgroundColor: "transparent",
     textStyle: {
       fontFamily: "Inter, -apple-system, sans-serif",
     },
@@ -4135,7 +4200,7 @@ function buildChartOption(chart, tf, viewport) {
     axisPointer: {
       link: [{ xAxisIndex: "all" }],
       label: { show: false, backgroundColor: C.orange },
-      lineStyle: { color: "#C2410C", width: 1, opacity: 0.45 },
+      lineStyle: { color: "#F7931A", width: 1, opacity: 0.45 },
     },
     tooltip: {
       trigger: "axis",
@@ -4144,12 +4209,12 @@ function buildChartOption(chart, tf, viewport) {
         snap: true,
         label: { show: false },
       },
-      backgroundColor: "#FFFFFF",
+      backgroundColor: "#141920",
       borderColor: "#252C36",
       borderWidth: 1,
       textStyle: { color: C.txt, fontSize: 12 },
       padding: 12,
-      extraCssText: "box-shadow:0 12px 32px rgba(28,25,23,.12);border-radius:12px;",
+      extraCssText: "box-shadow:0 12px 32px rgba(0,0,0,.55);border-radius:12px;",
       transitionDuration: 0,
       formatter: params => buildTooltipHtml(chart, params),
     },
@@ -4172,10 +4237,10 @@ function buildChartOption(chart, tf, viewport) {
         start: zoomStart,
         end: zoomEnd,
         borderColor: "#252C36",
-        backgroundColor: "#F5F0EB",
+        backgroundColor: "#1A2029",
         fillerColor: "rgba(247,147,26,.12)",
-        handleStyle: { color: C.orange, borderColor: "#C2410C" },
-        moveHandleStyle: { color: "#F5F0EB" },
+        handleStyle: { color: C.orange, borderColor: "#F7931A" },
+        moveHandleStyle: { color: "#1A2029" },
         textStyle: { color: C.muted },
         brushSelect: false,
       },
@@ -4186,7 +4251,7 @@ function buildChartOption(chart, tf, viewport) {
         gridIndex: 0,
         data: chart.labels,
         boundaryGap: true,
-        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisLine: { lineStyle: { color: "#252C36" } },
         axisTick: { show: false },
         axisLabel: { show: false },
         splitLine: { show: false },
@@ -4198,7 +4263,7 @@ function buildChartOption(chart, tf, viewport) {
         gridIndex: 1,
         data: chart.labels,
         boundaryGap: true,
-        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisLine: { lineStyle: { color: "#252C36" } },
         axisTick: { show: false },
         axisLabel: { show: false },
         splitLine: { show: false },
@@ -4210,7 +4275,7 @@ function buildChartOption(chart, tf, viewport) {
         gridIndex: 2,
         data: chart.labels,
         boundaryGap: true,
-        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisLine: { lineStyle: { color: "#252C36" } },
         axisTick: { show: false },
         axisLabel: { show: false },
         splitLine: { show: false },
@@ -4222,7 +4287,7 @@ function buildChartOption(chart, tf, viewport) {
         gridIndex: 3,
         data: chart.labels,
         boundaryGap: true,
-        axisLine: { lineStyle: { color: "#D6CFC7" } },
+        axisLine: { lineStyle: { color: "#252C36" } },
         axisTick: { show: false },
         axisLabel: {
           color: C.muted,
@@ -4242,12 +4307,12 @@ function buildChartOption(chart, tf, viewport) {
         gridIndex: 0,
         position: "right",
         splitNumber: 4,
-        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLine: { show: true, lineStyle: { color: "#252C36" } },
         axisLabel: {
           color: "#8B96A5",
           formatter: value => "$" + compactNumber(value, 1),
         },
-        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+        splitLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.04)" } },
       },
       {
         min: 0,
@@ -4255,36 +4320,36 @@ function buildChartOption(chart, tf, viewport) {
         gridIndex: 1,
         position: "right",
         splitNumber: 3,
-        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLine: { show: true, lineStyle: { color: "#252C36" } },
         axisLabel: {
           color: "#8B96A5",
           formatter: value => (value === 30 || value === 50 || value === 70 ? value : ""),
         },
-        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+        splitLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.04)" } },
       },
       {
         scale: true,
         gridIndex: 2,
         position: "right",
         splitNumber: 3,
-        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLine: { show: true, lineStyle: { color: "#252C36" } },
         axisLabel: {
           color: "#8B96A5",
           formatter: value => compactNumber(value, 2),
         },
-        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+        splitLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.04)" } },
       },
       {
         scale: true,
         gridIndex: 3,
         position: "right",
         splitNumber: 2,
-        axisLine: { show: true, lineStyle: { color: "#D6CFC7" } },
+        axisLine: { show: true, lineStyle: { color: "#252C36" } },
         axisLabel: {
           color: "#8B96A5",
           formatter: value => compactNumber(value, 1),
         },
-        splitLine: { show: true, lineStyle: { color: "#EDE8E0" } },
+        splitLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.04)" } },
       },
     ],
     graphic: [
@@ -4422,7 +4487,7 @@ function buildChartOption(chart, tf, viewport) {
         opacity: 0.35,
       }),
       makeLineSeries("SMA50", chart.sma_50, 0, 0, {
-        color: "#7C3AED",
+        color: "#A78BFA",
         width: 1.5,
         opacity: 0.78,
       }),
@@ -4464,16 +4529,16 @@ function buildChartOption(chart, tf, viewport) {
         tooltip: { show: false },
       }),
       makeLineSeries("RSI", chart.rsi, 1, 1, {
-        color: "#7C3AED",
+        color: "#A78BFA",
         width: 1.8,
       }, {
-        areaStyle: { color: "rgba(124,58,237,0.05)" },
+        areaStyle: { color: "rgba(167,139,250,0.08)" },
         markArea: {
           silent: true,
           label: { show: false },
           data: [
-            [{ yAxis: 70, itemStyle: { color: "rgba(220,38,38,.06)" } }, { yAxis: 100 }],
-            [{ yAxis: 0, itemStyle: { color: "rgba(22,163,74,.06)" } }, { yAxis: 30 }],
+            [{ yAxis: 70, itemStyle: { color: "rgba(246,70,93,.10)" } }, { yAxis: 100 }],
+            [{ yAxis: 0, itemStyle: { color: "rgba(14,203,129,.10)" } }, { yAxis: 30 }],
           ],
         },
       }),
@@ -4490,7 +4555,7 @@ function buildChartOption(chart, tf, viewport) {
         })),
       },
       makeLineSeries("MACD", chart.macd, 2, 2, {
-        color: "#0D9488",
+        color: "#2DD4BF",
         width: 1.5,
       }),
       makeLineSeries("Signal", chart.macd_signal, 2, 2, {
