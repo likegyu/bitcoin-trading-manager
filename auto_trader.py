@@ -92,10 +92,13 @@ def load_trade_log(limit: int = 50) -> list[dict]:
     try:
         if not os.path.exists(TRADE_LOG_PATH):
             return []
+        # 파일 전체를 readlines() 로 읽으면 거래가 많을수록 메모리를 선형적으로 소비.
+        # deque(maxlen=N) 로 tail 만 유지하여 메모리 상한을 둔다.
+        from collections import deque
         with open(TRADE_LOG_PATH, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        records = []
-        for line in reversed(lines[-limit * 2:]):
+            tail = deque(f, maxlen=max(1, limit) * 2)
+        records: list[dict] = []
+        for line in reversed(tail):
             line = line.strip()
             if line:
                 try:
