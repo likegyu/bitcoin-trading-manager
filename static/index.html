@@ -224,25 +224,34 @@ button:disabled { cursor: not-allowed; }
 /* ══ Header ═══════════════════════════════════════════════════════ */
 .header {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(220px, auto) 1fr auto;
   align-items: center;
-  column-gap: var(--s-5);
-  row-gap: var(--s-2);
-  padding: var(--s-3) 0 var(--s-4);
-  border-bottom: 1px solid var(--border);
+  column-gap: var(--s-4);
+  row-gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0)),
+    var(--bg-surface);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
   margin-bottom: var(--s-4);
 }
 .header-brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s-3);
-  flex-wrap: wrap;
   min-width: 0;
 }
 .header-symbol {
   display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
   flex-shrink: 0;
 }
 .header-actions {
@@ -255,11 +264,11 @@ button:disabled { cursor: not-allowed; }
   position: relative;
 }
 .header-title {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 800;
   color: var(--text-strong);
   line-height: 1;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   display: inline-flex;
   align-items: center;
 }
@@ -276,15 +285,21 @@ button:disabled { cursor: not-allowed; }
 }
 .header-pair {
   font-size: 12px;
-  color: var(--text-muted);
-  font-weight: 500;
-  margin-left: 4px;
+  color: var(--accent);
+  font-weight: 700;
 }
 .header-price {
-  font-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-canvas);
+  font-size: 21px;
   font-weight: 800;
   color: var(--accent);
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   line-height: 1;
   min-width: 120px;
@@ -398,14 +413,15 @@ a.status-chip { cursor: pointer; }
 
 #donate-popup {
   display: none;
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
+  top: var(--donate-top, 72px);
+  left: var(--donate-left, 12px);
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-sm);
   padding: var(--s-4);
-  width: 300px;
+  width: min(320px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   box-shadow: var(--shadow-lg);
   z-index: 500;
   animation: fadein var(--dur-base) var(--ease);
@@ -2321,7 +2337,7 @@ a.status-chip { cursor: pointer; }
     </div>
     <div class="header-actions">
       <div class="header-donate-wrap">
-        <button class="btn-donate" onclick="toggleDonate(event)">☕ 도네이션</button>
+        <button class="btn-donate" type="button" aria-expanded="false" aria-controls="donate-popup" onclick="toggleDonate(event)">도네이션</button>
         <div id="donate-popup">
           <div class="donate-title">☕ 커피 한 잔 사주세요</div>
           <div class="donate-sub">USDT (TRC20 / Tron 네트워크)</div>
@@ -5395,9 +5411,38 @@ function notifyAnalysisResult(data) {
 updateNotifBtn();
 
 // ══ 도네이션 팝업 ══════════════════════════════
+function positionDonatePopup() {
+  const popup = document.getElementById('donate-popup');
+  const btn = document.querySelector('.btn-donate');
+  if (!popup || !btn) return;
+
+  const margin = 12;
+  const gap = 8;
+  const btnRect = btn.getBoundingClientRect();
+  const popupWidth = Math.min(320, window.innerWidth - margin * 2);
+  const popupHeight = popup.offsetHeight || 160;
+
+  let left = btnRect.right - popupWidth;
+  left = Math.max(margin, Math.min(left, window.innerWidth - popupWidth - margin));
+
+  let top = btnRect.bottom + gap;
+  if (top + popupHeight + margin > window.innerHeight) {
+    top = Math.max(margin, btnRect.top - popupHeight - gap);
+  }
+
+  popup.style.setProperty('--donate-left', `${Math.round(left)}px`);
+  popup.style.setProperty('--donate-top', `${Math.round(top)}px`);
+}
+
 function toggleDonate(e) {
   e.stopPropagation();
-  document.getElementById('donate-popup').classList.toggle('open');
+  const popup = document.getElementById('donate-popup');
+  const btn = document.querySelector('.btn-donate');
+  if (!popup) return;
+  const willOpen = !popup.classList.contains('open');
+  popup.classList.toggle('open', willOpen);
+  if (btn) btn.setAttribute('aria-expanded', String(willOpen));
+  if (willOpen) requestAnimationFrame(positionDonatePopup);
 }
 function copyDonateAddr(e) {
   e.stopPropagation();
@@ -5426,8 +5471,21 @@ function copyDonateAddr(e) {
 }
 document.addEventListener('click', (e) => {
   const p = document.getElementById('donate-popup');
-  if (p && !p.closest('div').contains(e.target)) p.classList.remove('open');
+  const wrap = document.querySelector('.header-donate-wrap');
+  if (p && wrap && !wrap.contains(e.target)) {
+    p.classList.remove('open');
+    const btn = document.querySelector('.btn-donate');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
 });
+window.addEventListener('resize', () => {
+  const p = document.getElementById('donate-popup');
+  if (p?.classList.contains('open')) positionDonatePopup();
+});
+window.addEventListener('scroll', () => {
+  const p = document.getElementById('donate-popup');
+  if (p?.classList.contains('open')) positionDonatePopup();
+}, { passive: true });
 
 // ══════════════════════════════════════════════
 // 자동 주기 분석 — 서버 사이드 스케줄 기반
