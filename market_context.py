@@ -341,9 +341,8 @@ def _fetch_orderbook_imbalance(symbol: str, ctx: dict) -> None:
 
 def _fetch_bybit_oi(ctx: dict, symbol: str = "BTCUSDT") -> None:
     """
-    Bybit v5 API로 BTC 선물 OI(계약수) 수집 후 BTC 단위로 변환.
-    Bybit BTCUSDT 선물 1계약 = 1 USDT (inverse 아님, linear).
-    OI(USDT) / mark_price ≈ OI(BTC).
+    Bybit v5 API로 BTC 선물 OI를 수집.
+    Bybit linear BTCUSDT openInterest 단위는 이미 BTC다.
 
     Binance OI와 합산해 시장 전체 레버리지 규모를 파악.
     """
@@ -365,9 +364,7 @@ def _fetch_bybit_oi(ctx: dict, symbol: str = "BTCUSDT") -> None:
             ctx["bybit_oi"] = ctx["combined_oi"] = None
             return
 
-        oi_usdt    = float(items[0]["openInterest"])
-        mark_price = ctx.get("mark_price") or ctx.get("index_price") or 80000.0
-        bybit_oi_btc = oi_usdt / mark_price
+        bybit_oi_btc = float(items[0]["openInterest"])
 
         ctx["bybit_oi"] = round(bybit_oi_btc, 1)
 
