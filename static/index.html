@@ -5593,8 +5593,13 @@ function showError(msg) {
     btn.textContent = '분석 중...';
     fb.textContent = '';
     try {
-      const res = await fetch(`/api/analyze?password=${encodeURIComponent(pw)}`, {
-        method: 'POST', keepalive: true,
+      // 비밀번호는 쿼리스트링이 아니라 body 로 전송 — 액세스 로그/프록시 로그에
+      // 평문 노출되는 것을 방지.
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+        keepalive: true,
       });
       const data = await res.json();
       if (res.status === 403) {

@@ -103,6 +103,21 @@ app = FastAPI()
 _executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=max(16, (os.cpu_count() or 4) * 4)
 )
+
+
+def _require_owner(password: object) -> None:
+    """OWNER_PASSWORD 를 타이밍-공격 내성으로 검증. 실패 시 HTTP 예외.
+
+    - OWNER_PASSWORD 가 설정되지 않았거나 기본값이면 모든 요청을 403 으로 거절
+      → 로컬-only 기능을 외부에서 우연히 호출하는 사고 방지.
+    """
+    if not runtime_config.owner_password_configured():
+        raise HTTPException(
+            status_code=403,
+            detail="OWNER_PASSWORD 환경변수가 설정되지 않아 이 기능은 비활성화돼 있습니다.",
+        )
+    if not runtime_config.verify_owner_password(password):
+        raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
 CHART_WINDOW = 120
 BASE_OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
 ACCOUNT_STREAM_WS_BASE = "wss://fstream.binance.com/ws"
@@ -169,8 +184,41 @@ def _persist_latest_analysis(payload: dict):
         print(f"[analysis-cache] persist failed: {exc}")
 
 
+# 히스토리 라인 수 캐시 (프로세스 생애 동안 유지) — 매 append 마다 파일 전체를
+# 읽어 길이를 세지 않도록 lazy 초기화 후 카운터만 증가시킨다.
+_analysis_history_line_count: int | None = None
+
+
+def _count_history_lines() -> int:
+    try:
+        if not os.path.exists(ANALYSIS_HISTORY_PATH):
+            return 0
+        count = 0
+        with open(ANALYSIS_HISTORY_PATH, "rb") as f:
+            for _ in f:
+                count += 1
+        return count
+    except Exception:
+        return 0
+
+
+def _truncate_history_file() -> None:
+    """JSONL 히스토리 파일을 최대 건수로 잘라낸다 (tail 만 유지)."""
+    from collections import deque
+    try:
+        with open(ANALYSIS_HISTORY_PATH, "r", encoding="utf-8") as f:
+            tail = deque(f, maxlen=ANALYSIS_HISTORY_MAX)
+        tmp_path = f"{ANALYSIS_HISTORY_PATH}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.writelines(tail)
+        os.replace(tmp_path, ANALYSIS_HISTORY_PATH)
+    except Exception as exc:
+        print(f"[analysis-history] truncate failed: {exc}")
+
+
 def _persist_analysis_history(payload: dict):
     """분석 결과 핵심 필드를 JSONL 히스토리 파일에 누적 저장."""
+    global _analysis_history_line_count
     try:
         os.makedirs(os.path.dirname(ANALYSIS_HISTORY_PATH), exist_ok=True)
         sections = payload.get("report_sections") or {}
@@ -184,16 +232,19 @@ def _persist_analysis_history(payload: dict):
             "summary":     sections.get("summary"),
             "trade_levels": payload.get("trade_levels"),
         }
-        # 추가
         with open(ANALYSIS_HISTORY_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-        # 최대 건수 초과 시 앞쪽 줄 잘라내기
-        with open(ANALYSIS_HISTORY_PATH, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        if len(lines) > ANALYSIS_HISTORY_MAX:
-            with open(ANALYSIS_HISTORY_PATH, "w", encoding="utf-8") as f:
-                f.writelines(lines[-ANALYSIS_HISTORY_MAX:])
+        # lazy 카운터 초기화
+        if _analysis_history_line_count is None:
+            _analysis_history_line_count = _count_history_lines()
+        else:
+            _analysis_history_line_count += 1
+
+        # 최대 건수를 일정 버퍼 이상 초과했을 때만 실제로 잘라냄 → 빈번한 rewrite 방지
+        if _analysis_history_line_count > ANALYSIS_HISTORY_MAX + 50:
+            _truncate_history_file()
+            _analysis_history_line_count = ANALYSIS_HISTORY_MAX
     except Exception as exc:
         print(f"[analysis-history] persist failed: {exc}")
 
@@ -1723,14 +1774,23 @@ async def schedule_set(body: ScheduleSetRequest):
     return _schedule_manager.status()
 
 
+class AnalyzeRequest(BaseModel):
+    # 주인장 쿨다운 우회용 비밀번호 — 선택적. body 로만 받아 URL/액세스로그 노출 방지.
+    password: str | None = None
+
+
 @app.post("/api/analyze")
-async def analyze_start(password: str | None = None):
-    # 주인장 패스워드가 제공됐지만 틀린 경우 403
-    if password and password != runtime_config.OWNER_PASSWORD:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
-    # 패스워드가 맞으면 쿨다운 우회
-    bypass = bool(password and password == runtime_config.OWNER_PASSWORD)
+async def analyze_start(
+    body: AnalyzeRequest | None = None,
+    password: str | None = None,  # 하위 호환: 쿼리스트링으로도 일시적으로 허용
+):
+    # body 우선, 없으면 쿼리스트링 (레거시) — 둘 다 비어있으면 일반 분석
+    supplied = (body.password if body else None) or password
+    bypass = False
+    if supplied:
+        if not runtime_config.verify_owner_password(supplied):
+            raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+        bypass = True
     job, started = await _analysis_manager.start_job(bypass_cooldown=bypass)
     return {"job": job, "started": started}
 
@@ -1942,12 +2002,26 @@ class SetupSaveRequest(BaseModel):
     fred_api_key:       str = ""
 
 
+def _is_local_client(request: Request) -> bool:
+    """요청이 로컬 루프백에서 왔는지 판정 — setup/save 같은 초기화 엔드포인트 보호용."""
+    host = (request.client.host if request.client else "") or ""
+    return host in ("127.0.0.1", "::1", "localhost")
+
+
 @app.post("/api/setup/save")
-async def setup_save(body: SetupSaveRequest):
+async def setup_save(body: SetupSaveRequest, request: Request):
     """
     입력받은 키를 .env 파일에 저장하고 config 모듈을 재로드.
-    로컬 실행 전용.
+
+    보안:
+      - 로컬 루프백 또는 올바른 OWNER_PASSWORD 가 있을 때만 허용.
+        (원격에서 임의 사용자가 API 키를 덮어쓰는 것을 차단)
+      - 입력 값은 CRLF 로 .env 파일을 오염시키지 못하도록 sanitize.
     """
+    # 원격 호출이면 OWNER_PASSWORD 가 필요 (헤더로만 받음 → 로그 유출 방지)
+    if not _is_local_client(request):
+        _require_owner(request.headers.get("X-Owner-Password"))
+
     import config as _cfg
     from pathlib import Path
 
@@ -1962,12 +2036,12 @@ async def setup_save(body: SetupSaveRequest):
                 k, _, v = line.partition("=")
                 existing[k.strip()] = v.strip()
 
-    # 새 값 병합 (빈 문자열이면 기존 값 유지)
+    # 새 값 병합 — CRLF/NUL 제거하여 .env 파일 오염/환경변수 주입 방지
     updates = {
-        "CLAUDE_API_KEY":     body.claude_api_key,
-        "BINANCE_API_KEY":    body.binance_api_key,
-        "BINANCE_SECRET_KEY": body.binance_secret_key,
-        "FRED_API_KEY":       body.fred_api_key,
+        "CLAUDE_API_KEY":     runtime_config.sanitize_env_value(body.claude_api_key),
+        "BINANCE_API_KEY":    runtime_config.sanitize_env_value(body.binance_api_key),
+        "BINANCE_SECRET_KEY": runtime_config.sanitize_env_value(body.binance_secret_key),
+        "FRED_API_KEY":       runtime_config.sanitize_env_value(body.fred_api_key),
     }
     for k, v in updates.items():
         if v:
@@ -1995,44 +2069,52 @@ async def setup_save(body: SetupSaveRequest):
 @app.get("/api/analysis-history")
 async def analysis_history_endpoint(limit: int = 100):
     """저장된 분석 히스토리 반환 (최신순)."""
+    # 방어적 경계 — 음수/비현실적 값은 상식적 범위로 clamp.
+    limit = max(1, min(limit, ANALYSIS_HISTORY_MAX))
+    from collections import deque
     entries: list = []
     try:
         if os.path.exists(ANALYSIS_HISTORY_PATH):
+            # 파일 전체를 메모리에 올리지 않고 마지막 N 줄만 유지.
             with open(ANALYSIS_HISTORY_PATH, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            entries.append(json.loads(line))
-                        except Exception:
-                            pass
+                tail = deque(f, maxlen=limit)
+            for line in tail:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        pass
     except Exception as exc:
         print(f"[analysis-history] read failed: {exc}")
-    return {"entries": list(reversed(entries[-limit:]))}
+    return {"entries": list(reversed(entries))}
 
 
 @app.get("/api/performance")
 async def performance_endpoint(days: int = 30):
     """account_history.jsonl 기반 성과 지표 반환."""
     from datetime import datetime, timezone, timedelta
+    # 방어적 경계 — 최대 1년, 최소 1일.
+    days = max(1, min(days, 365))
     history_path = os.path.join(BASE_DIR, "data", "account_history.jsonl")
-    entries: list = []
+    # cutoff 를 먼저 계산하여 파싱 단계에서 바로 필터링 → 메모리 사용량 절감
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+    snapshots: list = []
     try:
         if os.path.exists(history_path):
             with open(history_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if line:
-                        try:
-                            entries.append(json.loads(line))
-                        except Exception:
-                            pass
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except Exception:
+                        continue
+                    if (entry.get("observed_ts") or 0) >= cutoff:
+                        snapshots.append(entry)
     except Exception as exc:
         return {"error": str(exc), "snapshots": [], "daily": []}
-
-    # days 범위 필터
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
-    snapshots = [e for e in entries if (e.get("observed_ts") or 0) >= cutoff]
 
     # 일별 집계 (KST 기준 날짜로 그룹)
     from collections import defaultdict
@@ -2097,8 +2179,7 @@ async def owner_message_get():
 async def owner_message_post(body: OwnerAnnounceRequest):
     """주인장 메시지 등록 (비밀번호 인증 필요)."""
     global _owner_message
-    if body.password != runtime_config.OWNER_PASSWORD:
-        raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+    _require_owner(body.password)
     text = body.text.strip()
     if not text:
         # 빈 문자열이면 메시지 삭제
@@ -2158,6 +2239,13 @@ async def cheers_post(body: CheerRequest, request: Request):
         _cheer_store.append(entry)
         _cheer_ip_last[ip] = now
 
+        # IP 맵 누수 방지 — TTL 지난 레코드를 주기적으로 정리.
+        # 매 요청마다 제거하면 O(n) 이 반복되므로 크기가 커졌을 때만 실행.
+        if len(_cheer_ip_last) > 1024:
+            stale_cutoff = now - _CHEER_TTL_SEC
+            for stale_ip in [k for k, v in _cheer_ip_last.items() if v < stale_cutoff]:
+                _cheer_ip_last.pop(stale_ip, None)
+
     return {"ok": True, "id": entry["id"]}
 
 
@@ -2168,8 +2256,9 @@ async def chzzk_live():
     url = f"https://api.chzzk.naver.com/service/v2/channels/{CHANNEL_ID}/live-detail"
 
     def _fetch():
-        import requests as _req
-        resp = _req.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        # 프록시 env 무시 공유 세션 사용 — 연결 재사용 + MITM 방지.
+        from http_client import _session as _http
+        resp = _http.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
         return resp.json()
 
     try:
@@ -2250,6 +2339,18 @@ class AutoTraderConfig(BaseModel):
     dry_run: bool = True
 
 
+def _require_owner_or_local(request: Request) -> None:
+    """위험 엔드포인트 가드 — 로컬 루프백이면 통과, 아니면 OWNER_PASSWORD 헤더 필수.
+
+    자동매매 토글/강제청산/잔고 리셋 등은 자금에 직접 영향을 주므로 외부 노출시
+    최소한 OWNER_PASSWORD 를 요구한다. 쿼리/바디가 아닌 X-Owner-Password 헤더로만
+    받아 URL·액세스 로그 유출을 방지.
+    """
+    if _is_local_client(request):
+        return
+    _require_owner(request.headers.get("X-Owner-Password"))
+
+
 @app.get("/api/autotrader")
 async def autotrader_status():
     """자동매매 현재 설정 + 최근 10건 매매 기록."""
@@ -2259,8 +2360,9 @@ async def autotrader_status():
 
 
 @app.post("/api/autotrader")
-async def autotrader_config(body: AutoTraderConfig):
+async def autotrader_config(body: AutoTraderConfig, request: Request):
     """자동매매 ON/OFF 및 드라이런 설정."""
+    _require_owner_or_local(request)
     if not _AUTO_TRADER_AVAILABLE or _auto_trader is None:
         raise HTTPException(status_code=503, detail="auto_trader 모듈을 로드할 수 없습니다.")
     result = _auto_trader.set_config(enabled=body.enabled, dry_run=body.dry_run)
@@ -2272,12 +2374,15 @@ async def autotrader_trades(limit: int = 50):
     """매매 로그 조회 (최근 N건)."""
     if not _AUTO_TRADER_AVAILABLE or _auto_trader is None:
         raise HTTPException(status_code=503, detail="auto_trader 모듈을 로드할 수 없습니다.")
+    # 경계값 clamp — 비현실적 limit 방어
+    limit = max(1, min(limit, 500))
     return {"trades": _auto_trader.load_trade_log(limit=limit)}
 
 
 @app.post("/api/autotrader/close")
-async def autotrader_close():
+async def autotrader_close(request: Request):
     """현재 포지션 즉시 청산 (긴급 청산용)."""
+    _require_owner_or_local(request)
     if not _AUTO_TRADER_AVAILABLE or _auto_trader is None:
         raise HTTPException(status_code=503, detail="auto_trader 모듈을 로드할 수 없습니다.")
     import trader as _trader_mod
@@ -2301,8 +2406,12 @@ async def autotrader_balance():
 
 
 @app.post("/api/autotrader/balance/reset")
-async def autotrader_balance_reset(initial: float = 10000):
+async def autotrader_balance_reset(request: Request, initial: float = 10000):
     """드라이런 가상 잔고 초기화 (initial: 초기 잔고 금액)."""
+    _require_owner_or_local(request)
+    # 음수/0/비정상 큰 값 차단 — 계산 불안정성과 오작동 방지.
+    if not (0 < initial <= 1e9):
+        raise HTTPException(status_code=422, detail="initial 값은 0 < initial ≤ 1e9 범위여야 합니다.")
     try:
         import backtester as _bt
     except ImportError as exc:

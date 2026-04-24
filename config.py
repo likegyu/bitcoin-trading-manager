@@ -4,6 +4,7 @@
 # ⚠️ 보안 주의: API 키는 .env 파일에서 관리합니다.
 #    .gitignore에 .env를 반드시 추가하세요!
 
+import hmac
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -25,6 +26,47 @@ def _safe_env(key: str, default: str = "") -> str:
     """
     val = os.getenv(key, default) or default
     return val.replace("\r", "").replace("\n", "").strip()
+
+
+# 기본값 "changeme" 와 동일한 값은 "비밀번호 미설정" 으로 취급하기 위한 상수
+_OWNER_PASSWORD_DEFAULT = "changeme"
+
+
+def owner_password_configured() -> bool:
+    """OWNER_PASSWORD 가 실제로 설정되어 있는지 여부.
+
+    - 비어 있으면 False
+    - 기본값 'changeme' 그대로면 False
+    → 실제로 비밀번호를 바꾼 경우에만 인증 기능을 허용한다.
+    """
+    pw = OWNER_PASSWORD
+    return bool(pw) and pw != _OWNER_PASSWORD_DEFAULT
+
+
+def verify_owner_password(supplied: object) -> bool:
+    """타이밍-공격 내성으로 OWNER_PASSWORD 를 비교.
+
+    - 비밀번호가 설정되지 않았으면 어떤 값이 와도 False (기능 비활성)
+    - 입력이 str 이 아니면 False
+    - hmac.compare_digest 로 상수 시간 비교
+    """
+    if not owner_password_configured():
+        return False
+    if not isinstance(supplied, str):
+        return False
+    return hmac.compare_digest(supplied.encode("utf-8"), OWNER_PASSWORD.encode("utf-8"))
+
+
+def sanitize_env_value(value: object) -> str:
+    """.env 파일에 기록할 값을 안전하게 정리.
+
+    - str 이 아니면 빈 문자열
+    - CR/LF/NUL 제거 (줄바꿈 삽입 시 추가 환경변수 주입 가능)
+    - 앞뒤 공백 제거
+    """
+    if not isinstance(value, str):
+        return ""
+    return value.replace("\r", "").replace("\n", "").replace("\x00", "").strip()
 
 
 CLAUDE_API_KEY = _safe_env("CLAUDE_API_KEY")
@@ -76,7 +118,7 @@ AUTO_TRADE_REVERSAL_MIN_HOLD    = int(_safe_env("AUTO_TRADE_REVERSAL_MIN_HOLD", 
 AUTO_TRADE_REVERSAL_MIN_CONF    = int(_safe_env("AUTO_TRADE_REVERSAL_MIN_CONF",    "67"))  # 반전 최소 확신도 (진입보다 높게)
 AUTO_TRADE_REVERSAL_MAX_PER_DAY = int(_safe_env("AUTO_TRADE_REVERSAL_MAX_PER_DAY", "2"))   # 하루 최대 반전 횟수
 
-OWNER_PASSWORD = _safe_env("OWNER_PASSWORD", "changeme")  # 주인장 확성기 비밀번호
+OWNER_PASSWORD = _safe_env("OWNER_PASSWORD", _OWNER_PASSWORD_DEFAULT)  # 주인장 확성기 비밀번호
 
 # 분석할 시간봉 목록
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
