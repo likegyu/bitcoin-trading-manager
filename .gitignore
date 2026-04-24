@@ -1,5 +1,6 @@
 # API 키 — 절대 커밋 금지
 .env
+*.pem
 
 # Python
 __pycache__/
