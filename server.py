@@ -109,7 +109,11 @@ ACCOUNT_STREAM_WS_BASE = "wss://fstream.binance.com/ws"
 ACCOUNT_STREAM_KEEPALIVE_SECS = 50 * 60
 ACCOUNT_REFRESH_DEBOUNCE_SECS = 0.35
 ACCOUNT_REFRESH_MIN_INTERVAL_SECS = 1.5
-MARKET_STREAM_WS_BASE = "wss://fstream.binance.com/stream"
+MARKET_STREAM_WS_BASE = "wss://fstream.binance.com/stream"   # 레거시 (IP 차단 시 미사용)
+BYBIT_MARKET_WS_URL   = "wss://stream.bybit.com/v5/public/linear"
+# Bybit ↔ TIMEFRAMES 변환 테이블
+_TF_TO_BYBIT  = {"5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D"}
+_BYBIT_TF_MAP = {v: k for k, v in _TF_TO_BYBIT.items()}
 MACRO_REFRESH_SECS = 60 * 60
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LATEST_ANALYSIS_PATH   = os.path.join(BASE_DIR, "data", "latest_analysis.json")
@@ -605,34 +609,96 @@ class MarketStreamManager:
         self._ready.set()
         print(f"[market-stream] ready! tf_data={list(tf_data.keys())} price={price}")
 
-    def _stream_url(self) -> str:
-        symbol = self.symbol.lower()
-        streams = [f"{symbol}@aggTrade"] + [f"{symbol}@kline_{tf}" for tf in TIMEFRAMES]
-        joined = "/".join(streams)
-        return f"{MARKET_STREAM_WS_BASE}?streams={joined}"
+    def _bybit_subscribe_args(self) -> list[str]:
+        """Bybit v5 WebSocket 구독 topic 목록 생성."""
+        sym = self.symbol.upper()
+        topics = [f"publicTrade.{sym}"]
+        for tf in TIMEFRAMES:
+            interval = _TF_TO_BYBIT.get(tf)
+            if interval:
+                topics.append(f"kline.{interval}.{sym}")
+        return topics
+
+    @staticmethod
+    def _normalize_bybit_kline(kline: dict, interval: str) -> dict:
+        """
+        Bybit kline 데이터를 기존 Binance kline 포맷으로 변환.
+        기존 _enqueue_kline / _process_kline / _forming_kline 로직을 그대로 재사용하기 위함.
+        """
+        tf = _BYBIT_TF_MAP.get(interval, "")
+        return {
+            "i": tf,
+            "t": kline.get("start"),       # 캔들 시작 ms (Binance kline["t"])
+            "o": kline.get("open"),
+            "h": kline.get("high"),
+            "l": kline.get("low"),
+            "c": kline.get("close"),
+            "v": kline.get("volume"),
+            "x": kline.get("confirm", False),  # True = 확정 캔들 (Binance kline["x"])
+        }
 
     async def _consume_stream(self):
+        """
+        Bybit Linear Perpetual WebSocket 스트림 수신.
+        Binance fstream.binance.com 은 특정 AWS IP 대역에서 스트림 데이터를 무음 차단하므로
+        Bybit stream.bybit.com 으로 교체. OHLCV 히스토리·현재가 초기화는 Binance REST 유지.
+        """
         self._ws_connect_count += 1
-        print(f"[market-stream] WebSocket 연결 시도 #{self._ws_connect_count}: {self._stream_url()}")
+        args = self._bybit_subscribe_args()
+        print(f"[market-stream] Bybit WebSocket 연결 시도 #{self._ws_connect_count}: {BYBIT_MARKET_WS_URL}")
+        print(f"[market-stream] 구독 topics: {args}")
+
         async with websockets.connect(
-            self._stream_url(),
-            ping_interval=None,   # Binance는 WS 프로토콜 ping frame 미지원 → None 필수
+            BYBIT_MARKET_WS_URL,
+            ping_interval=None,   # Bybit은 JSON ping {"op":"ping"} 사용 — 아래 _bybit_ping 태스크에서 처리
             ping_timeout=None,
             close_timeout=5,
             max_size=2**20,
         ) as ws:
-            print(f"[market-stream] WebSocket 연결 성공 #{self._ws_connect_count}")
-            async for raw_msg in ws:
-                payload = json.loads(raw_msg)
-                data = payload.get("data", payload)
-                event_type = data.get("e")
+            # 구독 메시지 전송
+            await ws.send(json.dumps({"op": "subscribe", "args": args}))
+            print(f"[market-stream] Bybit WebSocket 연결 성공 #{self._ws_connect_count}")
 
-                if event_type == "aggTrade":
-                    self._trade_count += 1
-                    await self._handle_trade(data)
-                elif event_type == "kline":
-                    self._kline_count += 1
-                    await self._enqueue_kline(data.get("k", {}))
+            # Bybit 연결 유지: 20초마다 JSON ping 필요 (미전송 시 30초 후 서버가 끊음)
+            async def _bybit_ping():
+                while True:
+                    await asyncio.sleep(20)
+                    try:
+                        await ws.send(json.dumps({"op": "ping"}))
+                    except Exception:
+                        break
+
+            ping_task = asyncio.create_task(_bybit_ping(), name="bybit-ping")
+            try:
+                async for raw_msg in ws:
+                    payload = json.loads(raw_msg)
+                    topic: str = payload.get("topic", "")
+                    if not topic:
+                        # pong / subscribe confirm — 무시
+                        continue
+
+                    if topic.startswith("publicTrade."):
+                        # 실시간 체결 이벤트 → 가격 갱신
+                        for trade in payload.get("data", []):
+                            self._trade_count += 1
+                            price = _safe(trade.get("p"))
+                            if price is None:
+                                continue
+                            async with self._lock:
+                                self._price = price
+                                self._last_update = _now_label()
+                            self._schedule_price_flush()
+
+                    elif topic.startswith("kline."):
+                        # topic 형식: "kline.{interval}.{symbol}"
+                        parts = topic.split(".")
+                        interval = parts[1] if len(parts) >= 2 else ""
+                        for kline in payload.get("data", []):
+                            self._kline_count += 1
+                            normalized = self._normalize_bybit_kline(kline, interval)
+                            await self._enqueue_kline(normalized)
+            finally:
+                ping_task.cancel()
 
     async def _handle_trade(self, data: dict):
         price = _safe(data.get("p"))
@@ -1636,6 +1702,7 @@ async def debug_price():
         "trade_events_received": _market_stream._trade_count,
         "kline_events_received": _market_stream._kline_count,
         "ws_reconnect_count": _market_stream._ws_connect_count,
+        "ws_source": "bybit",  # fstream.binance.com → stream.bybit.com 으로 교체
     }
 
 
