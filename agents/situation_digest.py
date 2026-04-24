@@ -235,7 +235,7 @@ def summarize_situation_tags(
 
     # 3) 거시 — regime 필드만 사용 (수치는 노이즈)
     if macro_snapshot:
-        for key in ("DFII10", "DGS2", "DTWEXBGS", "STABLE_MCAP", "USDT_DOM", "BTC_DOM"):
+        for key in ("TNX_10Y", "FVX_5Y", "DXY", "STABLE_MCAP", "USDT_DOM", "BTC_DOM"):
             entry = macro_snapshot.get(key)
             if not isinstance(entry, dict):
                 continue

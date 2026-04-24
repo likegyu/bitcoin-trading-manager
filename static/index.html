@@ -2372,17 +2372,17 @@ a.status-chip { cursor: pointer; }
   <!-- 거시경제 레짐 카드 행 -->
   <div class="macro-section-label">거시경제 레짐</div>
   <div class="macro-row" id="macro-row">
-    <div class="macro-card" id="macro-DFII10">
-      <div class="card-label">10Y 실질금리</div>
+    <div class="macro-card" id="macro-TNX_10Y">
+      <div class="card-label">10Y 국채금리</div>
       <div class="card-value" style="color:var(--text-muted);">—</div>
       <div class="card-sub" style="color:var(--text-muted);">로딩 중</div>
     </div>
-    <div class="macro-card" id="macro-DGS2">
-      <div class="card-label">2Y 국채금리</div>
+    <div class="macro-card" id="macro-FVX_5Y">
+      <div class="card-label">5Y 국채금리</div>
       <div class="card-value" style="color:var(--text-muted);">—</div>
       <div class="card-sub" style="color:var(--text-muted);">로딩 중</div>
     </div>
-    <div class="macro-card" id="macro-DTWEXBGS">
+    <div class="macro-card" id="macro-DXY">
       <div class="card-label">달러 인덱스</div>
       <div class="card-value" style="color:var(--text-muted);">—</div>
       <div class="card-sub" style="color:var(--text-muted);">로딩 중</div>
@@ -5796,17 +5796,17 @@ function renderDailyChart(daily) {
 // 거시경제 지표
 // ══════════════════════════════════════════════
 const MACRO_CFG = {
-  DFII10:     { negativeGood: true  },   // 금리↑ = BTC 부정
-  DGS2:       { negativeGood: true  },
-  DTWEXBGS:   { negativeGood: true  },   // 달러↑ = BTC 부정
+  TNX_10Y:    { negativeGood: true  },   // 금리↑ = BTC 부정
+  FVX_5Y:     { negativeGood: true  },
+  DXY:        { negativeGood: true  },   // 달러↑ = BTC 부정
   STABLE_MCAP:{ negativeGood: false },
   USDT_DOM:   { negativeGood: false },
   BTC_DOM:    { negativeGood: false },
 };
 const MACRO_DELTA_THRESHOLD = {
-  DFII10: 0.03,
-  DGS2: 0.03,
-  DTWEXBGS: 0.15,
+  TNX_10Y: 0.03,
+  FVX_5Y: 0.03,
+  DXY: 0.20,
   STABLE_MCAP: 0.20,
   USDT_DOM: 0.10,
   BTC_DOM: 0.10,
