@@ -13,12 +13,14 @@ from macro_history import (
 
 def _macro_sample(day_index: int) -> dict:
     return {
-        "DFII10": {"value": 1.50 + day_index * 0.03},
-        "DGS2": {"value": 3.80 - day_index * 0.02},
-        "DTWEXBGS": {"value": 118.0 + day_index * 0.40},
+        "TNX_10Y": {"value": 4.20 + day_index * 0.03},
+        "FVX_5Y": {"value": 3.80 - day_index * 0.02},
+        "DXY": {"value": 103.0 + day_index * 0.40},
         "STABLE_MCAP": {"value": 205.0 + day_index * 1.50},
         "USDT_DOM": {"value": 63.0 - day_index * 0.20},
         "BTC_DOM": {"value": 58.0 + day_index * 0.35},
+        "HYG_LQD": {"value": 0.8200 + day_index * 0.0015},
+        "IBIT_PX": {"value": 55.00 + day_index * 0.80},
     }
 
 
@@ -62,10 +64,14 @@ class MacroHistoryTests(unittest.TestCase):
         summary = self.timeline._build_summary_locked(None)
         week = summary["windows"]["week"]["metrics"]
 
-        self.assertEqual(week["DFII10"]["trend"], "상승")
-        self.assertEqual(week["DGS2"]["trend"], "하락")
+        self.assertEqual(week["TNX_10Y"]["trend"], "상승")
+        self.assertEqual(week["FVX_5Y"]["trend"], "하락")
         self.assertEqual(week["BTC_DOM"]["trend"], "상승")
         self.assertEqual(week["USDT_DOM"]["trend"], "하락")
+        # HYG_LQD 주간 변화 = 7*0.0015 = 0.0105, threshold=0.002 → 상승
+        self.assertEqual(week["HYG_LQD"]["trend"], "상승")
+        # IBIT_PX 주간 변화 = 7*0.80 = 5.6, threshold=0.50 → 상승
+        self.assertEqual(week["IBIT_PX"]["trend"], "상승")
 
     def test_attach_to_macro_populates_change_fields(self):
         latest_macro = _macro_sample(7)

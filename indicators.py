@@ -207,12 +207,15 @@ def add_supertrend(
 
 # ── 실현변동성 (Realized Volatility) ─────────
 # TF별 캔들 수 → 연환산 계수
+# 크립토 시장은 24/7 거래 → 전통 주식의 영업일 252 가 아니라 365 사용.
+# (과거 252 를 쓰면 DVOL 내재변동성 대비 약 √(252/365) ≈ 83%, 즉 RV 가
+#  17% 저평가되어 IV 프리미엄 판정이 편향됨.)
 _RV_ANNUALIZE = {
-    "1d":  252,
-    "4h":  252 * 6,
-    "1h":  252 * 24,
-    "15m": 252 * 96,
-    "5m":  252 * 288,
+    "1d":  365,
+    "4h":  365 * 6,
+    "1h":  365 * 24,
+    "15m": 365 * 96,
+    "5m":  365 * 288,
 }
 
 def add_realized_vol(df: pd.DataFrame, tf: str = "1d", period: int = 20) -> pd.DataFrame:
@@ -226,7 +229,7 @@ def add_realized_vol(df: pd.DataFrame, tf: str = "1d", period: int = 20) -> pd.D
       RV > DVOL : IV 할인 → 옵션 매수 유리 / 변동성 확대 예상
       RV < DVOL : IV 프리미엄 → 방향 불확실성 높게 pricing 중
     """
-    ann_factor = _RV_ANNUALIZE.get(tf, 252)
+    ann_factor = _RV_ANNUALIZE.get(tf, 365)
     log_ret    = np.log(df["close"] / df["close"].shift(1))
 
     rv_long = log_ret.rolling(period).std() * np.sqrt(ann_factor) * 100

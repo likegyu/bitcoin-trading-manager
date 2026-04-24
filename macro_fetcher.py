@@ -1,73 +1,27 @@
 # =============================================
 # 거시경제 지표 수집 모듈
-# ─ FRED : DFEDTARU (기준금리 상단), DFII10 (10Y 실질금리),
-#           DGS2 (2Y 국채시장금리), DTWEXBGS (달러 인덱스)
+# ─ yfinance  : ^TNX (10Y 금리), ^FVX (5Y 금리), DX-Y.NYB (달러 인덱스),
+#                ^GSPC, ^IXIC, ^VIX, GC=F, HYG, LQD, IBIT
 # ─ DefiLlama : 전체 스테이블코인 시총, USDT 도미넌스
+# ─ CoinGecko : BTC 도미넌스, ETH/BTC 비율
+#
+# 과거 FRED 의존성은 제거됨 — FRED 는 영업일 기준 T+1 지연이라
+# 서버 스냅샷(30분 주기)과 동기화할 때 24h/72h 변화가 0 으로 찍히는
+# 문제가 있어, 동일 지표군을 yfinance 실시간 데이터로 대체함.
 # =============================================
-import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 from typing import Optional
-from config import FRED_API_KEY
 from macro_history import attach_macro_history_summary
 from http_client import _session as _http  # 프록시 환경변수 무시 세션
 
-FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
-# ── FRED 시리즈 정의 ──────────────────────────────────────────
-# DFEDTARU : Fed Funds Target Rate Upper Bound (실제 FOMC 기준금리 상단, 일별)
-#   → 25bp 단위로 계단식 변화. 시장금리(DGS2)와 달리 FOMC 결정일에만 변동.
-# DGS2     : 2Y Treasury Yield (시장 기대 반영 — 기준금리 예상치에 선행)
-# DFII10   : 10Y TIPS Yield (실질금리)
-# DTWEXBGS : Broad Dollar Index
-_FRED_SERIES = {
-    "DFEDTARU": {"label": "기준금리(상단)",  "unit": "%",  "fmt": ".2f"},
-    "DFII10":   {"label": "10Y 실질금리",   "unit": "%",  "fmt": "+.2f"},
-    "DGS2":     {"label": "2Y 국채금리",    "unit": "%",  "fmt": "+.2f"},
-    "DTWEXBGS": {"label": "달러 인덱스",    "unit": "",   "fmt": ".2f"},
-}
-
-
-def _fetch_fred(series_id: str, days: int = 60) -> Optional[pd.Series]:
-    """
-    FRED API로 시계열을 수집해 pd.Series(index=datetime)로 반환.
-    API 키 없거나 실패 시 None.
-    """
-    if not FRED_API_KEY:
-        return None
-    try:
-        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        r = _http.get(
-            FRED_BASE,
-            params={
-                "series_id":        series_id,
-                "api_key":          FRED_API_KEY,
-                "file_type":        "json",
-                "sort_order":       "asc",
-                "observation_start": start,
-            },
-            timeout=10,
-        )
-        r.raise_for_status()
-        obs = r.json().get("observations", [])
-        if not obs:
-            return None
-
-        s = pd.Series(
-            {o["date"]: float(o["value"])
-             for o in obs if o["value"] not in (".", "")},
-            dtype=float,
-        )
-        s.index = pd.to_datetime(s.index)
-        return s.sort_index()
-    except Exception:
-        return None
-
+# ── 시계열 통계 공통 헬퍼 ─────────────────────────────────────
 
 def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> dict:
     """
     pd.Series로부터 최신값 · 변화율 · 최근 시계열 요약을 계산.
+    입력 시리즈가 비어있거나 길이가 짧으면 None 필드로 채운 구조를 반환.
     """
     empty = {
         "value": None,
@@ -84,7 +38,10 @@ def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> di
         return empty
 
     latest = float(s.iloc[-1])
-    latest_date = s.index[-1].strftime("%Y-%m-%d")
+    try:
+        latest_date = s.index[-1].strftime("%Y-%m-%d")
+    except Exception:
+        latest_date = None
 
     # 5일 변화 (영업일 기준: -6번째 인덱스)
     if len(s) >= 6:
@@ -119,7 +76,6 @@ def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> di
             return "하락"
         return "중립"
 
-    # 레짐 플래그 (5일 변화 기준)
     regime = _classify_change(change5d, change_threshold)
 
     # 20일 추세는 최근 20개 구간의 앞/뒤 평균 차이로 판단
@@ -159,13 +115,16 @@ def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> di
 
     recent_points = None
     if len(s) >= 3:
-        recent_points = [
-            {
-                "date": idx.strftime("%m-%d"),
-                "value": float(value),
-            }
-            for idx, value in s.iloc[-3:].items()
-        ]
+        try:
+            recent_points = [
+                {
+                    "date": idx.strftime("%m-%d"),
+                    "value": float(value),
+                }
+                for idx, value in s.iloc[-3:].items()
+            ]
+        except Exception:
+            recent_points = None
 
     return {
         "value":         latest,
@@ -180,6 +139,138 @@ def _compute_stats(s: Optional[pd.Series], change_threshold: float = 0.05) -> di
     }
 
 
+# ── yfinance helpers ─────────────────────────────────────────
+
+def _extract_close(data) -> Optional[pd.Series]:
+    """yfinance.download 결과에서 Close 시리즈를 안전하게 추출."""
+    try:
+        if data is None or (hasattr(data, "empty") and data.empty):
+            return None
+        close = data["Close"].dropna()
+        if isinstance(close, pd.DataFrame):
+            if close.shape[1] == 0:
+                return None
+            close = close.iloc[:, 0].dropna()
+        return close if len(close) > 0 else None
+    except Exception:
+        return None
+
+
+def _yf_close_series(ticker: str, period: str = "60d") -> Optional[pd.Series]:
+    """yfinance로 단일 티커 종가 시계열 조회."""
+    try:
+        import yfinance as yf
+        data = yf.download(
+            ticker, period=period, interval="1d",
+            progress=False, auto_adjust=True, threads=False,
+        )
+        return _extract_close(data)
+    except Exception:
+        return None
+
+
+# ── 시장 금리·달러 인덱스 (yfinance 실시간) ───────────────────
+
+def _fetch_market_rates() -> dict:
+    """
+    실시간 시장금리·달러 지수 수집.
+
+    티커 규칙:
+      ^TNX  — 10Y Treasury Yield. 값은 'yield × 10' 형식(예: 42.5 → 4.25%).
+      ^FVX  — 5Y  Treasury Yield. 동일 규칙.
+      DX-Y.NYB — ICE 달러 인덱스 (실제 값).
+
+    각 키별 pd.Series(종가)를 반환. 실패 시 None.
+    """
+    out: dict[str, Optional[pd.Series]] = {"TNX_10Y": None, "FVX_5Y": None, "DXY": None}
+
+    for ticker, key, scale in (
+        ("^TNX",     "TNX_10Y", 0.1),
+        ("^FVX",     "FVX_5Y",  0.1),
+        ("DX-Y.NYB", "DXY",     1.0),
+    ):
+        s = _yf_close_series(ticker, period="90d")
+        if s is not None and len(s) > 0:
+            out[key] = (s * scale).astype(float)
+    return out
+
+
+# ── 신용 스프레드 프록시: HYG/LQD ─────────────────────────────
+
+def _fetch_credit_spread() -> Optional[pd.Series]:
+    """
+    HYG (하이일드 채권 ETF) / LQD (투자등급 채권 ETF) 비율.
+
+    비율↓ = 하이일드 스프레드 확대 = 리스크오프 선행 신호.
+    BTC 와 상관이 높고(특히 하락장 방향), 전통 시장 스트레스 → 코인 디레버리지를
+    먼저 신호한다.
+    """
+    try:
+        import yfinance as yf
+        data = yf.download(
+            ["HYG", "LQD"], period="90d", interval="1d",
+            progress=False, auto_adjust=True, threads=False,
+        )
+        close_df = data["Close"].dropna() if data is not None else None
+        if close_df is None or close_df.empty:
+            return None
+        # MultiIndex 케이스 방어
+        if isinstance(close_df, pd.Series):
+            return None
+        if "HYG" not in close_df.columns or "LQD" not in close_df.columns:
+            return None
+        ratio = (close_df["HYG"] / close_df["LQD"]).dropna()
+        return ratio if len(ratio) > 0 else None
+    except Exception:
+        return None
+
+
+# ── 현물 BTC ETF: IBIT ───────────────────────────────────────
+
+def _fetch_btc_etf() -> dict:
+    """
+    IBIT (BlackRock iShares Bitcoin Trust) 시계열.
+    기관 수급 프록시 — 거래량/20MA 비율로 참여도 증감을 추정.
+
+    반환:
+      {
+        "close_series": pd.Series | None,
+        "vol_latest":  float | None,
+        "vol_20ma":    float | None,
+        "vol_ratio":   float | None,  # latest / 20MA
+      }
+    """
+    out: dict = {
+        "close_series": None, "vol_latest": None, "vol_20ma": None, "vol_ratio": None,
+    }
+    try:
+        import yfinance as yf
+        data = yf.download(
+            "IBIT", period="60d", interval="1d",
+            progress=False, auto_adjust=True, threads=False,
+        )
+        if data is None or (hasattr(data, "empty") and data.empty):
+            return out
+
+        out["close_series"] = _extract_close(data)
+
+        try:
+            vol = data["Volume"].dropna()
+            if isinstance(vol, pd.DataFrame):
+                vol = vol.iloc[:, 0].dropna()
+            if len(vol) >= 20:
+                vol_20ma   = float(vol.iloc[-20:].mean())
+                vol_latest = float(vol.iloc[-1])
+                out["vol_latest"] = vol_latest
+                out["vol_20ma"]   = vol_20ma
+                out["vol_ratio"]  = (vol_latest / vol_20ma) if vol_20ma > 0 else None
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return out
+
+
 # ── 전통 시장 지표 (yfinance) ─────────────────────────────────
 
 def _fetch_traditional_markets() -> dict:
@@ -189,21 +280,12 @@ def _fetch_traditional_markets() -> dict:
       - ^IXIC  : 나스닥 컴포지트
       - ^VIX   : CBOE 변동성 지수
       - GC=F   : 금 선물 (USD/oz)
-
-    반환 구조:
-      {
-        "SPX":  {"price": float, "chg_pct": float, "prev_close": float},
-        "NDX":  {...},
-        "VIX":  {"price": float, "chg_pct": float},
-        "GOLD": {"price": float, "chg_pct": float},
-        "error": str | None,
-      }
     """
     result: dict = {
         "SPX": None, "NDX": None, "VIX": None, "GOLD": None, "error": None,
     }
     try:
-        import yfinance as yf  # 런타임 임포트 — 설치 안 됐을 때 전체 모듈 블로킹 방지
+        import yfinance as yf
 
         tickers_map = {
             "^GSPC": "SPX",
@@ -212,7 +294,6 @@ def _fetch_traditional_markets() -> dict:
             "GC=F":  "GOLD",
         }
 
-        # period="5d"로 충분 — 하루 종가 2개(전일·최신)만 필요
         data = yf.download(
             list(tickers_map.keys()),
             period="5d",
@@ -222,7 +303,6 @@ def _fetch_traditional_markets() -> dict:
             threads=False,
         )
 
-        # MultiIndex DataFrame — data.get() 은 MultiIndex에서 None 반환하므로 직접 접근
         try:
             close_df = data["Close"]
         except KeyError:
@@ -259,15 +339,9 @@ def _fetch_traditional_markets() -> dict:
 # ── CoinGecko BTC 도미넌스 ───────────────────────────────────
 
 def _fetch_btc_dominance() -> Optional[float]:
-    """
-    CoinGecko 무료 글로벌 엔드포인트에서 BTC 도미넌스(%) 수집.
-    키 불필요.
-    """
+    """CoinGecko 무료 글로벌 엔드포인트에서 BTC 도미넌스(%) 수집."""
     try:
-        r = _http.get(
-            "https://api.coingecko.com/api/v3/global",
-            timeout=10,
-        )
+        r = _http.get("https://api.coingecko.com/api/v3/global", timeout=10)
         r.raise_for_status()
         return float(r.json()["data"]["market_cap_percentage"]["btc"])
     except Exception:
@@ -277,22 +351,11 @@ def _fetch_btc_dominance() -> Optional[float]:
 # ── ETH/BTC 비율 ─────────────────────────────────────────────
 
 def _fetch_eth_btc_ratio() -> dict:
-    """
-    CoinGecko에서 ETH·BTC USD 가격을 수집해 ETH/BTC 비율과 24h 변화율을 계산.
-    키 불필요.
-
-    반환:
-      {
-        "eth_usd": float,
-        "btc_usd": float,
-        "eth_btc": float,          # ETH/BTC 비율
-        "eth_chg_24h": float,      # ETH USD 24h 변화율(%)
-        "btc_chg_24h": float,      # BTC USD 24h 변화율(%)
-        "ratio_chg_24h": float,    # ETH/BTC 비율 24h 변화율(%)
-        "error": str | None,
-      }
-    """
-    result: dict = {k: None for k in ("eth_usd","btc_usd","eth_btc","eth_chg_24h","btc_chg_24h","ratio_chg_24h","error")}
+    """CoinGecko simple/price — ETH/BTC 비율 및 24h 변화."""
+    result: dict = {k: None for k in (
+        "eth_usd", "btc_usd", "eth_btc", "eth_chg_24h",
+        "btc_chg_24h", "ratio_chg_24h", "error",
+    )}
     try:
         r = _http.get(
             "https://api.coingecko.com/api/v3/simple/price",
@@ -306,13 +369,12 @@ def _fetch_eth_btc_ratio() -> dict:
         r.raise_for_status()
         data = r.json()
 
-        btc_usd      = float(data["bitcoin"]["usd"])
-        eth_usd      = float(data["ethereum"]["usd"])
-        btc_chg      = float(data["bitcoin"].get("usd_24h_change", 0) or 0)
-        eth_chg      = float(data["ethereum"].get("usd_24h_change", 0) or 0)
-        eth_btc      = eth_usd / btc_usd if btc_usd > 0 else None
+        btc_usd = float(data["bitcoin"]["usd"])
+        eth_usd = float(data["ethereum"]["usd"])
+        btc_chg = float(data["bitcoin"].get("usd_24h_change", 0) or 0)
+        eth_chg = float(data["ethereum"].get("usd_24h_change", 0) or 0)
+        eth_btc = eth_usd / btc_usd if btc_usd > 0 else None
 
-        # ETH/BTC 비율의 24h 변화율 = (1 + eth_chg/100) / (1 + btc_chg/100) - 1
         if btc_chg is not None and eth_chg is not None:
             ratio_chg = ((1 + eth_chg / 100) / (1 + btc_chg / 100) - 1) * 100
         else:
@@ -335,10 +397,7 @@ def _fetch_eth_btc_ratio() -> dict:
 # ── DefiLlama 스테이블코인 ────────────────────────────────────
 
 def _fetch_stablecoins() -> dict:
-    """
-    DefiLlama에서 전체 스테이블코인 시총 + USDT 도미넌스 수집.
-    키 불필요. 실패 시 None으로 채움.
-    """
+    """DefiLlama 전체 스테이블코인 시총 + USDT 도미넌스."""
     out = {"stable_total_b": None, "usdt_b": None, "usdt_dom": None}
     try:
         r = _http.get(
@@ -366,91 +425,137 @@ def _fetch_stablecoins() -> dict:
 
 # ── 공개 인터페이스 ───────────────────────────────────────────
 
+# 지표 메타 (키 순서 = 프롬프트 출력 순서)
+_METRIC_META = {
+    "TNX_10Y":     {"label": "10Y 국채금리",    "unit": "%",  "fmt": ".2f", "threshold": 0.03},
+    "FVX_5Y":      {"label": "5Y 국채금리",     "unit": "%",  "fmt": ".2f", "threshold": 0.03},
+    "DXY":         {"label": "달러 인덱스",     "unit": "",   "fmt": ".2f", "threshold": 0.20},
+    "STABLE_MCAP": {"label": "스테이블코인 시총", "unit": "B",  "fmt": ".1f", "threshold": 0.20},
+    "USDT_DOM":    {"label": "USDT 도미넌스",   "unit": "%",  "fmt": ".1f", "threshold": 0.10},
+    "BTC_DOM":     {"label": "BTC 도미넌스",    "unit": "%",  "fmt": ".1f", "threshold": 0.10},
+    "HYG_LQD":     {"label": "HYG/LQD 비율",    "unit": "",   "fmt": ".4f", "threshold": 0.002},
+    "IBIT_PX":     {"label": "IBIT 가격",       "unit": "$",  "fmt": ".2f", "threshold": 0.50},
+}
+
+
+def _empty_stat_fields() -> dict:
+    return {
+        "latest_date": None,
+        "change5d": None, "change20d": None, "zscore20": None,
+        "regime": None, "trend20": None,
+        "recent_flow": None, "recent_points": None,
+    }
+
+
 def fetch_macro_context() -> dict:
     """
-    거시 지표 전체를 한 번에 수집.
-    반환 dict 구조:
+    거시 지표 전체 수집.
+
+    반환 dict 구조 (모든 값은 선택적):
       {
-        "DFII10":      {label, unit, fmt, value, change5d, zscore20, regime},
-        "DGS2":        {...},
-        "DTWEXBGS":    {...},
-        "STABLE_MCAP": {label, unit, fmt, value, change5d=None, zscore20=None, regime=None},
+        "TNX_10Y":     {label, unit, fmt, value, change5d, change20d, zscore20, regime, trend20, recent_flow, recent_points, latest_date},
+        "FVX_5Y":      {...},
+        "DXY":         {...},
+        "STABLE_MCAP": {label, unit, fmt, value, ...},
         "USDT_DOM":    {...},
         "BTC_DOM":     {...},
+        "HYG_LQD":     {...},
+        "IBIT_PX":     {..., vol_ratio, vol_latest, vol_20ma},
+        "_eth_btc":    {...},
+        "_trad_markets": {...},
+        "_history_summary": {...},  # macro_history.attach_macro_history_summary가 주입
       }
     """
     result: dict = {}
 
-    # FRED — DFEDTARU 는 step-function(계단식) 시계열이므로 days=120으로 길게 조회
-    for sid, meta in _FRED_SERIES.items():
-        days = 120 if sid == "DFEDTARU" else 60
-        s     = _fetch_fred(sid, days=days)
-        stats = _compute_stats(s)
-        result[sid] = {**meta, **stats}
+    # ── 시장 금리·달러 (yfinance, 실시간) ────────────────────
+    rates = _fetch_market_rates()
+    for key in ("TNX_10Y", "FVX_5Y", "DXY"):
+        meta = _METRIC_META[key]
+        stats = _compute_stats(rates.get(key), change_threshold=meta["threshold"])
+        result[key] = {
+            "label": meta["label"], "unit": meta["unit"], "fmt": meta["fmt"],
+            **stats,
+        }
 
-    # DefiLlama 스테이블코인
+    # ── DefiLlama 스테이블코인 ──────────────────────────────
     sc = _fetch_stablecoins()
-
     result["STABLE_MCAP"] = {
-        "label":    "스테이블코인 시총",
-        "unit":     "B",
-        "fmt":      ".1f",
-        "value":    sc["stable_total_b"],
-        "change5d": None,
-        "zscore20": None,
-        "regime":   None,
+        "label": _METRIC_META["STABLE_MCAP"]["label"],
+        "unit":  _METRIC_META["STABLE_MCAP"]["unit"],
+        "fmt":   _METRIC_META["STABLE_MCAP"]["fmt"],
+        "value": sc["stable_total_b"],
+        **_empty_stat_fields(),
     }
     result["USDT_DOM"] = {
-        "label":    "USDT 도미넌스",
-        "unit":     "%",
-        "fmt":      ".1f",
-        "value":    sc["usdt_dom"],
-        "change5d": None,
-        "zscore20": None,
-        "regime":   None,
+        "label": _METRIC_META["USDT_DOM"]["label"],
+        "unit":  _METRIC_META["USDT_DOM"]["unit"],
+        "fmt":   _METRIC_META["USDT_DOM"]["fmt"],
+        "value": sc["usdt_dom"],
+        **_empty_stat_fields(),
     }
 
-    # CoinGecko BTC 도미넌스
+    # ── CoinGecko BTC 도미넌스 ──────────────────────────────
     result["BTC_DOM"] = {
-        "label":    "BTC 도미넌스",
-        "unit":     "%",
-        "fmt":      ".1f",
-        "value":    _fetch_btc_dominance(),
-        "change5d": None,
-        "zscore20": None,
-        "regime":   None,
+        "label": _METRIC_META["BTC_DOM"]["label"],
+        "unit":  _METRIC_META["BTC_DOM"]["unit"],
+        "fmt":   _METRIC_META["BTC_DOM"]["fmt"],
+        "value": _fetch_btc_dominance(),
+        **_empty_stat_fields(),
     }
 
-    # ETH/BTC 비율
+    # ── HYG/LQD 신용 스프레드 프록시 ─────────────────────────
+    hyg_lqd_series = _fetch_credit_spread()
+    hyg_meta  = _METRIC_META["HYG_LQD"]
+    hyg_stats = _compute_stats(hyg_lqd_series, change_threshold=hyg_meta["threshold"])
+    result["HYG_LQD"] = {
+        "label": hyg_meta["label"], "unit": hyg_meta["unit"], "fmt": hyg_meta["fmt"],
+        **hyg_stats,
+    }
+
+    # ── IBIT (Spot BTC ETF) ─────────────────────────────────
+    ibit = _fetch_btc_etf()
+    ibit_meta  = _METRIC_META["IBIT_PX"]
+    ibit_stats = _compute_stats(ibit.get("close_series"), change_threshold=ibit_meta["threshold"])
+    result["IBIT_PX"] = {
+        "label": ibit_meta["label"], "unit": ibit_meta["unit"], "fmt": ibit_meta["fmt"],
+        **ibit_stats,
+        "vol_latest": ibit.get("vol_latest"),
+        "vol_20ma":   ibit.get("vol_20ma"),
+        "vol_ratio":  ibit.get("vol_ratio"),
+    }
+
+    # ── ETH/BTC 비율 ────────────────────────────────────────
     result["_eth_btc"] = _fetch_eth_btc_ratio()
 
-    # 전통 시장 (yfinance) — 별도 키로 저장 (format_macro_context에서 별도 섹션 출력)
+    # ── 전통 시장 (yfinance) ────────────────────────────────
     result["_trad_markets"] = _fetch_traditional_markets()
 
     attach_macro_history_summary(result)
     return result
 
 
-def _staleness_days(latest_date_str: Optional[str]) -> Optional[int]:
-    """FRED 기준일로부터 오늘까지 경과 일수. None이면 날짜 없음."""
-    if not latest_date_str:
-        return None
-    try:
-        from datetime import date as _date
-        ld = _date.fromisoformat(latest_date_str)
-        return (_date.today() - ld).days
-    except Exception:
-        return None
+# ── 포매팅 (Claude 프롬프트 삽입용) ───────────────────────────
+
+def _change_suffix(key: str, unit: str) -> str:
+    """히스토리 기반 24h/72h/7d 변화량 값 뒤에 붙일 단위."""
+    if key == "STABLE_MCAP":
+        return "B"
+    if unit == "%":
+        return "%p"
+    # $, "" 등은 접미사 없음 (숫자 자체로 명확)
+    return ""
 
 
-# FRED 시리즈별 허용 지연 일수 (이 값 초과 시 경고)
-# DTWEXBGS는 H.10 릴리즈 기준 최대 7-8영업일 지연 정상
-_STALE_THRESHOLD_DAYS: dict[str, int] = {
-    "DFEDTARU": 4,   # FOMC 이후 익일 반영
-    "DFII10":   4,   # 영업일 기준 T+1 (주말 포함 시 3일)
-    "DGS2":     4,   # 영업일 기준 T+1
-    "DTWEXBGS": 7,   # H.10 릴리즈 5-7일 지연 정상; 7일 초과 시 경고
-}
+def _change_format(key: str, fmt: str) -> str:
+    """
+    24h/72h/7d 변화량을 위한 포맷 스펙.
+    HYG/LQD 처럼 소수점 이하가 중요한 비율은 지표 fmt(.4f)를 재활용하고,
+    그 외는 .2f 로 간결하게 표시.
+    """
+    if key == "HYG_LQD":
+        return "+.4f"
+    return "+.2f"
 
 
 def format_macro_context(macro: dict) -> str:
@@ -460,23 +565,22 @@ def format_macro_context(macro: dict) -> str:
     """
     lines = [
         "[거시경제 지표]",
-        "  ※ FRED 항목은 최신값뿐 아니라 24h/72h/7d/5일/20일 변화, 최근 흐름, 최근 3개 관측치를 함께 제공합니다.",
-        "  ※ DTWEXBGS(달러 인덱스)는 H.10 릴리즈 기준 최대 7-8영업일 지연이 정상입니다.",
+        "  ※ 금리·달러 인덱스·채권 ETF·IBIT 는 yfinance 실시간 종가 기준 시계열입니다.",
+        "  ※ 24h/72h/7d 변화는 서버 스냅샷 기반(30분 주기 누적) — 스냅샷 부족 시 5일 변화를 함께 참고.",
     ]
+
     for key, d in macro.items():
         if str(key).startswith("_"):
             continue
         v = d.get("value")
-        if v is None:
-            if not FRED_API_KEY and key in ("DFEDTARU", "DFII10", "DGS2", "DTWEXBGS"):
-                lines.append(f"  {d['label']} ({key}): FRED API 키 없음 — 미제공")
-            else:
-                lines.append(f"  {d['label']} ({key}): 데이터 없음")
-            continue
-
         unit = d.get("unit", "")
         fmt  = d.get("fmt", ".2f")
-        val_str = f"{v:{fmt}}{unit}"
+
+        if v is None:
+            lines.append(f"  {d.get('label', key)} ({key}): 데이터 없음")
+            continue
+
+        val_str = f"{v:{fmt}}{unit}" if unit != "$" else f"${v:{fmt}}"
 
         extras = []
         latest_date = d.get("latest_date")
@@ -488,32 +592,23 @@ def format_macro_context(macro: dict) -> str:
         recent_flow = d.get("recent_flow")
         recent_points = d.get("recent_points")
 
-        # 데이터 지연 경고
-        stale_days = _staleness_days(latest_date)
-        stale_threshold = _STALE_THRESHOLD_DAYS.get(key, 4)
-        stale_flag = ""
-        if stale_days is not None and stale_days > stale_threshold:
-            stale_flag = f" ⚠️{stale_days}일지연"
-
         if latest_date is not None:
-            extras.append(f"기준일 {latest_date}{stale_flag}")
+            extras.append(f"기준일 {latest_date}")
+
+        suffix = _change_suffix(key, unit)
+        cfmt   = _change_format(key, fmt)
 
         if d.get("change24h") is not None:
-            suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
-            extras.append(f"24h 변화 {d['change24h']:+.2f}{suffix}")
+            extras.append(f"24h 변화 {d['change24h']:{cfmt}}{suffix}")
         if d.get("change72h") is not None:
-            suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
-            extras.append(f"72h 변화 {d['change72h']:+.2f}{suffix}")
+            extras.append(f"72h 변화 {d['change72h']:{cfmt}}{suffix}")
         if d.get("change7d") is not None:
-            suffix = "B" if key == "STABLE_MCAP" else "%p" if unit == "%" else ""
             ch7 = d["change7d"]
-            # history 기반 7d 변화는 서버 구동 중 누적된 스냅샷으로 계산됨.
-            # 스냅샷이 적으면 0처럼 보일 수 있어 FRED 5일 변화를 함께 참고해야 함.
             samples = d.get("change7d_samples")
             if samples is not None and samples < 3:
-                extras.append(f"7d 변화 {ch7:+.2f}{suffix}(스냅샷{samples}개-FRED5일변화참고)")
+                extras.append(f"7d 변화 {ch7:{cfmt}}{suffix}(스냅샷{samples}개-5일변화참고)")
             else:
-                extras.append(f"7d 변화 {ch7:+.2f}{suffix}")
+                extras.append(f"7d 변화 {ch7:{cfmt}}{suffix}")
         if c5  is not None:
             extras.append(f"5일 변화 {c5:+.3f}")
         if c20 is not None:
@@ -529,12 +624,20 @@ def format_macro_context(macro: dict) -> str:
         if recent_flow is not None:
             extras.append(f"최근 흐름 {recent_flow}")
         if recent_points:
-            point_str = " → ".join(f"{p['date']}:{p['value']:{fmt}}{unit}" for p in recent_points)
+            point_str = " → ".join(
+                f"{p['date']}:{p['value']:{fmt}}{unit if unit != '$' else ''}"
+                for p in recent_points
+            )
             extras.append(f"최근 3개 {point_str}")
+
+        # IBIT 전용 보조 필드: 거래량/20MA
+        if key == "IBIT_PX" and d.get("vol_ratio") is not None:
+            extras.append(f"거래량/20MA {d['vol_ratio']:.2f}x")
 
         extra_str = f"  ({', '.join(extras)})" if extras else ""
         lines.append(f"  {d['label']} ({key}): {val_str}{extra_str}")
 
+    # ── 서버 저장 기반 거시 추이 ─────────────────────────────
     history_summary = macro.get("_history_summary") or {}
     sections = history_summary.get("sections") or []
     if sections:
@@ -547,7 +650,7 @@ def format_macro_context(macro: dict) -> str:
                     continue
                 lines.append(f"      {line}")
 
-    # ── ETH/BTC 비율 섹션 ────────────────────────────────────────
+    # ── ETH/BTC 비율 섹션 ────────────────────────────────────
     eb = macro.get("_eth_btc") or {}
     if eb.get("eth_btc") is not None:
         ratio     = eb["eth_btc"]
@@ -561,9 +664,7 @@ def format_macro_context(macro: dict) -> str:
                 f"  (ETH ${eb['eth_usd']:,.0f} {eth_chg:+.1f}% / "
                 f"BTC ${eb['btc_usd']:,.0f} {btc_chg:+.1f}%)"
             )
-        lines.append(
-            f"  ETH/BTC 비율: {ratio:.6f}{chg_str}{price_str}"
-        )
+        lines.append(f"  ETH/BTC 비율: {ratio:.6f}{chg_str}{price_str}")
         lines.append(
             "  ※ 해석: 비율↑ = ETH 상대 강세(알트 시즌 가능성) / 비율↓ = BTC 단독 강세 또는 리스크오프. "
             "BTC 도미넌스와 함께 순환 방향 확인."
@@ -571,7 +672,7 @@ def format_macro_context(macro: dict) -> str:
     elif eb.get("error"):
         lines.append(f"  ETH/BTC 비율: 수집 실패 — {eb['error']}")
 
-    # ── 전통 시장 섹션 ───────────────────────────────────────────
+    # ── 전통 시장 섹션 ──────────────────────────────────────
     trad = macro.get("_trad_markets") or {}
     trad_error = trad.get("error")
     trad_labels = {
@@ -600,14 +701,12 @@ def format_macro_context(macro: dict) -> str:
     elif trad_error:
         lines.append(f"[전통 시장]: 수집 실패 — {trad_error}")
 
-    if not FRED_API_KEY:
-        lines.append("  ※ FRED API 키 미설정 — 금리·달러 데이터 비활성")
-
+    # ── 종합 해석 ────────────────────────────────────────────
     lines.append(
         "  ※ 해석 참고: "
-        "기준금리(DFEDTARU)는 FOMC 결정일에만 25bp 단위로 변동 — 2Y 국채금리(DGS2)와 달리 일별 등락 없음. "
-        "DGS2가 DFEDTARU보다 낮으면 시장이 금리 인하를 선반영. "
-        "실질금리·달러 상승은 BTC 등 위험자산에 부정적 압력. "
+        "10Y/5Y 금리·DXY↑ = 실질 할인율 상승·달러 강세 → BTC 등 위험자산 압박. "
+        "HYG/LQD↓ = 신용 스프레드 확대 → 리스크오프 선행 신호(BTC 조정 위험). "
+        "IBIT 거래량/20MA 1.5x 이상 + 가격↑ = 기관 수급 가속(현물 ETF 유입). "
         "스테이블코인 시총↑+USDT 도미넌스↓+BTC 도미넌스↑ = 알트→BTC 순환(위험선호 유지). "
         "스테이블코인 시총 정체+USDT 도미넌스↑+BTC 도미넌스↑ = 방어적 포지셔닝. "
         "스테이블코인 시총↑+USDT 도미넌스↓+BTC 도미넌스↓ = 알트 시즌 가능성. "

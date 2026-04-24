@@ -781,8 +781,25 @@ class AccountContextTimeline:
         target = _as_float(ctx.get("daily_target_pct"))
         loss_lim = _as_float(ctx.get("daily_loss_limit_pct"))
         pnl_base_equity = start_equity
-        if pnl_base_equity is None and total_mode == "cash" and current_equity is not None and cash_pnl is not None:
-            pnl_base_equity = current_equity - cash_pnl
+        if pnl_base_equity is None and total_mode == "cash" and cash_pnl is not None:
+            # cash-mode fallback: 시작 시점 지갑잔고(wallet_balance - cash_pnl)를 분모로 사용.
+            # current_equity 는 wallet + 현재 미실현손익 이므로, 그걸 분모로 쓰면
+            # 오픈 포지션의 uPnL 만큼 분모가 부풀려져 실현 수익률이 저평가됨.
+            # (account_context.py 의 today_pnl_pct 계산과 동일 규약)
+            wallet = _as_float(ctx.get("wallet_balance"))
+            if wallet is not None:
+                pnl_base_equity = wallet - cash_pnl
+            elif current_equity is not None and total_pnl is not None:
+                # wallet_balance 가 없으면 equity - total_pnl 로 fallback
+                # (이 경우 분모에 uPnL 이 남지만, 다른 기준값이 전혀 없음)
+                pnl_base_equity = current_equity - total_pnl
+            if pnl_base_equity is not None and pnl_base_equity <= 0:
+                # 비정상값 — 최후 fallback
+                pnl_base_equity = (
+                    current_equity - total_pnl
+                    if current_equity is not None and total_pnl is not None
+                    else None
+                )
 
         ctx["today_pnl_pct"] = None
         ctx["remaining_to_target_pct"] = None

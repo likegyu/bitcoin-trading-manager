@@ -91,6 +91,12 @@ class AccountHistoryDayAnchorTests(unittest.TestCase):
         self.assertEqual(current["carryover_positions"], [])
         self.assertAlmostEqual(current["today_total_pnl"], 12.0, places=6)
 
+        # cash-mode 분모는 wallet_balance - cash_pnl 이어야 함.
+        # current: equity=1070, upnl=55 → wallet_balance=1015, cash_pnl=12
+        # 올바른 분모 = 1015 - 12 = 1003, pct = 12/1003 * 100 ≈ 1.1964%
+        # 과거 버그(current_equity - cash_pnl = 1058) 면 pct ≈ 1.1342% 가 나와야 실패함
+        self.assertAlmostEqual(current["today_pnl_pct"], 12.0 / 1003.0 * 100, places=4)
+
     def test_recent_prev_close_can_anchor_evaluation(self):
         self._append_snapshot(
             _ctx(1000.0, -5.0, [_position()], upnl=20.0),

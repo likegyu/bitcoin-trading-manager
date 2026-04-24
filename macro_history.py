@@ -16,14 +16,17 @@ WINDOW_CONFIGS = (
 )
 
 METRIC_CONFIG = {
-    # DFEDTARU: FOMC 결정일에만 변동(25bp 단위). threshold=0.13 → 25bp 변화 시 확실히 감지.
-    "DFEDTARU": {"label": "기준금리(상단)", "threshold": 0.13},
-    "DFII10": {"label": "10Y 실질금리", "threshold": 0.03},
-    "DGS2": {"label": "2Y 국채금리", "threshold": 0.03},
-    "DTWEXBGS": {"label": "달러 인덱스", "threshold": 0.15},
-    "STABLE_MCAP": {"label": "스테이블 시총", "threshold": 0.20},
-    "USDT_DOM": {"label": "USDT 도미넌스", "threshold": 0.10},
-    "BTC_DOM": {"label": "BTC 도미넌스", "threshold": 0.10},
+    # 시장 금리·달러 (yfinance 실시간)
+    "TNX_10Y":     {"label": "10Y 국채금리", "threshold": 0.03,  "unit": "%p"},
+    "FVX_5Y":      {"label": "5Y 국채금리",  "threshold": 0.03,  "unit": "%p"},
+    "DXY":         {"label": "달러 인덱스",  "threshold": 0.20,  "unit": ""},
+    # 크립토 자금지표
+    "STABLE_MCAP": {"label": "스테이블 시총", "threshold": 0.20, "unit": "B"},
+    "USDT_DOM":    {"label": "USDT 도미넌스","threshold": 0.10, "unit": "%p"},
+    "BTC_DOM":     {"label": "BTC 도미넌스", "threshold": 0.10, "unit": "%p"},
+    # BTC 특화 추가 지표
+    "HYG_LQD":     {"label": "HYG/LQD 비율", "threshold": 0.002, "unit": ""},
+    "IBIT_PX":     {"label": "IBIT 가격",    "threshold": 0.50,  "unit": "$"},
 }
 
 RETENTION_HOURS = 240
@@ -68,11 +71,11 @@ def _metric_threshold(metric: str) -> float:
 def _format_delta(metric: str, value: float | None) -> str:
     if value is None:
         return "N/A"
-    if metric in {"DFEDTARU", "DFII10", "DGS2", "USDT_DOM", "BTC_DOM"}:
-        return f"{value:+.2f}%p"
-    if metric == "STABLE_MCAP":
-        return f"{value:+.2f}B"
-    return f"{value:+.2f}"
+    unit = METRIC_CONFIG.get(metric, {}).get("unit", "")
+    # 비율·지수는 소수 4자리까지 노출 (HYG/LQD 같은 미세 비율 대응)
+    if metric == "HYG_LQD":
+        return f"{value:+.4f}"
+    return f"{value:+.2f}{unit}"
 
 
 def _classify_delta(metric: str, value: float | None) -> str | None:
@@ -166,30 +169,33 @@ def _metric_window(window: list[dict], metric: str) -> dict:
     }
 
 
+# 섹션 구성: 지표를 그룹 단위로 묶어 출력
+_SECTION_GROUPS = (
+    ("금리·달러",       ("TNX_10Y", "FVX_5Y", "DXY")),
+    ("크립토 자금지표", ("STABLE_MCAP", "USDT_DOM", "BTC_DOM")),
+    ("신용·ETF 수급",   ("HYG_LQD", "IBIT_PX")),
+)
+
+
 def _section_lines(metrics: dict[str, dict], include_rates: bool = True) -> tuple[list[str], list[str]]:
     lines: list[str] = []
     highlights: list[str] = []
 
-    if include_rates:
-        rate_parts = []
-        for metric in ("DFEDTARU", "DFII10", "DGS2", "DTWEXBGS"):
-            change = metrics[metric]["change"]
+    for idx, (group_label, metric_keys) in enumerate(_SECTION_GROUPS):
+        # include_rates=False 는 '금리·달러' 그룹을 건너뜀 (현재 호출자 없음 — 확장 여지)
+        if not include_rates and idx == 0:
+            continue
+        parts = []
+        for metric in metric_keys:
+            stats = metrics.get(metric) or {}
+            change = stats.get("change")
             if change is None:
                 continue
-            rate_parts.append(f"{_metric_label(metric)} {_format_delta(metric, change)}")
-        if rate_parts:
-            lines.append("금리·달러: " + " / ".join(rate_parts))
-            highlights.extend(rate_parts[:2])
-
-    crypto_parts = []
-    for metric in ("STABLE_MCAP", "USDT_DOM", "BTC_DOM"):
-        change = metrics[metric]["change"]
-        if change is None:
-            continue
-        crypto_parts.append(f"{_metric_label(metric)} {_format_delta(metric, change)}")
-    if crypto_parts:
-        lines.append("크립토 자금지표: " + " / ".join(crypto_parts))
-        highlights.extend(crypto_parts)
+            parts.append(f"{_metric_label(metric)} {_format_delta(metric, change)}")
+        if parts:
+            lines.append(f"{group_label}: " + " / ".join(parts))
+            # 첫 그룹은 상위 2개만 하이라이트 — 나머지는 전체 등재
+            highlights.extend(parts[:2] if idx == 0 else parts)
 
     return lines, highlights
 
