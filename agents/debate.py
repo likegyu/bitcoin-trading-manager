@@ -38,6 +38,10 @@ DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-haiku-4-5-20251001")
 # max_rounds=2 → Bull→Bear→Bull반박→Bear반박, 총 4회.
 DEBATE_MAX_ROUNDS = int(os.getenv("DEBATE_MAX_ROUNDS", "1"))
 
+# 출력 목표: 400~700자 ≈ 200~350 tokens. 안전 마진 포함 800으로 제한.
+# 기존 7500은 최악의 경우 과다 출력을 허용 → 비용·속도 모두 손해.
+DEBATE_MAX_OUTPUT_TOKENS = int(os.getenv("DEBATE_MAX_OUTPUT_TOKENS", "800"))
+
 # 토론 자체를 끄고 싶을 때: DEBATE_ENABLED=0
 DEBATE_ENABLED = os.getenv("DEBATE_ENABLED", "1") not in ("0", "false", "False", "")
 
@@ -86,7 +90,7 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
         try:
             msg = client.messages.create(
                 model=DEBATE_MODEL,
-                max_tokens=7500,
+                max_tokens=DEBATE_MAX_OUTPUT_TOKENS,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )

@@ -43,6 +43,10 @@ RISK_MAX_ROUNDS = int(os.getenv("RISK_MAX_ROUNDS", "1"))
 # Risk Triad 자체를 끄고 싶을 때: RISK_ENABLED=0
 RISK_ENABLED = os.getenv("RISK_ENABLED", "1") not in ("0", "false", "False", "")
 
+# 출력 목표: 400~700자 ≈ 200~350 tokens. 안전 마진 포함 1000으로 제한.
+# 기존 7500은 낭비. Risk 에이전트는 리스크 규모 서술이라 조금 더 여유 허용.
+RISK_MAX_OUTPUT_TOKENS = int(os.getenv("RISK_MAX_OUTPUT_TOKENS", "1000"))
+
 
 # 발언 순서 — Aggressive 가 먼저 치고 나가면 Conservative/Neutral 이 반박/중재하는 구조.
 SPEAKING_ORDER = ("aggressive", "conservative", "neutral")
@@ -97,7 +101,7 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
         try:
             msg = client.messages.create(
                 model=RISK_MODEL,
-                max_tokens=7500,
+                max_tokens=RISK_MAX_OUTPUT_TOKENS,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )

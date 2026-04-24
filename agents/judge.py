@@ -29,6 +29,10 @@ except Exception:
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-sonnet-4-6")
 JUDGE_ENABLED = os.getenv("JUDGE_ENABLED", "1") not in ("0", "false", "False", "")
 
+# 출력 포맷: 판정/이유/Bull핵심/Bear핵심 = 4줄 고정 ≈ 150~250 tokens.
+# 안전 마진 포함 500으로 제한. 기존 2500은 낭비.
+JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "500"))
+
 JUDGE_SYSTEM = """당신은 BTC 선물 시장의 'Investment Judge(투자 심판)'입니다.
 역할: Bull Researcher 와 Bear Researcher 의 토론을 공정하게 듣고,
 어느 쪽의 논리가 현재 데이터에 더 잘 부합하는지 판정한 뒤 명확한 방향성 결론을 내립니다.
@@ -122,7 +126,7 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
         try:
             msg = client.messages.create(
                 model=JUDGE_MODEL,
-                max_tokens=2500,
+                max_tokens=JUDGE_MAX_OUTPUT_TOKENS,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )

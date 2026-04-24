@@ -586,9 +586,13 @@ def analyze_with_claude(
         macro_snapshot=macro_snapshot,
         debate_block=debate_block,
     )
+    # 실제 출력 구조: 약 10개 섹션 × 3~5줄 ≈ 600~1000 tokens.
+    # 12000은 과도하며 디버깅용 대형 마진. ANALYST_MAX_TOKENS으로 조절 가능.
+    # 기본값 4000: 충분한 여유 + 비용·속도 개선.
+    _analyst_max_tokens = int(_os.getenv("ANALYST_MAX_TOKENS", "4000"))
     request_kwargs = {
         "model": CLAUDE_MODEL,
-        "max_tokens": 12000,
+        "max_tokens": _analyst_max_tokens,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": prompt}],
     }
