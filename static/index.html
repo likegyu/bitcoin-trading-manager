@@ -1959,6 +1959,10 @@ const state = {
   marketSource: null,
   marketRetryTimer: null,
   marketConnected: false,
+  // 라이브 market-stream 이 최소 1회 지표/차트를 채웠는지 여부.
+  // true 이면 분석(snapshot) 페이로드로 실시간 지표/차트를 덮어쓰지 않는다 —
+  // 분석 스냅샷이 실시간 값을 잠깐 밀어내고 되돌아오는 flicker 방지.
+  liveMarketPrimed: false,
   accountSource: null,
   accountRetryTimer: null,
   analyzing:    false,
@@ -2104,10 +2108,13 @@ function finishAnalysisRun({ startCooldown = false } = {}) {
 
 function shouldApplyAnalysisPayload(data) {
   if (!data) return false;
-  if (!state.analysisTime) return true;
-  if (data.analysis_time && data.analysis_time !== state.analysisTime) return true;
   const rawText = String(data.raw_text || "").trim();
-  return !!rawText;
+  if (!rawText) return false;                    // 내용 없는 페이로드는 무시
+  if (!state.analysisTime) return true;          // 첫 분석 결과 — 항상 적용
+  // analysis_time 이 있으면 현재와 달라야 재적용 — 포커스/재로드 시 동일 스냅샷을
+  // 반복 적용하면서 실시간 지표/차트가 잠깐 분석시점 값으로 덮여 flicker 가 발생.
+  if (data.analysis_time) return data.analysis_time !== state.analysisTime;
+  return true;
 }
 
 async function fetchAnalysisStatus(includeLatest = false) {
@@ -2367,6 +2374,7 @@ function applyResult(data, options = {}) {
 function applyMarketData(data, source = "market") {
   if (!data) return;
   let refreshSignal = false;
+  const isAnalysis = source === "analysis";
 
   if (data.symbol || data.pair_label) {
     state.symbol = data.symbol || state.symbol;
@@ -2376,7 +2384,7 @@ function applyMarketData(data, source = "market") {
 
   // 분석 결과(source="analysis")의 price는 분석 실행 시점 스냅샷이라 stale함.
   // 가격 표시는 SSE 실시간 스트림(source="market"/"price")에서만 업데이트한다.
-  if (source !== "analysis" && data.price !== undefined && data.price !== null) {
+  if (!isAnalysis && data.price !== undefined && data.price !== null) {
     document.getElementById("header-price").textContent = "$" + data.price.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -2391,7 +2399,7 @@ function applyMarketData(data, source = "market") {
   if (data.last_update) {
     state.lastMarketUpdate = data.last_update;
     if (
-      source !== "analysis" &&
+      !isAnalysis &&
       state.analysisTime &&
       data.last_update !== state.analysisTime &&
       !state.analysisStale
@@ -2401,16 +2409,21 @@ function applyMarketData(data, source = "market") {
     }
   }
 
-  if (data.indicators) {
+  // 지표/피보/차트는 실시간 계산치. 분석 페이로드는 분석 시점 스냅샷이라
+  // 라이브가 이미 채운 자리에 덮어쓰면 → 다음 SSE 틱까지 잠깐 옛 값이 보였다가
+  // 되돌아오는 flicker 가 발생한다. 라이브가 활성이고 이미 값을 넣었다면 skip.
+  const allowLiveFields = !isAnalysis || !state.liveMarketPrimed;
+
+  if (allowLiveFields && data.indicators) {
     renderMetricCards(data.indicators);
   }
 
-  if (data.fibs) {
+  if (allowLiveFields && data.fibs) {
     state.fibs = Object.assign({}, state.fibs, data.fibs);
   }
 
   const incomingCharts = data.charts || {};
-  const hasChartPatch = Object.keys(incomingCharts).length > 0;
+  const hasChartPatch = allowLiveFields && Object.keys(incomingCharts).length > 0;
   if (hasChartPatch) {
     const nextCharts = Object.assign({}, state.charts);
     let needsFullRender = false;
@@ -2440,6 +2453,12 @@ function applyMarketData(data, source = "market") {
     if (needsFullRender && (incomingCharts[state.currentTf] || !state.charts[state.currentTf])) {
       scheduleRenderCurrentChart();
     }
+  }
+
+  // 라이브 소스가 지표/차트를 처음으로 채웠다면 priming 플래그 설정 — 이후
+  // 도착하는 분석 페이로드는 실시간 계산치를 덮어쓰지 않는다.
+  if (!isAnalysis && !state.liveMarketPrimed && (data.indicators || hasChartPatch)) {
+    state.liveMarketPrimed = true;
   }
 
   if ((data.price !== undefined && data.price !== null) || data.fibs || hasChartPatch) {
