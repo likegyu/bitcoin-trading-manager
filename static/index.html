@@ -2408,7 +2408,7 @@ a.status-chip { cursor: pointer; }
 
   <!-- 전통 시장 카드 행 -->
   <div class="macro-section-label">전통 시장</div>
-  <div class="macro-row" id="trad-row" style="grid-template-columns:repeat(5,minmax(0,1fr));">
+  <div class="macro-row" id="trad-row" style="grid-template-columns:repeat(6,minmax(0,1fr));">
     <div class="macro-card" id="trad-SPX">
       <div class="card-label">S&amp;P 500</div>
       <div class="card-value" style="color:var(--text-muted);">—</div>
@@ -2430,6 +2430,12 @@ a.status-chip { cursor: pointer; }
       <div class="card-value" style="color:var(--text-muted);">—</div>
       <div class="card-sub" style="color:var(--text-muted);">로딩 중</div>
     </div>
+    <div class="macro-card" id="macro-HYG_LQD">
+      <div class="card-label">HYG/LQD</div>
+      <div class="card-value" style="color:var(--text-muted);">—</div>
+      <div class="card-sub" style="color:var(--text-muted);">로딩 중</div>
+      <div class="card-note">↓신용 스트레스</div>
+    </div>
     <div class="macro-card" id="trad-ETHBTC">
       <div class="card-label">ETH/BTC</div>
       <div class="card-value" style="color:var(--text-muted);">—</div>
@@ -2440,7 +2446,7 @@ a.status-chip { cursor: pointer; }
 
   <!-- 시장 심리 카드 행 -->
   <div class="macro-section-label">시장 심리</div>
-  <div class="macro-row" id="sentiment-row" style="grid-template-columns:repeat(5,minmax(0,1fr));">
+  <div class="macro-row" id="sentiment-row" style="grid-template-columns:repeat(6,minmax(0,1fr));">
     <div class="macro-card" id="sent-feargreed">
       <div class="card-label">Fear &amp; Greed</div>
       <div class="card-value" style="color:var(--text-muted);">—</div>
@@ -2470,6 +2476,12 @@ a.status-chip { cursor: pointer; }
       <div class="card-value" style="color:var(--text-muted);">—</div>
       <div class="card-sub" style="color:var(--text-muted);">로딩 중</div>
       <div class="card-note">Binance + Bybit</div>
+    </div>
+    <div class="macro-card" id="macro-IBIT_PX">
+      <div class="card-label">IBIT</div>
+      <div class="card-value" style="color:var(--text-muted);">—</div>
+      <div class="card-sub" style="color:var(--text-muted);">로딩 중</div>
+      <div class="card-note">Spot BTC ETF</div>
     </div>
   </div>
 
@@ -5802,6 +5814,8 @@ const MACRO_CFG = {
   STABLE_MCAP:{ negativeGood: false },
   USDT_DOM:   { negativeGood: true  },   // USDT 도미넌스↑ = 방어적 포지셔닝
   BTC_DOM:    { negativeGood: false },
+  HYG_LQD:    { negativeGood: false },   // HYG/LQD↑ = 신용 스트레스 완화
+  IBIT_PX:    { negativeGood: false },
 };
 const MACRO_DELTA_THRESHOLD = {
   TNX_10Y: 0.03,
@@ -5810,6 +5824,8 @@ const MACRO_DELTA_THRESHOLD = {
   STABLE_MCAP: 0.20,
   USDT_DOM: 0.10,
   BTC_DOM: 0.10,
+  HYG_LQD: 0.002,
+  IBIT_PX: 0.50,
 };
 
 function _macroColor(key, regime) {
@@ -5827,6 +5843,11 @@ function _macroDirectionFromDelta(key, delta) {
   if (num > threshold) return "상승";
   if (num < -threshold) return "하락";
   return "중립";
+}
+
+function _decimalPlacesFromFmt(fmt, fallback = 2) {
+  const match = String(fmt || "").match(/\.(\d+)f/);
+  return match ? Number(match[1]) : fallback;
 }
 
 function renderMacroCard(key, d) {
@@ -5853,28 +5874,36 @@ function renderMacroCard(key, d) {
 
   // 값 포맷
   let valStr;
+  const decimals = _decimalPlacesFromFmt(fmt, 2);
   if (key === "STABLE_MCAP") {
     valStr = "$" + v.toFixed(1) + "B";
+  } else if (unit === "$") {
+    valStr = "$" + v.toFixed(decimals);
   } else if (unit === "%") {
     const prefix = fmt.includes("+") ? (v >= 0 ? "+" : "") : "";
-    valStr = prefix + v.toFixed(2) + "%";
+    valStr = prefix + v.toFixed(decimals) + "%";
   } else {
-    valStr = v.toFixed(2);
+    valStr = v.toFixed(decimals);
   }
 
   function formatMacroDelta(value, label) {
     const num = Number(value);
+    const deltaDecimals = key === "HYG_LQD" ? 4 : 2;
     if (!Number.isFinite(num)) return null;
     if (key === "STABLE_MCAP") {
       const sign = num >= 0 ? "+" : "";
       return `${sign}${num.toFixed(2)}B (${label})`;
     }
+    if (unit === "$") {
+      const sign = num >= 0 ? "+" : "";
+      return `${sign}$${Math.abs(num).toFixed(deltaDecimals)} (${label})`;
+    }
     if (unit === "%") {
       const sign = num >= 0 ? "+" : "";
-      return `${sign}${num.toFixed(2)}%p (${label})`;
+      return `${sign}${num.toFixed(deltaDecimals)}%p (${label})`;
     }
     const sign = num >= 0 ? "+" : "";
-    return `${sign}${num.toFixed(2)} (${label})`;
+    return `${sign}${num.toFixed(deltaDecimals)} (${label})`;
   }
 
   // 서브텍스트: 최근 24h 변화 우선, 없으면 72h/7d/5d 변화, 마지막에 레짐
