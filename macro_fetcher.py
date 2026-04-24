@@ -171,12 +171,26 @@ def _yf_close_series(ticker: str, period: str = "60d") -> Optional[pd.Series]:
 
 # ── 시장 금리·달러 인덱스 (yfinance 실시간) ───────────────────
 
+def _normalize_yield_series(series: pd.Series) -> pd.Series:
+    """
+    Yahoo yield tickers have appeared in both percent (4.3) and percent*10
+    (43.0) formats across environments. Normalize to percent points.
+    """
+    s = pd.to_numeric(series, errors="coerce").dropna().astype(float)
+    if s.empty:
+        return s
+    recent = s.tail(min(len(s), 10)).median()
+    if pd.notna(recent) and recent > 20:
+        return s * 0.1
+    return s
+
+
 def _fetch_market_rates() -> dict:
     """
     실시간 시장금리·달러 지수 수집.
 
     티커 규칙:
-      ^TNX  — 10Y Treasury Yield. 값은 'yield × 10' 형식(예: 42.5 → 4.25%).
+      ^TNX  — 10Y Treasury Yield. 환경에 따라 4.25 또는 42.5 형식으로 와서 보정.
       ^FVX  — 5Y  Treasury Yield. 동일 규칙.
       DX-Y.NYB — ICE 달러 인덱스 (실제 값).
 
@@ -184,14 +198,14 @@ def _fetch_market_rates() -> dict:
     """
     out: dict[str, Optional[pd.Series]] = {"TNX_10Y": None, "FVX_5Y": None, "DXY": None}
 
-    for ticker, key, scale in (
-        ("^TNX",     "TNX_10Y", 0.1),
-        ("^FVX",     "FVX_5Y",  0.1),
-        ("DX-Y.NYB", "DXY",     1.0),
+    for ticker, key, is_yield in (
+        ("^TNX",     "TNX_10Y", True),
+        ("^FVX",     "FVX_5Y",  True),
+        ("DX-Y.NYB", "DXY",     False),
     ):
         s = _yf_close_series(ticker, period="90d")
         if s is not None and len(s) > 0:
-            out[key] = (s * scale).astype(float)
+            out[key] = _normalize_yield_series(s) if is_yield else s.astype(float)
     return out
 
 
