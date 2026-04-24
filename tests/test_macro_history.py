@@ -7,6 +7,7 @@ from pathlib import Path
 from macro_history import (
     MAX_ENTRIES,
     MacroHistoryTimeline,
+    _normalize_legacy_yield_units,
     _snapshot_from_macro,
 )
 
@@ -88,6 +89,25 @@ class MacroHistoryTests(unittest.TestCase):
         self.assertAlmostEqual(latest_macro["BTC_DOM"]["change7d"], 2.45, places=6)
         self.assertEqual(latest_macro["BTC_DOM"]["trend7d"], "상승")
         self.assertIn("_history_summary", latest_macro)
+
+    def test_normalizes_legacy_over_scaled_yields_only_before_cutoff(self):
+        legacy = {
+            "observed_ts": datetime(2026, 4, 24, 17, 20, tzinfo=timezone.utc).timestamp(),
+            "TNX_10Y": 0.4304,
+            "FVX_5Y": 0.3913,
+        }
+        self.assertTrue(_normalize_legacy_yield_units(legacy))
+        self.assertAlmostEqual(legacy["TNX_10Y"], 4.304, places=6)
+        self.assertAlmostEqual(legacy["FVX_5Y"], 3.913, places=6)
+
+        future_low_rate = {
+            "observed_ts": datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc).timestamp(),
+            "TNX_10Y": 0.95,
+            "FVX_5Y": 0.80,
+        }
+        self.assertFalse(_normalize_legacy_yield_units(future_low_rate))
+        self.assertAlmostEqual(future_low_rate["TNX_10Y"], 0.95, places=6)
+        self.assertAlmostEqual(future_low_rate["FVX_5Y"], 0.80, places=6)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,8 @@ METRIC_CONFIG = {
     "IBIT_PX":     {"label": "IBIT 가격",    "threshold": 0.50,  "unit": "$"},
 }
 
+_BAD_YIELD_SCALE_CUTOFF_TS = datetime(2026, 4, 24, 18, 30, tzinfo=timezone.utc).timestamp()
+_YIELD_METRICS = ("TNX_10Y", "FVX_5Y")
 RETENTION_HOURS = 240
 MAX_ENTRIES = 8000
 MIN_RECORD_INTERVAL_SECS = 30 * 60
@@ -47,6 +49,23 @@ def _as_float(value: Any) -> float | None:
     if not math.isfinite(num):
         return None
     return num
+
+
+def _normalize_legacy_yield_units(snapshot: dict) -> bool:
+    """Repair yield records saved by the previous 0.1 over-scaling bug."""
+    observed_ts = _as_float(snapshot.get("observed_ts"))
+    if observed_ts is None or observed_ts > _BAD_YIELD_SCALE_CUTOFF_TS:
+        return False
+
+    changed = False
+    for metric in _YIELD_METRICS:
+        value = _as_float(snapshot.get(metric))
+        if value is None:
+            continue
+        if 0 < value < 1.5:
+            snapshot[metric] = value * 10
+            changed = True
+    return changed
 
 
 def _fmt_duration(minutes: int) -> str:
@@ -261,6 +280,7 @@ class MacroHistoryTimeline:
             return
 
         loaded: deque[dict] = deque(maxlen=MAX_ENTRIES)
+        migrated = False
         if self._history_file.exists():
             try:
                 with self._history_file.open("r", encoding="utf-8") as handle:
@@ -269,16 +289,18 @@ class MacroHistoryTimeline:
                         if not raw:
                             continue
                         try:
-                            loaded.append(json.loads(raw))
+                            snapshot = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
+                        migrated = _normalize_legacy_yield_units(snapshot) or migrated
+                        loaded.append(snapshot)
             except OSError:
                 loaded.clear()
 
         self._entries = loaded
         if self._entries:
             pruned = self._prune_locked(datetime.now(timezone.utc).timestamp())
-            if pruned:
+            if pruned or migrated:
                 self._rewrite_locked()
 
         self._loaded = True
