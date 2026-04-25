@@ -283,6 +283,49 @@ class FinancialSituationMemory:
         with self._lock:
             return list(self._records)
 
+    def extract_recent_checklists(
+        self,
+        max_records: int = 10,
+        max_lines: int = 5,
+    ) -> list[str]:
+        """
+        최근 reflection 이 기록된 메모리에서 '다음 체크리스트:' 줄을 뽑아낸다.
+
+        Reflection 이 작성한 outcome 의 마지막 라인 형식:
+            "다음 체크리스트: ..."
+        이걸 모아 다음 분석에 '과거에 놓친 패턴 — 같은 실수 반복 금지' 로 주입.
+
+        반환: 가장 최근 기록 우선 정렬된 체크리스트 문자열 리스트 (중복 제거).
+        """
+        out: list[str] = []
+        seen: set[str] = set()
+        with self._lock:
+            recs = list(reversed(self._records))   # 최신부터
+        for r in recs[:max_records]:
+            outcome = (r.outcome or "").strip()
+            if not outcome:
+                continue
+            for line in outcome.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # "다음 체크리스트:" 또는 "체크리스트:" 둘 다 허용
+                m = re.match(r"^\s*(?:다음\s*)?체크리스트\s*[:：]\s*(.+)$", line)
+                if not m:
+                    continue
+                checklist_text = m.group(1).strip()
+                if not checklist_text:
+                    continue
+                # 중복 (대소문자/공백 정규화) 방지
+                key = re.sub(r"\s+", " ", checklist_text.lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(checklist_text)
+                if len(out) >= max_lines:
+                    return out
+        return out
+
     def list_pending_reflections(
         self,
         min_age_seconds: float = 300.0,   # 5분 (기존 30분 → 완화)
@@ -352,6 +395,22 @@ def format_memory_block(memories: list[dict]) -> str:
         else:
             lines.append("  실제 결과: (아직 리플렉션 미기록)")
 
+    return "\n".join(lines)
+
+
+def format_lessons_block(checklists: list[str]) -> str:
+    """
+    extract_recent_checklists() 의 출력을 프롬프트 주입용 블록으로 변환.
+    비어있으면 빈 문자열.
+    """
+    if not checklists:
+        return ""
+    lines = [
+        "[과거 체크리스트 — 같은 실수 반복 금지]",
+        "  최근 reflection 들이 남긴 자기개선 메모. 현재 분석에서 동일 함정에 빠지지 않았는지 점검하세요.",
+    ]
+    for i, c in enumerate(checklists, 1):
+        lines.append(f"  {i}. {c}")
     return "\n".join(lines)
 
 

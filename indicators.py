@@ -494,25 +494,30 @@ def summarize_indicators(tf: str, df: pd.DataFrame) -> str:
     else:
         supertrend_str = "N/A"
 
+    # ── MACD Hist 변화량 (절대 MACD/Signal 값은 거의 의미 없어 제거 — Hist 부호와 변화만 핵심) ──
+    hist_delta = hist_now - hist_prev
+
     lines = [
         tf_header,
         f"현재가: ${price:,.2f}",
         f"",
-        f"[최근 {n_candles}캔들 OHLC]  ← 마지막 행은 ⚠️미완성봉",
+        f"[최근 {n_candles}캔들 OHLC]  ← 마지막 행은 ⚠️미완성봉. Vol 옆 'MA비'는 거래량/MA20 비율",
     ] + ohlc_rows + [
         f"",
-        f"[지표 현재값]",
-        f"MACD: {last['macd']:.2f} / Signal: {last['macd_signal']:.2f} / Hist: {hist_now:+.2f} (직전: {hist_prev:+.2f})",
-        f"볼린저밴드: 상단 ${last['bb_upper']:,.2f} / 하단 ${last['bb_lower']:,.2f}  BB%B: {last['bb_pct']:.3f}",
-        # bb_mid(SMA20) 제거 — EMA9·SMA50·SMA200이 MA 맥락 제공, 중복 정보
+        f"[가격 레벨 — 절대값 (트리거·손절 계산용)]",
         f"SMA200: ${last['sma_200']:,.2f}",
         f"SMA50: ${last['sma_50']:,.2f}",
         f"EMA9: ${last['ema_9']:,.2f}",
+        f"볼린저밴드: 상단 ${last['bb_upper']:,.2f} / 하단 ${last['bb_lower']:,.2f}",
         f"VWAP(일중): {vwap_str}",
         f"Supertrend(10,3): {supertrend_str}",
+        f"",
+        f"[모멘텀·변동성 — 정성 평가는 <derived_features>에 이미 요약됨, 여기는 절대 수치만]",
+        f"MACD Hist: {hist_now:+.2f} (직전 {hist_prev:+.2f}, Δ {hist_delta:+.2f})",
+        f"BB%B: {last['bb_pct']:.3f}",
         f"실현변동성: {rv_str}",
-        f"ATR(14): ${last['atr']:.2f}",
-        f"거래량: {last['volume']:,.0f} / 거래량MA20: {last['volume_ma']:,.0f}",
+        f"ATR(14): ${last['atr']:.2f}  ← 손절 거리 환산용",
+        # 거래량/거래량MA 절대값 제거 — OHLC 테이블 마지막 행에 'MA비:{n}%' 로 이미 표시됨
     ]
 
     if tf != "5m":

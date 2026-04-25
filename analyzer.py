@@ -37,6 +37,18 @@ try:
 except Exception:
     extract_trading_signal = None  # type: ignore
     TradingSignal = None           # type: ignore
+try:
+    from agents.consistency_check import check_consistency
+except Exception:
+    check_consistency = None       # type: ignore
+try:
+    from agents.delta_context import build_delta_block
+except Exception:
+    build_delta_block = None       # type: ignore
+try:
+    from agents.memory import format_lessons_block
+except Exception:
+    format_lessons_block = None    # type: ignore
 
 import os as _os
 import logging as _logging
@@ -63,6 +75,7 @@ SYSTEM_PROMPT = (
     "4. 5m는 진입 타이밍 힌트일 뿐, 큰 방향의 핵심 근거로 과대평가하지 마세요.\n"
     "5. 계좌/포지션 정보와 최근 운영 맥락은 시장 방향의 근거가 아니라 실행 제약입니다. 관점·레짐보다 대응/리스크 관리 문단에 우선 반영하세요.\n"
     "6. 최근 계좌 운영 맥락이 보이면 수익 보호 모드인지, 손실 복구 시도인지, 노출을 줄이는 중인지 같은 운영 상태를 읽되 관측된 사실에 기대어 표현하세요.\n"
+    "7. [직전 대비 변화] 블록이 제공되면 무엇이 새로 바뀌었는지(레짐 전환·트리거 발동·지표 임계 돌파)를 먼저 평가하세요. 변화 없이 같은 상태가 지속이면 그 사실 자체를 근거로 인정하세요.\n"
     "\n"
     "확신도 산정 원칙:\n"
     "제공되는 모든 지표는 같은 가격 시계열에서 파생됩니다. "
@@ -74,6 +87,48 @@ SYSTEM_PROMPT = (
     "물리적으로 정합하는지를 기준으로 산정하세요. "
     "단, 구조와 지표가 정합할 때는 자신 있게 높은 확신도를 출력하세요. 불필요하게 낮추지 마세요.\n"
     "\n"
+    "확신도 루브릭 (각 축의 점수 anchor):\n"
+    "- price_structure (0~25):\n"
+    "    22~25 = 멀티 TF 구조 정합(HH/HL or LH/LL) + 핵심 레벨 클린 리테스트 + 추세선 살아있음\n"
+    "    15~21 = 한 TF의 구조는 명확하나 다른 TF 약화 신호 동반\n"
+    "    8~14  = 박스 또는 구조 모호 / 직전 스윙 무효화 조짐\n"
+    "    0~7   = 구조 깨짐·와이드 스윙·지지/저항 부재\n"
+    "- momentum (0~20):\n"
+    "    17~20 = 다중 TF MACD/RSI 동조 + 부호 전환 또는 임계 돌파가 최근 1~3봉\n"
+    "    11~16 = 1~2개 TF에서만 모멘텀 신호, 나머지는 중립\n"
+    "    5~10  = 모멘텀 미미하거나 다이버전스 발생\n"
+    "    0~4   = 모멘텀 명확히 반대 방향\n"
+    "- derivatives (0~20):\n"
+    "    16~20 = 펀딩·OI·스큐·CVD 중 3개 이상이 동일 방향 + 극단치 아님(역이용 위험 낮음)\n"
+    "    10~15 = 2개 신호 정합, 1~2개 모순\n"
+    "    4~9   = 신호 분산·중립 또는 역이용 조건(예: 펀딩 과열 시 추가 상승 베팅)\n"
+    "    0~3   = 파생 심리가 관점과 반대\n"
+    "- macro (0~15):\n"
+    "    12~15 = 실질금리·달러·스테이블 시총이 위험자산 우호 방향으로 명확히 정렬\n"
+    "    7~11  = 부분 정렬 또는 데이터 일부 stale\n"
+    "    3~6   = 거시 중립 또는 최근 상충 신호\n"
+    "    0~2   = 거시 명확히 반대\n"
+    "- account_risk_fit (0~10):\n"
+    "    8~10  = 현재 노출·잔고·레짐이 권장 사이즈·레버리지를 충분히 수용\n"
+    "    4~7   = 사이즈 축소 또는 분할 진입이 필요한 제약\n"
+    "    0~3   = 손실 복구 모드·증거금 빠듯·이미 동방향 풀포지션\n"
+    "- data_quality_penalty (-15~0): data_auditor warnings 1건당 -3~-5, do_not_use 항목 1건당 -2~-3 누적\n"
+    "- counter_scenario_penalty (-10~0): 반대 시나리오 1개당 -2~-4, 무시할 수 없는 모순 신호가 있으면 -8~-10\n"
+    "\n"
+    "확신도 산정 예시 (참고용 — 실제 산정은 현재 데이터로):\n"
+    "  4h SMA200 위에서 첫 풀백이 50일선 지지로 막히고 RSI 1h 60→52 후 반등, "
+    "  펀딩 +0.012%(정상)·OI 24h +6%·스큐 -1.2(콜 우세 약함). "
+    "  거시는 DXY 하락·HYG 우호. 계좌 평탄. data_auditor warnings 1건. 반대 시나리오 1개.\n"
+    "  → price_structure 20 / momentum 14 / derivatives 13 / macro 11 / account_risk_fit 8 "
+    "  / data_quality_penalty -3 / counter_scenario_penalty -3 = confidence 60.\n"
+    "\n"
+    "추론 흐름 예시 (참고용 — 형식만 모방, 결론은 현재 데이터로):\n"
+    "  먼저 보이는 사실: 4h 종가 $98,420 — 지난 3일 박스 상단 $97,800 위에서 마감.\n"
+    "  해석: 4h 박스 상단 돌파가 1봉 컨펌. 1h MACD Hist 직전 +0.12 → +0.41(상방 강화), "
+    "  EMA9>SMA50>SMA200 정배열. 펀딩 +0.034%로 정상 영역 진입.\n"
+    "  반대 시나리오: $97,800 재이탈 후 종가 닫히면 가짜 돌파. 거래량 MA 대비 90%로 약함이 약점.\n"
+    "  → 트리거: $99,200 4h 종가 돌파 시 추가, $97,500 4h 종가 이탈 시 무효화.\n"
+    "\n"
     "파생상품 데이터 해석 주의:\n"
     "25d 풋-콜 스큐는 블랙-숄즈 근사값으로 계산됩니다. "
     "부호(양수=풋 프리미엄 우세/약세 편향, 음수=콜 프리미엄 우세/강세 편향)와 "
@@ -84,7 +139,9 @@ SYSTEM_PROMPT = (
     "2. JSON 블록 뒤에는 기존 한국어 리포트 섹션을 작성하세요.\n"
     "3. 마크다운(**, ##, --- 등)과 HTML 태그는 사용하지 마세요. 단, <analysis_json> 태그만 예외로 허용됩니다.\n"
     "4. 데이터 감사관이 do_not_use_as_evidence로 표시한 항목은 근거로 쓰지 마세요.\n"
-    "5. 확정 사실, 추론, 대응을 섞지 말고 분리하세요."
+    "5. 확정 사실, 추론, 대응을 섞지 말고 분리하세요.\n"
+    "6. JSON의 view·confidence·trade.entry/stop/target은 본문 리포트와 부호·방향이 반드시 일치해야 합니다 "
+    "(예: view=상방 우위 → stop < entry < target). 모순되면 출력 전에 본문을 수정해 일치시키세요."
 )
 
 USER_PROMPT_TEMPLATE = """<analysis_request>
@@ -95,24 +152,20 @@ USER_PROMPT_TEMPLATE = """<analysis_request>
 <context>
 {context_blob}
 </context>
-{debate_block_separator}{debate_block}
+{delta_block_separator}{delta_block}{lessons_block_separator}{lessons_block}{debate_block_separator}{debate_block}
 
 <task>
 이 데이터를 바탕으로 지금 {pair_label}의 시장 관점을 애널리스트처럼 정리해주세요.
 방향성이 보이면 명확하게 매수/매도 관점을 제시하고, 지금 당장 취할 행동을 구체적으로 알려주세요. 불필요하게 중립으로 회피하지 마세요.
 데이터 감사관의 warnings와 do_not_overweight를 확신도 감점에 반영하세요.
+[직전 대비 변화] 블록이 있으면 이전 분석 이후 새로 등장한 신호·트리거 발동·레짐 전환을 우선 평가하세요.
+[과거 체크리스트] 블록이 있으면 같은 실수를 반복하지 않도록 점검하세요.
 </task>
 
 <confidence_rubric>
-확신도는 아래 100점 루브릭으로 산정하세요.
-- price_structure: 0~25
-- momentum: 0~20
-- derivatives: 0~20
-- macro: 0~15
-- account_risk_fit: 0~10
-- data_quality_penalty: 0~-15
-- counter_scenario_penalty: 0~-10
-같은 가격 시계열에서 파생된 중복 지표는 독립 근거로 중복 가산하지 마세요.
+확신도는 SYSTEM_PROMPT 의 100점 루브릭(price_structure 25 / momentum 20 / derivatives 20 / macro 15 / account_risk_fit 10 − data_quality_penalty 15 − counter_scenario_penalty 10)으로 산정하세요.
+각 축의 점수 anchor 는 system 측에 명시되어 있습니다. 같은 가격 시계열에서 파생된 중복 지표는 독립 근거로 중복 가산하지 마세요.
+confidence_breakdown 의 각 값을 합치면 confidence 와 정확히 일치해야 합니다 (penalty 는 음수로).
 </confidence_rubric>
 
 <json_contract>
@@ -387,6 +440,8 @@ def build_prompt(
     multi_tf_data: dict,
     macro_snapshot: Optional[dict] = None,
     debate_block: str = "",
+    delta_block: str = "",
+    lessons_block: str = "",
 ) -> str:
     """
     최종 애널리스트 Claude 호출용 user prompt 를 조립한다.
@@ -399,21 +454,26 @@ def build_prompt(
         미리 수집된 거시 스냅샷. None 이면 fetch_macro_context() 수행.
     debate_block : str, optional
         agents.format_debate_block() 의 출력. 빈 문자열이면 토론 섹션 생략.
+    delta_block : str, optional
+        agents.delta_context.build_delta_block() 의 출력 — 직전 분석 대비 변화.
+    lessons_block : str, optional
+        agents.memory.format_lessons_block() 의 출력 — 과거 reflection 체크리스트.
     """
     context_blob = _build_context_blob(multi_tf_data, macro_snapshot)
     now_kst_label = now_kst().strftime("%Y-%m-%d %H:%M")
 
-    # debate_block 앞에 ━━━ 구분선을 붙여 시각적 경계를 만든다. 비어 있으면 통째로 생략.
-    if debate_block:
-        debate_separator = "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    else:
-        debate_separator = ""
+    def _sep(block: str) -> str:
+        return "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" if block else ""
 
     return USER_PROMPT_TEMPLATE.format(
         now_kst=now_kst_label,
         pair_label=PAIR_LABEL,
         context_blob=context_blob,
-        debate_block_separator=debate_separator,
+        delta_block_separator=_sep(delta_block),
+        delta_block=delta_block,
+        lessons_block_separator=_sep(lessons_block),
+        lessons_block=lessons_block,
+        debate_block_separator=_sep(debate_block),
         debate_block=debate_block,
     )
 
@@ -762,11 +822,101 @@ def _system_prompt_param():
     ]
 
 
+def _analysis_tool_schema() -> dict:
+    """
+    ANALYST_USE_TOOL_SCHEMA=1 일 때 Claude 에 전달할 tool 정의.
+    스키마 강제로 JSON parse 실패가 구조적으로 사라진다.
+    """
+    return {
+        "name": "record_analysis",
+        "description": (
+            "현재 시장 분석의 구조화된 결과를 기록한다. "
+            "관점·확신도·매매 파라미터 모두 본문 한국어 리포트와 부호·방향이 일치해야 한다."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "view": {
+                    "type": "string",
+                    "enum": ["상방 우위", "하방 우위", "중립"],
+                },
+                "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+                "regime": {
+                    "type": "string",
+                    "enum": [
+                        "상승 추세", "하락 추세", "박스",
+                        "변동성 확장", "변동성 축소", "이벤트 대기 중",
+                    ],
+                },
+                "confidence_breakdown": {
+                    "type": "object",
+                    "properties": {
+                        "price_structure": {"type": "integer", "minimum": 0, "maximum": 25},
+                        "momentum": {"type": "integer", "minimum": 0, "maximum": 20},
+                        "derivatives": {"type": "integer", "minimum": 0, "maximum": 20},
+                        "macro": {"type": "integer", "minimum": 0, "maximum": 15},
+                        "account_risk_fit": {"type": "integer", "minimum": 0, "maximum": 10},
+                        "data_quality_penalty": {"type": "integer", "minimum": -15, "maximum": 0},
+                        "counter_scenario_penalty": {"type": "integer", "minimum": -10, "maximum": 0},
+                    },
+                    "required": [
+                        "price_structure", "momentum", "derivatives", "macro",
+                        "account_risk_fit", "data_quality_penalty", "counter_scenario_penalty",
+                    ],
+                    "additionalProperties": False,
+                },
+                "data_quality_notes": {"type": "array", "items": {"type": "string"}},
+                "key_facts": {"type": "array", "items": {"type": "string"}},
+                "inferences": {"type": "array", "items": {"type": "string"}},
+                "counter_scenario": {"type": "array", "items": {"type": "string"}},
+                "levels": {
+                    "type": "object",
+                    "properties": {
+                        "resistance":   {"type": ["number", "null"]},
+                        "support":      {"type": ["number", "null"]},
+                        "bull_trigger": {"type": ["number", "null"]},
+                        "bear_trigger": {"type": ["number", "null"]},
+                    },
+                    "additionalProperties": False,
+                },
+                "trade": {
+                    "type": "object",
+                    "properties": {
+                        "entry":    {"type": ["number", "null"]},
+                        "stop":     {"type": ["number", "null"]},
+                        "target":   {"type": ["number", "null"]},
+                        "leverage": {"type": "integer", "minimum": 1, "maximum": 20},
+                    },
+                    "additionalProperties": False,
+                },
+                "actions": {
+                    "type": "object",
+                    "properties": {
+                        "aggressive":   {"type": "string"},
+                        "conservative": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                "invalidation": {"type": "string"},
+                "summary":      {"type": "string"},
+            },
+            "required": [
+                "view", "confidence", "regime",
+                "confidence_breakdown",
+                "trade", "invalidation", "summary",
+            ],
+            "additionalProperties": False,
+        },
+    }
+
+
 def analyze_with_claude(
     multi_tf_data: dict,
     macro_snapshot: Optional[dict] = None,
     debate: Optional[DebateResult] = None,
     pipeline: Optional[PipelineResult] = None,
+    delta_block: str = "",
+    lessons_block: str = "",
 ) -> dict:
     """
     최종 애널리스트 Claude 호출.
@@ -775,6 +925,8 @@ def analyze_with_claude(
       1) pipeline (Phase 2+3 통합 블록, combined_block)
       2) debate   (Phase 1 단독 블록, 하위 호환)
       3) 없음
+
+    delta_block / lessons_block 은 run_full_analysis 가 만들어 전달.
     """
     client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
@@ -789,6 +941,8 @@ def analyze_with_claude(
         multi_tf_data,
         macro_snapshot=macro_snapshot,
         debate_block=debate_block,
+        delta_block=delta_block,
+        lessons_block=lessons_block,
     )
     # 실제 출력 구조: 약 10개 섹션 × 3~5줄 ≈ 600~1000 tokens.
     # 12000은 과도하며 디버깅용 대형 마진. ANALYST_MAX_TOKENS으로 조절 가능.
@@ -800,6 +954,15 @@ def analyze_with_claude(
         "system": _system_prompt_param(),
         "messages": [{"role": "user", "content": prompt}],
     }
+
+    # ── Tool Use opt-in (ANALYST_USE_TOOL_SCHEMA=1) ──
+    # JSON 스키마를 tool 로 강제하면 regex parse 실패가 구조적으로 사라짐.
+    # 본문 한국어 리포트는 동일 응답의 text 블록에서 함께 받음.
+    _use_tool = _os.getenv("ANALYST_USE_TOOL_SCHEMA", "0").lower() not in ("0", "false", "no", "")
+    if _use_tool:
+        request_kwargs["tools"] = [_analysis_tool_schema()]
+        # tool_choice 강제하지 않음 — 모델이 본문 텍스트와 tool_use 를 동시에 출력
+        # (tool_choice="any" 는 본문 누락 위험)
 
     # thinking 완전 비활성화 — 최종 분석은 이미 debate/judge/risk 블록이 reasoning을 제공하므로
     # adaptive thinking은 수만 토큰을 소모해 비용을 크게 높임. 구조화 출력에는 불필요.
@@ -834,11 +997,20 @@ def analyze_with_claude(
             f"content: {getattr(message, 'content', '(없음)')!r:.200}"
         )
 
-    # 응답 블록에서 텍스트만 추출 (thinking 블록 제외)
+    # 응답 블록에서 텍스트와 tool_use 추출 (thinking 블록 제외)
     raw_text = next(
-        (b.text for b in message.content if b.type == "text"), ""
+        (b.text for b in message.content if getattr(b, "type", None) == "text"), ""
     )
-    analysis_json = _extract_analysis_json(raw_text)
+    tool_json = None
+    for b in message.content:
+        if getattr(b, "type", None) == "tool_use" and getattr(b, "name", None) == "record_analysis":
+            inp = getattr(b, "input", None)
+            if isinstance(inp, dict):
+                tool_json = inp
+                break
+
+    # Tool Use 가 활성화·성공이면 tool_json 우선, 아니면 regex 추출 폴백
+    analysis_json = tool_json if tool_json is not None else _extract_analysis_json(raw_text)
     report_text = _strip_analysis_json_block(raw_text) or raw_text
 
     signal, confidence = parse_signal(report_text)
@@ -878,6 +1050,20 @@ def analyze_with_claude(
         except Exception as _ts_exc:
             _memory_logger.warning("extract_trading_signal 실패 — %s", _ts_exc)
 
+    # ── 사후 일관성 검증 (deterministic — 항상 실행 / LLM 검증은 env 로 opt-in) ──
+    consistency = None
+    if check_consistency is not None and isinstance(analysis_json, dict) and analysis_json:
+        try:
+            consistency = check_consistency(analysis_json, report_text)
+            if consistency and not consistency.get("ok"):
+                _memory_logger.warning(
+                    "Consistency check 실패(level=%s) — issues: %s",
+                    consistency.get("level"),
+                    consistency.get("issues"),
+                )
+        except Exception as _cc_exc:
+            _memory_logger.warning("check_consistency 실패 — %s", _cc_exc)
+
     return {
         "signal":       signal,
         "confidence":   confidence,
@@ -891,6 +1077,7 @@ def analyze_with_claude(
         "report_missing_sections": report_meta["missing_sections"],
         "trading_signal": trading_signal_dict,
         "claude_leverage": claude_leverage,
+        "consistency":  consistency,
         "debate":       (
             pipeline.debate.to_payload() if pipeline is not None and pipeline.debate
             else (debate.to_payload() if debate is not None else None)
@@ -988,6 +1175,33 @@ def run_full_analysis(
         price_at_analysis=price_at_analysis,   # ← reflection baseline
     )
 
+    # 3-a) 직전 분석 대비 변화 블록 (Δ context)
+    delta_block_str = ""
+    if build_delta_block is not None and memory_obj is not None:
+        try:
+            delta_block_str = build_delta_block(
+                multi_tf_data=multi_tf_data,
+                market_ctx=raw_ctx.get("market"),
+                macro_snapshot=raw_ctx.get("macro"),
+                current_situation_tags=situation_tags,
+                memory_obj=memory_obj,
+            )
+        except Exception as exc:
+            _memory_logger.warning("build_delta_block 실패 — %s", exc)
+
+    # 3-b) 최근 reflection 체크리스트 surfacing
+    lessons_block_str = ""
+    if (
+        format_lessons_block is not None
+        and memory_obj is not None
+        and hasattr(memory_obj, "extract_recent_checklists")
+    ):
+        try:
+            checklists = memory_obj.extract_recent_checklists(max_records=12, max_lines=5)
+            lessons_block_str = format_lessons_block(checklists)
+        except Exception as exc:
+            _memory_logger.warning("extract_recent_checklists 실패 — %s", exc)
+
     # 4) 최종 애널리스트 호출
     if progress_cb:
         progress_cb("final", "최종 애널리스트 종합 중")
@@ -996,6 +1210,8 @@ def run_full_analysis(
         multi_tf_data,
         macro_snapshot=macro_snapshot,
         pipeline=pipeline,
+        delta_block=delta_block_str,
+        lessons_block=lessons_block_str,
     )
 
     # 5) 메모리에 이번 상황-조언 페어 기록 (reflection 을 위한 씨앗)

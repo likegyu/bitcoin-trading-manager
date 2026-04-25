@@ -45,6 +45,7 @@ try:
         FinancialSituationMemory,
         AgentMemories,
         format_memory_block,
+        format_lessons_block,
         get_memory,
         get_agent_memories,
     )
@@ -53,6 +54,7 @@ except Exception as _memory_exc:
     FinancialSituationMemory = None   # type: ignore
     AgentMemories = None              # type: ignore
     format_memory_block = None        # type: ignore
+    format_lessons_block = None       # type: ignore
     get_memory = None                 # type: ignore
     get_agent_memories = None         # type: ignore
     _MEMORY_OK = False
@@ -87,6 +89,31 @@ except Exception as _signal_exc:
         type(_signal_exc).__name__, _signal_exc,
     )
 
+# ── Phase 6 (Consistency Check) ──────────────────────
+try:
+    from .consistency_check import check_consistency, format_consistency_block
+    _CONSISTENCY_OK = True
+except Exception as _consistency_exc:
+    check_consistency = None         # type: ignore
+    format_consistency_block = None  # type: ignore
+    _CONSISTENCY_OK = False
+    _log.warning(
+        "agents.consistency_check 로드 실패 — %s: %s",
+        type(_consistency_exc).__name__, _consistency_exc,
+    )
+
+# ── Delta Context (직전 분석 대비 변화 블록) ──────────
+try:
+    from .delta_context import build_delta_block
+    _DELTA_OK = True
+except Exception as _delta_exc:
+    build_delta_block = None   # type: ignore
+    _DELTA_OK = False
+    _log.warning(
+        "agents.delta_context 로드 실패 — %s: %s",
+        type(_delta_exc).__name__, _delta_exc,
+    )
+
 
 __all__ = [
     # Phase 1
@@ -107,6 +134,7 @@ __all__ = [
     "FinancialSituationMemory",
     "AgentMemories",
     "format_memory_block",
+    "format_lessons_block",
     "get_memory",
     "get_agent_memories",
     "reflect_on_record",
@@ -115,4 +143,9 @@ __all__ = [
     # Phase 5
     "extract_trading_signal",
     "TradingSignal",
+    # Phase 6
+    "check_consistency",
+    "format_consistency_block",
+    # Delta Context
+    "build_delta_block",
 ]
