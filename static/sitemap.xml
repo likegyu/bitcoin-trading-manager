@@ -3,16 +3,18 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://bitswipe.xyz/</loc>
-    <lastmod>2026-04-21</lastmod>
+    <lastmod>2026-04-25</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
-    <xhtml:link rel="alternate" hreflang="ko" href="https://bitswipe.xyz/"/>
+    <xhtml:link rel="alternate" hreflang="ko-KR" href="https://bitswipe.xyz/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bitswipe.xyz/"/>
   </url>
   <url>
     <loc>https://bitswipe.xyz/guide</loc>
-    <lastmod>2026-04-21</lastmod>
+    <lastmod>2026-04-25</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="ko" href="https://bitswipe.xyz/guide"/>
+    <xhtml:link rel="alternate" hreflang="ko-KR" href="https://bitswipe.xyz/guide"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://bitswipe.xyz/guide"/>
   </url>
 </urlset>
