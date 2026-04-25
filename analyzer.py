@@ -3,13 +3,15 @@
 # =============================================
 import re
 import time
+import json
 import anthropic
-from typing import Optional
+from typing import Any, Optional
 from config import CLAUDE_API_KEY, CLAUDE_MODEL, DEFAULT_SYMBOL, symbol_to_pair
 from indicators import summarize_indicators, fibonacci_swing_levels, fib_window_for_tf
 from account_context import fetch_account_context, format_account_context
 from market_context import fetch_market_context, format_market_context
 from macro_fetcher import fetch_macro_context, format_macro_context
+from analysis_context import build_analysis_context
 from time_utils import now_kst
 from agents import (
     run_bull_bear_debate,
@@ -42,6 +44,7 @@ import logging as _logging
 _memory_logger = _logging.getLogger(__name__)
 # 메모리 쓰기 전역 스위치 — 스테이징/백테스트 환경에서 기록 방지용
 MEMORY_WRITE_ENABLED = _os.getenv("MEMORY_WRITE_ENABLED", "1").lower() not in ("0", "false", "no")
+PROMPT_CACHE_ENABLED = _os.getenv("CLAUDE_PROMPT_CACHE_ENABLED", "1").lower() not in ("0", "false", "no")
 
 PAIR_LABEL = symbol_to_pair(DEFAULT_SYMBOL)
 
@@ -76,21 +79,84 @@ SYSTEM_PROMPT = (
     "부호(양수=풋 프리미엄 우세/약세 편향, 음수=콜 프리미엄 우세/강세 편향)와 "
     "크기 수준(예: 소폭 vs. 뚜렷한 편향)만 참고하고, 정확한 수치에 의존하지 마세요.\n"
     "\n"
-    "마크다운(**, ##, --- 등)과 HTML 태그는 절대 사용하지 마세요. 이모지와 일반 텍스트만 사용하세요."
+    "출력 원칙:\n"
+    "1. 응답 맨 앞에 <analysis_json>...</analysis_json> 블록을 반드시 작성하세요.\n"
+    "2. JSON 블록 뒤에는 기존 한국어 리포트 섹션을 작성하세요.\n"
+    "3. 마크다운(**, ##, --- 등)과 HTML 태그는 사용하지 마세요. 단, <analysis_json> 태그만 예외로 허용됩니다.\n"
+    "4. 데이터 감사관이 do_not_use_as_evidence로 표시한 항목은 근거로 쓰지 마세요.\n"
+    "5. 확정 사실, 추론, 대응을 섞지 말고 분리하세요."
 )
 
-USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_kst} (KST)
-⚠️ 각 타임프레임의 마지막 캔들은 현재 형성 중인 미완성봉입니다. 확정된 신호로 해석하지 마세요.
+USER_PROMPT_TEMPLATE = """<analysis_request>
+<timestamp>{now_kst} KST</timestamp>
+<pair>{pair_label}</pair>
+<candle_warning>각 타임프레임의 마지막 캔들은 현재 형성 중인 미완성봉입니다. 확정된 신호로 해석하지 마세요.</candle_warning>
 
-다음은 {pair_label}의 현재 멀티 타임프레임 기술적 분석 데이터입니다.
-
+<context>
 {context_blob}
+</context>
 {debate_block_separator}{debate_block}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<task>
 이 데이터를 바탕으로 지금 {pair_label}의 시장 관점을 애널리스트처럼 정리해주세요.
 방향성이 보이면 명확하게 매수/매도 관점을 제시하고, 지금 당장 취할 행동을 구체적으로 알려주세요. 불필요하게 중립으로 회피하지 마세요.
+데이터 감사관의 warnings와 do_not_overweight를 확신도 감점에 반영하세요.
+</task>
 
+<confidence_rubric>
+확신도는 아래 100점 루브릭으로 산정하세요.
+- price_structure: 0~25
+- momentum: 0~20
+- derivatives: 0~20
+- macro: 0~15
+- account_risk_fit: 0~10
+- data_quality_penalty: 0~-15
+- counter_scenario_penalty: 0~-10
+같은 가격 시계열에서 파생된 중복 지표는 독립 근거로 중복 가산하지 마세요.
+</confidence_rubric>
+
+<json_contract>
+응답 맨 앞에 반드시 순수 JSON만 담은 <analysis_json> 블록을 작성하세요.
+키는 아래와 정확히 맞추세요.
+{{
+  "view": "상방 우위|하방 우위|중립",
+  "confidence": 0,
+  "regime": "상승 추세|하락 추세|박스|변동성 확장|변동성 축소|이벤트 대기 중",
+  "confidence_breakdown": {{
+    "price_structure": 0,
+    "momentum": 0,
+    "derivatives": 0,
+    "macro": 0,
+    "account_risk_fit": 0,
+    "data_quality_penalty": 0,
+    "counter_scenario_penalty": 0
+  }},
+  "data_quality_notes": [],
+  "key_facts": [],
+  "inferences": [],
+  "counter_scenario": [],
+  "levels": {{
+    "resistance": null,
+    "support": null,
+    "bull_trigger": null,
+    "bear_trigger": null
+  }},
+  "trade": {{
+    "entry": null,
+    "stop": null,
+    "target": null,
+    "leverage": 1
+  }},
+  "actions": {{
+    "aggressive": "",
+    "conservative": ""
+  }},
+  "invalidation": "",
+  "summary": ""
+}}
+</json_contract>
+
+<report_contract>
 응답은 반드시 아래 형식으로만 작성하세요. 제목과 순서를 바꾸지 마세요:
 
 📊 관점: [상방 우위 / 하방 우위 / 중립]
@@ -134,6 +200,8 @@ USER_PROMPT_TEMPLATE = """분석 기준 시각: {now_kst} (KST)
 - [관심 레벨]의 4개 항목과 [매매 파라미터]의 4개 항목은 각 줄마다 숫자 또는 N/A만 적으세요. 이유·조건·괄호 설명 금지.
 - 2차 저항/지지 같은 추가 항목을 만들지 마세요.
 - [권장 레버리지]는 반드시 정수(예: 3배, 5배)로만 적고 범위·슬래시 표기 금지.
+</report_contract>
+</analysis_request>
 """
 
 
@@ -209,6 +277,26 @@ def _build_context_blob(
     except Exception as exc:
         account_context_str = f"[계좌 / 리스크 제약]\n  데이터 수집 실패 — {exc}"
 
+    analysis_ctx: dict[str, Any] = {}
+    try:
+        analysis_ctx = build_analysis_context(
+            multi_tf_data=multi_tf_data,
+            macro_snapshot=macro_payload,
+            market_ctx=market_ctx,
+            account_ctx=account_ctx,
+        )
+        analysis_context_str = analysis_ctx.get("text") or ""
+    except Exception as exc:
+        analysis_context_str = (
+            "<data_auditor>\n"
+            f"summary: 분석 컨텍스트 생성 실패 — {exc}\n"
+            "</data_auditor>"
+        )
+        analysis_ctx = {
+            "text": analysis_context_str,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
     # 각 타임프레임 상세 지표
     tf_order = ["1d", "4h", "1h", "15m", "5m"]
     ordered  = {tf: multi_tf_data[tf] for tf in tf_order if tf in multi_tf_data}
@@ -269,6 +357,8 @@ def _build_context_blob(
     # 최종 블록 조립 (기존 USER_PROMPT_TEMPLATE 의 내부 데이터 섹션과 동일 순서)
     indicators_summary = "\n\n".join(parts)
     context_blob = (
+        f"{analysis_context_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{tf_alignment}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{macro_context_str}\n"
@@ -288,6 +378,7 @@ def _build_context_blob(
             "macro": macro_payload,
             "market": market_ctx,
             "account": account_ctx,
+            "analysis_context": analysis_ctx,
         }
     return context_blob
 
@@ -558,6 +649,119 @@ def parse_trade_levels(text: str) -> dict:
     }
 
 
+def _strip_analysis_json_block(text: str) -> str:
+    """사용자에게 보여줄 리포트에서 기계 판독용 JSON 블록을 제거."""
+    if not text:
+        return ""
+    cleaned = re.sub(
+        r'\s*<analysis_json>\s*(?:```(?:json)?\s*)?\{.*?\}\s*(?:```\s*)?</analysis_json>\s*',
+        "",
+        text,
+        count=1,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    return cleaned.strip()
+
+
+def _extract_analysis_json(text: str) -> dict:
+    """Claude 응답의 <analysis_json> 블록을 dict로 파싱. 실패하면 빈 dict."""
+    if not text:
+        return {}
+    m = re.search(
+        r'<analysis_json>\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?</analysis_json>',
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if not m:
+        return {}
+
+    payload = m.group(1).strip()
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        # 일부 모델이 마지막 쉼표를 남기는 경우만 가볍게 보정한다.
+        payload = re.sub(r',\s*([}\]])', r'\1', payload)
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _price_or_none(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        num = float(value)
+        return num if num > 0 else None
+    text = str(value).strip()
+    if not text or re.match(r'^(?:n/?a|null|none|-)$', text, re.IGNORECASE):
+        return None
+    m = re.search(r'[-+]?\d[\d,]*(?:\.\d+)?', text)
+    if not m:
+        return None
+    try:
+        num = float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+    return num if num > 0 else None
+
+
+def _int_or_none(value: Any, min_value: int, max_value: int) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        num = int(round(float(value)))
+    else:
+        m = re.search(r'-?\d+', str(value))
+        if not m:
+            return None
+        num = int(m.group(0))
+    if min_value <= num <= max_value:
+        return num
+    return None
+
+
+def _signal_from_structured(analysis_json: dict) -> Optional[str]:
+    view = str(analysis_json.get("view") or "").strip()
+    for raw_view, signal in VIEW_TO_SIGNAL.items():
+        if raw_view in view:
+            return signal
+    if view in ("매수", "매도", "홀드"):
+        return view
+    return None
+
+
+def _levels_from_structured(analysis_json: dict) -> dict:
+    levels = analysis_json.get("levels") if isinstance(analysis_json, dict) else None
+    trade = analysis_json.get("trade") if isinstance(analysis_json, dict) else None
+    levels = levels if isinstance(levels, dict) else {}
+    trade = trade if isinstance(trade, dict) else {}
+
+    return {
+        "resistance": _price_or_none(levels.get("resistance")),
+        "support": _price_or_none(levels.get("support")),
+        "bull_trigger": _price_or_none(levels.get("bull_trigger")),
+        "bear_trigger": _price_or_none(levels.get("bear_trigger")),
+        "entry": _price_or_none(trade.get("entry")),
+        "stop": _price_or_none(trade.get("stop")),
+        "target": _price_or_none(trade.get("target")),
+    }
+
+
+def _system_prompt_param():
+    """Anthropic prompt caching: 정적 system prompt를 cache breakpoint로 표시."""
+    if not PROMPT_CACHE_ENABLED:
+        return SYSTEM_PROMPT
+    return [
+        {
+            "type": "text",
+            "text": SYSTEM_PROMPT,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
 def analyze_with_claude(
     multi_tf_data: dict,
     macro_snapshot: Optional[dict] = None,
@@ -593,7 +797,7 @@ def analyze_with_claude(
     request_kwargs = {
         "model": CLAUDE_MODEL,
         "max_tokens": _analyst_max_tokens,
-        "system": SYSTEM_PROMPT,
+        "system": _system_prompt_param(),
         "messages": [{"role": "user", "content": prompt}],
     }
 
@@ -610,6 +814,11 @@ def analyze_with_claude(
             break
 
         except anthropic.APIStatusError as e:
+            if e.status_code == 400 and request_kwargs.get("system") != SYSTEM_PROMPT:
+                # 모델/SDK 조합이 cache_control system block을 받지 못하면
+                # 동일 프롬프트를 일반 system 문자열로 한 번 더 시도한다.
+                request_kwargs["system"] = SYSTEM_PROMPT
+                continue
             if e.status_code in (429, 529) and attempt < max_retries - 1:
                 time.sleep(wait)
                 wait *= 2  # 10 → 20 → 40 → 80초
@@ -629,10 +838,31 @@ def analyze_with_claude(
     raw_text = next(
         (b.text for b in message.content if b.type == "text"), ""
     )
-    signal, confidence = parse_signal(raw_text)
-    trade_levels = parse_trade_levels(raw_text)
-    report_meta = parse_report_sections(raw_text)
-    claude_leverage = parse_leverage(raw_text)
+    analysis_json = _extract_analysis_json(raw_text)
+    report_text = _strip_analysis_json_block(raw_text) or raw_text
+
+    signal, confidence = parse_signal(report_text)
+    trade_levels = parse_trade_levels(report_text)
+    report_meta = parse_report_sections(report_text)
+    claude_leverage = parse_leverage(report_text)
+
+    structured_signal = _signal_from_structured(analysis_json)
+    structured_confidence = _int_or_none(analysis_json.get("confidence"), 0, 100)
+    structured_leverage = None
+    if isinstance(analysis_json.get("trade"), dict):
+        structured_leverage = _int_or_none(analysis_json["trade"].get("leverage"), 1, 20)
+
+    if structured_signal:
+        signal = structured_signal
+    if structured_confidence is not None:
+        confidence = structured_confidence
+    if structured_leverage is not None:
+        claude_leverage = structured_leverage
+
+    structured_levels = _levels_from_structured(analysis_json)
+    for key, value in structured_levels.items():
+        if value is not None:
+            trade_levels[key] = value
 
     # Judge 결과 추출 (signal processing 에 활용)
     judge_result = (
@@ -643,7 +873,7 @@ def analyze_with_claude(
     trading_signal_dict = None
     if extract_trading_signal is not None:
         try:
-            ts = extract_trading_signal(raw_text, judge_result=judge_result)
+            ts = extract_trading_signal(report_text, judge_result=judge_result)
             trading_signal_dict = ts.to_dict()
         except Exception as _ts_exc:
             _memory_logger.warning("extract_trading_signal 실패 — %s", _ts_exc)
@@ -651,7 +881,9 @@ def analyze_with_claude(
     return {
         "signal":       signal,
         "confidence":   confidence,
-        "raw_text":     raw_text,
+        "raw_text":     report_text,
+        "raw_response":  raw_text,
+        "analysis_json": analysis_json,
         "trade_levels": trade_levels,
         "prompt_used":  prompt,
         "report_sections": report_meta["sections"],
@@ -777,7 +1009,26 @@ def run_full_analysis(
                     "judge_verdict": pipeline.judge.verdict,
                     "judge_bull_key": pipeline.judge.bull_key,
                     "judge_bear_key": pipeline.judge.bear_key,
+                    "judge_rubric_scores": getattr(pipeline.judge, "rubric_scores", {}),
                 }
+            analysis_ctx_meta = raw_ctx.get("analysis_context") or {}
+            derived_meta = analysis_ctx_meta.get("derived") or {}
+            derived_summary = {
+                "higher_tf_bias": derived_meta.get("higher_tf_bias"),
+                "lower_tf_bias": derived_meta.get("lower_tf_bias"),
+                "conflicts": derived_meta.get("conflicts") or [],
+                "timeframes": [
+                    {
+                        "tf": f.get("tf"),
+                        "trend_bias": f.get("trend_bias"),
+                        "structure": f.get("structure"),
+                        "rsi_zone": f.get("rsi_zone"),
+                        "atr_pct": f.get("atr_pct"),
+                    }
+                    for f in (derived_meta.get("timeframes") or [])
+                    if isinstance(f, dict)
+                ],
+            }
             stored = memory_obj.add_situation(
                 situation=situation_for_memory,
                 advice=result.get("raw_text", ""),
@@ -785,6 +1036,13 @@ def run_full_analysis(
                 meta={
                     "signal": result.get("signal"),
                     "confidence": result.get("confidence"),
+                    "analysis_json": result.get("analysis_json") or {},
+                    "confidence_breakdown": (
+                        (result.get("analysis_json") or {}).get("confidence_breakdown") or {}
+                    ),
+                    "data_quality": analysis_ctx_meta.get("quality") or {},
+                    "data_auditor": analysis_ctx_meta.get("auditor") or {},
+                    "derived_features_summary": derived_summary,
                     "trade_levels": result.get("trade_levels"),
                     "trading_signal": result.get("trading_signal"),
                     "pair": PAIR_LABEL,
@@ -800,5 +1058,3 @@ def run_full_analysis(
             _memory_logger.warning("memory.add_situation 실패 — %s", exc)
 
     return result
-
-

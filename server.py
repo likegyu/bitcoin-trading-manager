@@ -219,6 +219,7 @@ def _persist_analysis_history(payload: dict):
             "regime":      sections.get("regime"),
             "summary":     sections.get("summary"),
             "trade_levels": payload.get("trade_levels"),
+            "analysis_json": payload.get("analysis_json"),
         }
         with open(ANALYSIS_HISTORY_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -472,6 +473,7 @@ def _build_payload(tf_data: dict, price: float, analysis: dict) -> dict:
         "signal":       analysis["signal"],
         "confidence":   analysis["confidence"],
         "raw_text":     analysis["raw_text"],
+        "analysis_json": analysis.get("analysis_json") or {},
         "trade_levels": analysis["trade_levels"],
         "report_sections": analysis.get("report_sections", {}),
         "report_format_ok": analysis.get("report_format_ok", False),
@@ -1795,6 +1797,7 @@ async def reflect_endpoint():
                 price_now=price_now,
                 elapsed_seconds=el,
                 memory=analyst_memory,
+                decision_meta=r.meta or {},
             ),
         )
         all_results.append(res.to_dict())
@@ -1830,6 +1833,7 @@ async def reflect_endpoint():
                             price_now=price_now,
                             elapsed_seconds=el,
                             memory=rm,
+                            decision_meta=r.meta or {},
                         ),
                     )
                     all_results.append(res.to_dict())

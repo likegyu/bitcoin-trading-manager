@@ -14,6 +14,7 @@
 # =============================================
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -116,11 +117,16 @@ REFLECTION_USER_TEMPLATE = """[과거 판단 시점] {past_ts}
 {past_advice}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[판단 메타]
+{decision_meta_block}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [사후 가격 변화]
 기준가: ${price_then:,.2f}
 현재가: ${price_now:,.2f}
 변화율: {pct_change:+.2f}% ({direction})
 경과 시간: {elapsed_label}
+방향성 평가: {decision_evaluation}
 
 위 정보를 바탕으로 리플렉션을 작성하세요. 마지막 줄은 반드시
 '다음 체크리스트:' 로 시작하는 1~2줄 요약으로 마치세요.
@@ -137,6 +143,7 @@ class ReflectionResult:
     pct_change: float
     reflection_text: str
     updated: bool           # 메모리에 outcome 업데이트 성공 여부
+    decision_evaluation: str = ""
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -148,6 +155,7 @@ class ReflectionResult:
             "pct_change":      round(self.pct_change, 4),
             "reflection_text": self.reflection_text,
             "updated":         self.updated,
+            "decision_evaluation": self.decision_evaluation,
             "error":           self.error,
         }
 
@@ -184,6 +192,107 @@ def _elapsed_label(seconds: float) -> str:
     return f"{seconds / 86400:.1f}일"
 
 
+def _compact_decision_meta(role: str, decision_meta: Optional[dict]) -> str:
+    if not decision_meta:
+        return "(메타 없음)"
+
+    meta = decision_meta if isinstance(decision_meta, dict) else {}
+    analysis_json = meta.get("analysis_json") if isinstance(meta.get("analysis_json"), dict) else {}
+    trade_levels = meta.get("trade_levels") if isinstance(meta.get("trade_levels"), dict) else {}
+    quality = meta.get("data_quality") if isinstance(meta.get("data_quality"), dict) else {}
+    auditor = meta.get("data_auditor") if isinstance(meta.get("data_auditor"), dict) else {}
+    derived = meta.get("derived_features_summary") if isinstance(meta.get("derived_features_summary"), dict) else {}
+    confidence_breakdown = (
+        meta.get("confidence_breakdown")
+        if isinstance(meta.get("confidence_breakdown"), dict)
+        else analysis_json.get("confidence_breakdown")
+    )
+
+    lines = [
+        f"role={role}",
+        f"pair={meta.get('pair') or '(unknown)'}",
+    ]
+    if meta.get("signal") or analysis_json.get("view"):
+        lines.append(f"signal={meta.get('signal') or analysis_json.get('view')}")
+    if meta.get("confidence") is not None or analysis_json.get("confidence") is not None:
+        lines.append(f"confidence={meta.get('confidence', analysis_json.get('confidence'))}")
+    if analysis_json.get("regime"):
+        lines.append(f"regime={analysis_json.get('regime')}")
+    if meta.get("verdict") or meta.get("judge_verdict"):
+        lines.append(f"judge_verdict={meta.get('verdict') or meta.get('judge_verdict')}")
+    if trade_levels:
+        lines.append("trade_levels=" + json.dumps(trade_levels, ensure_ascii=False, sort_keys=True)[:500])
+    if confidence_breakdown:
+        lines.append(
+            "confidence_breakdown="
+            + json.dumps(confidence_breakdown, ensure_ascii=False, sort_keys=True)[:500]
+        )
+    if quality:
+        lines.append(f"data_quality={quality.get('grade')}({quality.get('score')}/100)")
+    if auditor.get("summary"):
+        lines.append(f"data_auditor={auditor.get('summary')}")
+    if derived:
+        lines.append(
+            "derived_bias="
+            f"higher:{derived.get('higher_tf_bias')}, lower:{derived.get('lower_tf_bias')}, "
+            f"conflicts:{derived.get('conflicts') or []}"
+        )
+    return "\n".join(lines)
+
+
+def _expected_direction(role: str, decision_meta: Optional[dict]) -> str:
+    meta = decision_meta if isinstance(decision_meta, dict) else {}
+    analysis_json = meta.get("analysis_json") if isinstance(meta.get("analysis_json"), dict) else {}
+    raw = " ".join(str(x or "") for x in (
+        meta.get("signal"),
+        analysis_json.get("view"),
+        meta.get("verdict"),
+        meta.get("judge_verdict"),
+    ))
+
+    if role == "bull" and not raw.strip():
+        return "long"
+    if role == "bear" and not raw.strip():
+        return "short"
+
+    if any(token in raw for token in ("매수", "롱", "상방", "long", "buy")):
+        return "long"
+    if any(token in raw for token in ("매도", "숏", "하방", "short", "sell")):
+        return "short"
+    if any(token in raw for token in ("홀드", "중립", "neutral")):
+        return "neutral"
+    return "unknown"
+
+
+def _directional_evaluation(role: str, decision_meta: Optional[dict], pct: float) -> str:
+    expected = _expected_direction(role, decision_meta)
+    threshold = 0.20
+    if expected == "unknown":
+        return "평가 불가: 당시 방향성 메타 없음"
+    if abs(pct) < threshold:
+        realized = "flat"
+    elif pct > 0:
+        realized = "up"
+    else:
+        realized = "down"
+
+    if expected == "long":
+        if realized == "up":
+            return "방향성 적중: 상방 판단 후 가격 상승"
+        if realized == "down":
+            return "방향성 오판: 상방 판단 후 가격 하락"
+        return "중립 결과: 상방 판단 후 유의미한 이동 없음"
+    if expected == "short":
+        if realized == "down":
+            return "방향성 적중: 하방 판단 후 가격 하락"
+        if realized == "up":
+            return "방향성 오판: 하방 판단 후 가격 상승"
+        return "중립 결과: 하방 판단 후 유의미한 이동 없음"
+    if realized == "flat":
+        return "중립 판단 적중: 유의미한 이동 없음"
+    return "중립 판단 미흡: 방향성 이동을 놓침"
+
+
 def reflect_on_record(
     record_ts: str,
     situation: str,
@@ -193,6 +302,7 @@ def reflect_on_record(
     elapsed_seconds: float,
     memory: Optional[FinancialSituationMemory] = None,
     memory_name: str = "analyst",
+    decision_meta: Optional[dict] = None,
 ) -> ReflectionResult:
     """
     단일 과거 기록에 대해 리플렉션을 실행하고 메모리의 outcome 필드를 업데이트한다.
@@ -207,6 +317,7 @@ def reflect_on_record(
         price_now=price_now,
         elapsed_seconds=elapsed_seconds,
         memory=memory,
+        decision_meta=decision_meta,
     )
 
 
@@ -219,6 +330,7 @@ def reflect_for_role(
     price_now: float,
     elapsed_seconds: float,
     memory: Optional[FinancialSituationMemory] = None,
+    decision_meta: Optional[dict] = None,
 ) -> ReflectionResult:
     """
     역할별 전용 시스템 프롬프트를 사용해 리플렉션을 실행한다.
@@ -262,6 +374,8 @@ def reflect_for_role(
     if price_then and price_then != 0:
         pct = (price_now - price_then) / price_then * 100.0
     direction = "상승" if pct > 0 else ("하락" if pct < 0 else "정체")
+    decision_meta_block = _compact_decision_meta(role, decision_meta)
+    decision_evaluation = _directional_evaluation(role, decision_meta, pct)
 
     system_prompt = ROLE_REFLECTION_SYSTEMS.get(role, DEFAULT_REFLECTION_SYSTEM)
     prompt = REFLECTION_USER_TEMPLATE.format(
@@ -273,6 +387,8 @@ def reflect_for_role(
         price_now=price_now,
         pct_change=pct,
         direction=direction,
+        decision_meta_block=decision_meta_block,
+        decision_evaluation=decision_evaluation,
         elapsed_label=_elapsed_label(elapsed_seconds),
     )
 
@@ -295,6 +411,7 @@ def reflect_for_role(
     outcome_block = (
         f"[사후 {_elapsed_label(elapsed_seconds)}] "
         f"${price_then:,.2f} → ${price_now:,.2f} ({pct:+.2f}%, {direction})\n"
+        f"평가: {decision_evaluation}\n"
         f"{reflection_text}"
     )
     updated = memory.update_outcome(record_ts, outcome_block)
@@ -307,4 +424,5 @@ def reflect_for_role(
         pct_change=pct,
         reflection_text=reflection_text,
         updated=updated,
+        decision_evaluation=decision_evaluation,
     )

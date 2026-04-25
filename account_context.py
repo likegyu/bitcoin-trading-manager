@@ -2,6 +2,8 @@
 # 내 계좌 상태 수집 (Binance Futures)
 # 잔고 / 오픈 포지션 / 오늘 실현 손익
 # =============================================
+from __future__ import annotations
+
 import hmac
 import hashlib
 import time as _time

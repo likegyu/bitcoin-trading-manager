@@ -12,8 +12,9 @@
 from __future__ import annotations
 
 import os
+import re
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Callable, Optional
 
 import anthropic
@@ -44,9 +45,12 @@ JUDGE_SYSTEM = """당신은 BTC 선물 시장의 'Investment Judge(투자 심판
 4. 판정 이유를 구체적 데이터 근거(가격 구조, 파생심리, 거시)로 2~3줄 서술.
 5. 다음 단계(Risk Triad)가 이 결론을 토대로 리스크 규모를 논의할 수 있도록
    'Bull 의 핵심 근거 한 줄 / Bear 의 핵심 근거 한 줄' 을 마지막에 요약.
+6. 점수는 -2~+2 정수로만 평가하세요. +2는 해당 축이 판정 방향을 강하게 지지,
+   0은 중립/불충분, -2는 판정 방향에 강하게 반대한다는 뜻입니다.
 
 출력 형식 (반드시 준수):
 판정: [상방 우위 / 하방 우위 / 중립]
+점수: price_structure=0, momentum=0, derivatives=0, macro=0, account_risk_fit=0, counter_scenario=0
 이유: [2~3줄 구체적 근거]
 Bull 핵심: [한 줄]
 Bear 핵심: [한 줄]
@@ -81,6 +85,7 @@ class JudgeResult:
     bull_key: str       # Bull 핵심 근거 한 줄
     bear_key: str       # Bear 핵심 근거 한 줄
     raw_text: str       # LLM 원본 출력
+    rubric_scores: dict[str, int] = field(default_factory=dict)
     model: str = ""
     elapsed_s: float = 0.0
     error: Optional[str] = None
@@ -92,7 +97,13 @@ class JudgeResult:
 def _parse_judge_output(text: str) -> dict:
     """Judge LLM 출력에서 구조화된 필드 추출."""
     lines = text.strip().splitlines()
-    result = {"verdict": "", "reasoning": "", "bull_key": "", "bear_key": ""}
+    result = {
+        "verdict": "",
+        "reasoning": "",
+        "bull_key": "",
+        "bear_key": "",
+        "rubric_scores": {},
+    }
     reasoning_lines = []
     in_reasoning = False
 
@@ -100,6 +111,13 @@ def _parse_judge_output(text: str) -> dict:
         stripped = line.strip()
         if stripped.startswith("판정:"):
             result["verdict"] = stripped[len("판정:"):].strip()
+            in_reasoning = False
+        elif stripped.startswith("점수:"):
+            score_text = stripped[len("점수:"):].strip()
+            result["rubric_scores"] = {
+                key: int(val)
+                for key, val in re.findall(r'([a-z_]+)\s*=\s*(-?\d+)', score_text)
+            }
             in_reasoning = False
         elif stripped.startswith("이유:"):
             val = stripped[len("이유:"):].strip()
@@ -218,6 +236,7 @@ def run_judge(
         bull_key=parsed["bull_key"],
         bear_key=parsed["bear_key"],
         raw_text=raw,
+        rubric_scores=parsed.get("rubric_scores") or {},
         model=JUDGE_MODEL,
         elapsed_s=round(elapsed, 2),
     )
@@ -235,6 +254,9 @@ def format_judge_block(judge: Optional[JudgeResult]) -> str:
 
     lines = ["[투자 심판 결론]"]
     lines.append(f"  판정: {judge.verdict}")
+    if judge.rubric_scores:
+        score_line = ", ".join(f"{k}={v}" for k, v in judge.rubric_scores.items())
+        lines.append(f"  점수: {score_line}")
     if judge.reasoning:
         lines.append(f"  이유: {judge.reasoning}")
     if judge.bull_key:
