@@ -36,9 +36,32 @@ CONSISTENCY_LLM_MODEL = os.getenv(
     "CONSISTENCY_LLM_MODEL", "claude-haiku-4-5-20251001"
 )
 CONSISTENCY_LLM_MAX_TOKENS = int(os.getenv("CONSISTENCY_LLM_MAX_TOKENS", "300"))
+CONFIDENCE_MIN = 1
+CONFIDENCE_MAX = 100
+CONFIDENCE_BREAKDOWN_BOUNDS = {
+    "price_structure": (0, 30),
+    "momentum": (0, 20),
+    "derivatives": (0, 20),
+    "macro": (0, 15),
+    "account_risk_fit": (0, 15),
+    "data_quality_penalty": (-15, 0),
+    "counter_scenario_penalty": (-10, 0),
+}
 
 
 # ── 결정적 검증 ──────────────────────────────────────
+def _clamp_confidence(value: int) -> int:
+    return max(CONFIDENCE_MIN, min(CONFIDENCE_MAX, int(value)))
+
+
+def _clamp_int(value: Any, min_value: int, max_value: int) -> Optional[int]:
+    try:
+        num = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(min_value, min(max_value, num))
+
+
 def _check_levels_geometry(view: str, trade: dict) -> list[str]:
     """view 와 trade entry/stop/target 의 부호 관계 검증."""
     issues: list[str] = []
@@ -81,18 +104,23 @@ def _check_confidence_breakdown(analysis_json: dict) -> list[str]:
         "price_structure", "momentum", "derivatives", "macro",
         "account_risk_fit", "data_quality_penalty", "counter_scenario_penalty",
     )
-    total = 0
+    normalized_total = 0
     missing = []
     for k in expected_keys:
         v = cb.get(k)
         if v is None:
             missing.append(k)
             continue
-        try:
-            total += int(v)
-        except (TypeError, ValueError):
+        min_value, max_value = CONFIDENCE_BREAKDOWN_BOUNDS[k]
+        normalized_value = _clamp_int(v, min_value, max_value)
+        if normalized_value is None:
             issues.append(f"confidence_breakdown.{k} 가 정수 아님: {v!r}")
             return issues
+        if normalized_value != v:
+            issues.append(
+                f"confidence_breakdown.{k}={v!r} 가 허용 범위 {min_value}~{max_value} 밖"
+            )
+        normalized_total += normalized_value
     if missing:
         issues.append(f"confidence_breakdown 누락: {', '.join(missing)}")
         return issues
@@ -102,10 +130,15 @@ def _check_confidence_breakdown(analysis_json: dict) -> list[str]:
     except (TypeError, ValueError):
         return issues
 
-    diff = abs(confidence_int - total)
+    if not (CONFIDENCE_MIN <= confidence_int <= CONFIDENCE_MAX):
+        issues.append(f"confidence({confidence_int}) 가 {CONFIDENCE_MIN}~{CONFIDENCE_MAX} 범위 밖")
+        return issues
+
+    expected_confidence = _clamp_confidence(normalized_total)
+    diff = abs(confidence_int - expected_confidence)
     if diff > 2:   # ±2 점 허용 (반올림 차)
         issues.append(
-            f"confidence({confidence_int}) ≠ breakdown 합({total})  "
+            f"confidence({confidence_int}) ≠ breakdown 합 clamp({normalized_total} → {expected_confidence})  "
             f"차이 {diff}점 — 모델이 합산을 안 맞춤"
         )
     return issues

@@ -148,7 +148,7 @@ def _parse_confidence(text: str) -> int:
     cleaned_text = _strip_markdown_text(text)
     m = re.search(r'(?:확신도|신뢰도)\D*?(\d{1,3})', cleaned_text)
     if m:
-        return min(int(m.group(1)), 100)
+        return max(1, min(100, int(m.group(1))))
     return 50
 
 

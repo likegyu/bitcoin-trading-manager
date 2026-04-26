@@ -3448,7 +3448,11 @@ function renderSignalBadge(signal, confidence) {
   const color = SIG_COLOR[signal] || C.dim;
   const emoji = SIG_EMOJI[signal] || "●";
   const view  = SIG_VIEW[signal] || signal || "중립";
-  const confValue = Number.isFinite(Number(confidence)) ? Number(confidence) : 0;
+  const hasConfidence = confidence !== null && confidence !== undefined && confidence !== "";
+  const rawConfidence = Number(confidence);
+  const confValue = hasConfidence && Number.isFinite(rawConfidence)
+    ? Math.max(1, Math.min(100, rawConfidence))
+    : 0;
   const badge = document.getElementById("sig-badge");
   badge.className = "sig-badge " + cls;
 
@@ -5317,19 +5321,78 @@ function updateAutoUI() {
 
 
 function escapeHtml(str) {
-  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
             .replace(/"/g,"&quot;").replace(/\n/g,"<br>");
+}
+
+function escapeMarkdownHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderMarkdownInline(str) {
+  return String(str ?? "")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+function renderBasicMarkdown(str) {
+  const lines = escapeMarkdownHtml(str).split(/\r?\n/);
+  const html = [];
+  let inList = false;
+  const closeList = () => {
+    if (inList) {
+      html.push("</ul>");
+      inList = false;
+    }
+  };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      closeList();
+      continue;
+    }
+    if (/^---+$/.test(line)) {
+      closeList();
+      html.push("<hr>");
+      continue;
+    }
+    const heading = line.match(/^#{1,5}\s+(.+)$/);
+    if (heading) {
+      closeList();
+      html.push(`<h3>${renderMarkdownInline(heading[1])}</h3>`);
+      continue;
+    }
+    const bullet = line.match(/^(?:[-*]|\u2022)\s+(.+)$/);
+    if (bullet) {
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${renderMarkdownInline(bullet[1])}</li>`);
+      continue;
+    }
+    closeList();
+    html.push(`<p>${renderMarkdownInline(line)}</p>`);
+  }
+  closeList();
+  return html.join("");
 }
 
 function renderMarkdown(str) {
   if (!str) return "";
+  const safeSource = escapeMarkdownHtml(str);
   if (typeof marked !== "undefined") {
     try {
-      return marked.parse(str, { breaks: true, gfm: true });
+      return marked.parse(safeSource, { breaks: true, gfm: true });
     } catch(e) { /* fallback */ }
   }
-  // marked 로드 실패 시 기본 escapeHtml 처리
-  return escapeHtml(str);
+  return renderBasicMarkdown(str);
 }
 
 // ══════════════════════════════════════════════

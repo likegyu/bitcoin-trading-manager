@@ -1,6 +1,7 @@
 import unittest
 
 from analyzer import (
+    _confidence_from_breakdown,
     _extract_analysis_json,
     _levels_from_structured,
     _normalize_analysis_json,
@@ -125,6 +126,74 @@ class AnalyzerStructuredOutputTests(unittest.TestCase):
         self.assertEqual(normalized["confidence"], 35)
         self.assertTrue(adjustments)
 
+    def test_confidence_breakdown_clamps_to_one_to_one_hundred(self):
+        low = {
+            "confidence_breakdown": {
+                "price_structure": 0,
+                "momentum": 0,
+                "derivatives": 0,
+                "macro": 0,
+                "account_risk_fit": 0,
+                "data_quality_penalty": -15,
+                "counter_scenario_penalty": -10,
+            },
+        }
+        high = {
+            "confidence_breakdown": {
+                "price_structure": 30,
+                "momentum": 20,
+                "derivatives": 20,
+                "macro": 15,
+                "account_risk_fit": 15,
+                "data_quality_penalty": 0,
+                "counter_scenario_penalty": 0,
+            },
+        }
+
+        self.assertEqual(_confidence_from_breakdown(low), 1)
+        self.assertEqual(_confidence_from_breakdown(high), 100)
+
+    def test_normalizes_zero_confidence_to_minimum_one(self):
+        parsed = {
+            "confidence": 0,
+            "confidence_breakdown": {
+                "price_structure": 0,
+                "momentum": 0,
+                "derivatives": 0,
+                "macro": 0,
+                "account_risk_fit": 0,
+                "data_quality_penalty": 0,
+                "counter_scenario_penalty": 0,
+            },
+        }
+
+        normalized, adjustments = _normalize_analysis_json(parsed)
+
+        self.assertEqual(normalized["confidence"], 1)
+        self.assertTrue(adjustments)
+
+    def test_normalizes_breakdown_components_before_summing(self):
+        parsed = {
+            "confidence": 55,
+            "confidence_breakdown": {
+                "price_structure": 999,
+                "momentum": 20,
+                "derivatives": 20,
+                "macro": 15,
+                "account_risk_fit": 15,
+                "data_quality_penalty": 5,
+                "counter_scenario_penalty": -99,
+            },
+        }
+
+        normalized, adjustments = _normalize_analysis_json(parsed)
+
+        self.assertEqual(normalized["confidence_breakdown"]["price_structure"], 30)
+        self.assertEqual(normalized["confidence_breakdown"]["data_quality_penalty"], 0)
+        self.assertEqual(normalized["confidence_breakdown"]["counter_scenario_penalty"], -10)
+        self.assertEqual(normalized["confidence"], 90)
+        self.assertGreaterEqual(len(adjustments), 4)
+
     def test_parse_signal_tolerates_markdown_wrapped_fields(self):
         report = (
             "📊 **관점:** **상방 우위**\n"
@@ -135,6 +204,10 @@ class AnalyzerStructuredOutputTests(unittest.TestCase):
 
         self.assertEqual(signal, "매수")
         self.assertEqual(confidence, 74)
+
+    def test_parse_signal_clamps_confidence_to_one_to_one_hundred(self):
+        self.assertEqual(parse_signal("💯 확신도: 0%")[1], 1)
+        self.assertEqual(parse_signal("💯 확신도: 150%")[1], 100)
 
 
 if __name__ == "__main__":

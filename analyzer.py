@@ -88,11 +88,11 @@ SYSTEM_PROMPT = (
     "단, 구조와 지표가 정합할 때는 자신 있게 높은 확신도를 출력하세요. 불필요하게 낮추지 마세요.\n"
     "\n"
     "확신도 루브릭 (각 축의 점수 anchor):\n"
-    "- price_structure (0~25):\n"
-    "    22~25 = 멀티 TF 구조 정합(HH/HL or LH/LL) + 핵심 레벨 클린 리테스트 + 추세선 살아있음\n"
-    "    15~21 = 한 TF의 구조는 명확하나 다른 TF 약화 신호 동반\n"
-    "    8~14  = 박스 또는 구조 모호 / 직전 스윙 무효화 조짐\n"
-    "    0~7   = 구조 깨짐·와이드 스윙·지지/저항 부재\n"
+    "- price_structure (0~30):\n"
+    "    26~30 = 멀티 TF 구조 정합(HH/HL or LH/LL) + 핵심 레벨 클린 리테스트 + 추세선 살아있음\n"
+    "    18~25 = 한 TF의 구조는 명확하나 다른 TF 약화 신호 동반\n"
+    "    9~17  = 박스 또는 구조 모호 / 직전 스윙 무효화 조짐\n"
+    "    0~8   = 구조 깨짐·와이드 스윙·지지/저항 부재\n"
     "- momentum (0~20):\n"
     "    17~20 = 다중 TF MACD/RSI 동조 + 부호 전환 또는 임계 돌파가 최근 1~3봉\n"
     "    11~16 = 1~2개 TF에서만 모멘텀 신호, 나머지는 중립\n"
@@ -108,10 +108,10 @@ SYSTEM_PROMPT = (
     "    7~11  = 부분 정렬 또는 데이터 일부 stale\n"
     "    3~6   = 거시 중립 또는 최근 상충 신호\n"
     "    0~2   = 거시 명확히 반대\n"
-    "- account_risk_fit (0~10):\n"
-    "    8~10  = 현재 노출·잔고·레짐이 권장 사이즈·레버리지를 충분히 수용\n"
-    "    4~7   = 사이즈 축소 또는 분할 진입이 필요한 제약\n"
-    "    0~3   = 손실 복구 모드·증거금 빠듯·이미 동방향 풀포지션\n"
+    "- account_risk_fit (0~15):\n"
+    "    12~15 = 현재 노출·잔고·레짐이 권장 사이즈·레버리지를 충분히 수용\n"
+    "    6~11  = 사이즈 축소 또는 분할 진입이 필요한 제약\n"
+    "    0~5   = 손실 복구 모드·증거금 빠듯·이미 동방향 풀포지션\n"
     "- data_quality_penalty (-15~0): data_auditor warnings 1건당 -3~-5, do_not_use 항목 1건당 -2~-3 누적\n"
     "- counter_scenario_penalty (-10~0): 반대 시나리오 1개당 -2~-4, 무시할 수 없는 모순 신호가 있으면 -8~-10\n"
     "\n"
@@ -119,8 +119,8 @@ SYSTEM_PROMPT = (
     "  4h SMA200 위에서 첫 풀백이 50일선 지지로 막히고 RSI 1h 60→52 후 반등, "
     "  펀딩 +0.012%(정상)·OI 24h +6%·스큐 -1.2(콜 우세 약함). "
     "  거시는 DXY 하락·HYG 우호. 계좌 평탄. data_auditor warnings 1건. 반대 시나리오 1개.\n"
-    "  → price_structure 20 / momentum 14 / derivatives 13 / macro 11 / account_risk_fit 8 "
-    "  / data_quality_penalty -3 / counter_scenario_penalty -3 = confidence 60.\n"
+    "  → price_structure 24 / momentum 14 / derivatives 13 / macro 11 / account_risk_fit 11 "
+    "  / data_quality_penalty -3 / counter_scenario_penalty -3 = confidence 67.\n"
     "\n"
     "추론 흐름 예시 (참고용 — 형식만 모방, 결론은 현재 데이터로):\n"
     "  먼저 보이는 사실: 4h 종가 $98,420 — 지난 3일 박스 상단 $97,800 위에서 마감.\n"
@@ -164,11 +164,12 @@ USER_PROMPT_TEMPLATE = """<analysis_request>
 </task>
 
 <confidence_rubric>
-확신도는 SYSTEM_PROMPT 의 100점 루브릭(price_structure 25 / momentum 20 / derivatives 20 / macro 15 / account_risk_fit 10 − data_quality_penalty 15 − counter_scenario_penalty 10)으로 산정하세요.
+확신도는 SYSTEM_PROMPT 의 100점 가산 루브릭(price_structure 30 / momentum 20 / derivatives 20 / macro 15 / account_risk_fit 15)에서 data_quality_penalty 최대 15점, counter_scenario_penalty 최대 10점을 차감해 산정하세요.
 각 축의 점수 anchor 는 system 측에 명시되어 있습니다. 같은 가격 시계열에서 파생된 중복 지표는 독립 근거로 중복 가산하지 마세요.
+최종 confidence 는 confidence_breakdown 7개 값의 합을 1~100 범위로 제한한 값입니다. 합계가 0 이하이면 1, 100 이상이면 100으로 기록하세요.
 
 [필수 자가검증 — JSON 출력 직전에 반드시 수행]
-1. confidence_breakdown 의 7개 값(penalty 2개는 음수)을 더하면 confidence 와 정확히 일치해야 합니다.
+1. confidence_breakdown 의 7개 값(penalty 2개는 음수)을 더한 뒤 1~100으로 제한하면 confidence 와 정확히 일치해야 합니다.
    합산이 어긋나면 본문 출력 전에 confidence 또는 breakdown 항목을 스스로 수정하세요.
 2. 본문 💯 확신도 % 와 JSON confidence 가 다르면 둘 다 동일하게 맞추세요.
 3. view 와 trade.entry/stop/target 의 부호 정합 — 상방이면 stop<entry<target, 하방이면 target<entry<stop.
@@ -180,7 +181,7 @@ USER_PROMPT_TEMPLATE = """<analysis_request>
 키는 아래와 정확히 맞추세요.
 {{
   "view": "상방 우위|하방 우위|중립",
-  "confidence": 0,
+  "confidence": 1,
   "regime": "상승 추세|하락 추세|박스|변동성 확장|변동성 축소|이벤트 대기 중",
   "confidence_breakdown": {{
     "price_structure": 0,
@@ -495,6 +496,29 @@ CONFIDENCE_BREAKDOWN_KEYS = (
     "price_structure", "momentum", "derivatives", "macro",
     "account_risk_fit", "data_quality_penalty", "counter_scenario_penalty",
 )
+CONFIDENCE_BREAKDOWN_BOUNDS = {
+    "price_structure": (0, 30),
+    "momentum": (0, 20),
+    "derivatives": (0, 20),
+    "macro": (0, 15),
+    "account_risk_fit": (0, 15),
+    "data_quality_penalty": (-15, 0),
+    "counter_scenario_penalty": (-10, 0),
+}
+CONFIDENCE_MIN = 1
+CONFIDENCE_MAX = 100
+
+
+def _clamp_confidence(value: int) -> int:
+    return max(CONFIDENCE_MIN, min(CONFIDENCE_MAX, int(value)))
+
+
+def _clamp_int(value: Any, min_value: int, max_value: int) -> Optional[int]:
+    try:
+        num = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(min_value, min(max_value, num))
 
 
 def _strip_markdown_text(text: Any) -> str:
@@ -661,7 +685,7 @@ def parse_signal(text: str) -> tuple[str, int]:
     confidence = 50
     conf_match = re.search(r'(?:확신도|신뢰도)\D*?(\d{1,3})', cleaned_text)
     if conf_match:
-        confidence = min(int(conf_match.group(1)), 100)
+        confidence = _clamp_confidence(int(conf_match.group(1)))
 
     return signal, confidence
 
@@ -850,20 +874,36 @@ def _levels_from_structured(analysis_json: dict) -> dict:
     }
 
 
-def _confidence_from_breakdown(analysis_json: dict) -> Optional[int]:
-    cb = analysis_json.get("confidence_breakdown") if isinstance(analysis_json, dict) else None
+def _normalized_confidence_breakdown(cb: Any) -> tuple[Optional[dict], list[str]]:
     if not isinstance(cb, dict):
-        return None
+        return None, []
 
-    total = 0
+    normalized: dict[str, int] = {}
+    adjustments: list[str] = []
     for key in CONFIDENCE_BREAKDOWN_KEYS:
         if key not in cb:
-            return None
-        try:
-            total += int(cb[key])
-        except (TypeError, ValueError):
-            return None
-    return max(0, min(100, total))
+            return None, []
+        min_value, max_value = CONFIDENCE_BREAKDOWN_BOUNDS[key]
+        normalized_value = _clamp_int(cb.get(key), min_value, max_value)
+        if normalized_value is None:
+            return None, []
+        if normalized_value != cb.get(key):
+            adjustments.append(
+                f"confidence_breakdown.{key} {cb.get(key)!r} -> {normalized_value} "
+                f"because allowed range is {min_value}..{max_value}"
+            )
+        normalized[key] = normalized_value
+    return normalized, adjustments
+
+
+def _confidence_from_breakdown(analysis_json: dict) -> Optional[int]:
+    cb = analysis_json.get("confidence_breakdown") if isinstance(analysis_json, dict) else None
+    normalized_cb, _ = _normalized_confidence_breakdown(cb)
+    if normalized_cb is None:
+        return None
+
+    total = sum(normalized_cb.values())
+    return _clamp_confidence(total)
 
 
 def _normalize_analysis_json(analysis_json: dict) -> tuple[dict, list[str]]:
@@ -873,8 +913,15 @@ def _normalize_analysis_json(analysis_json: dict) -> tuple[dict, list[str]]:
     normalized = dict(analysis_json)
     adjustments: list[str] = []
 
+    normalized_cb, breakdown_adjustments = _normalized_confidence_breakdown(
+        normalized.get("confidence_breakdown")
+    )
+    if normalized_cb is not None:
+        normalized["confidence_breakdown"] = normalized_cb
+        adjustments.extend(breakdown_adjustments)
+
     breakdown_confidence = _confidence_from_breakdown(normalized)
-    stated_confidence = _int_or_none(normalized.get("confidence"), 0, 100)
+    stated_confidence = _int_or_none(normalized.get("confidence"), CONFIDENCE_MIN, CONFIDENCE_MAX)
     if breakdown_confidence is not None and (
         stated_confidence is None or abs(stated_confidence - breakdown_confidence) > 2
     ):
@@ -924,7 +971,7 @@ def _render_report_from_structured(analysis_json: dict) -> str:
 
     confidence = _confidence_from_breakdown(analysis_json)
     if confidence is None:
-        confidence = _int_or_none(analysis_json.get("confidence"), 0, 100)
+        confidence = _int_or_none(analysis_json.get("confidence"), CONFIDENCE_MIN, CONFIDENCE_MAX)
     if confidence is None:
         confidence = 50
 
@@ -1045,7 +1092,7 @@ def _analysis_tool_schema() -> dict:
                     "type": "string",
                     "enum": ["상방 우위", "하방 우위", "중립"],
                 },
-                "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+                "confidence": {"type": "integer", "minimum": CONFIDENCE_MIN, "maximum": CONFIDENCE_MAX},
                 "regime": {
                     "type": "string",
                     "enum": [
@@ -1056,11 +1103,11 @@ def _analysis_tool_schema() -> dict:
                 "confidence_breakdown": {
                     "type": "object",
                     "properties": {
-                        "price_structure": {"type": "integer", "minimum": 0, "maximum": 25},
+                        "price_structure": {"type": "integer", "minimum": 0, "maximum": 30},
                         "momentum": {"type": "integer", "minimum": 0, "maximum": 20},
                         "derivatives": {"type": "integer", "minimum": 0, "maximum": 20},
                         "macro": {"type": "integer", "minimum": 0, "maximum": 15},
-                        "account_risk_fit": {"type": "integer", "minimum": 0, "maximum": 10},
+                        "account_risk_fit": {"type": "integer", "minimum": 0, "maximum": 15},
                         "data_quality_penalty": {"type": "integer", "minimum": -15, "maximum": 0},
                         "counter_scenario_penalty": {"type": "integer", "minimum": -10, "maximum": 0},
                     },
@@ -1153,10 +1200,9 @@ def analyze_with_claude(
         delta_block=delta_block,
         lessons_block=lessons_block,
     )
-    # 실제 출력 구조: 약 10개 섹션 × 3~5줄 ≈ 600~1000 tokens.
-    # 12000은 과도하며 디버깅용 대형 마진. ANALYST_MAX_TOKENS으로 조절 가능.
-    # 기본값 4000: 충분한 여유 + 비용·속도 개선.
-    _analyst_max_tokens = int(_os.getenv("ANALYST_MAX_TOKENS", "4000"))
+    # 실제 출력 구조: tool_use JSON + 한국어 리포트 10개 섹션 ≈ 1500~3000 tokens.
+    # 기본값 5000: 구조화 출력과 본문을 함께 받을 때 마지막 섹션 잘림을 피하는 여유.
+    _analyst_max_tokens = int(_os.getenv("ANALYST_MAX_TOKENS", "5000"))
     request_kwargs = {
         "model": CLAUDE_MODEL,
         "max_tokens": _analyst_max_tokens,
@@ -1240,7 +1286,9 @@ def analyze_with_claude(
     claude_leverage = parse_leverage(report_text)
 
     structured_signal = _signal_from_structured(analysis_json)
-    structured_confidence = _int_or_none(analysis_json.get("confidence"), 0, 100)
+    structured_confidence = _int_or_none(
+        analysis_json.get("confidence"), CONFIDENCE_MIN, CONFIDENCE_MAX
+    )
     structured_leverage = None
     if isinstance(analysis_json.get("trade"), dict):
         structured_leverage = _int_or_none(analysis_json["trade"].get("leverage"), 1, 10)

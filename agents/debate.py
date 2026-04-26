@@ -38,10 +38,8 @@ DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-haiku-4-5-20251001")
 # max_rounds=2 → Bull→Bear→Bull반박→Bear반박, 총 4회.
 DEBATE_MAX_ROUNDS = int(os.getenv("DEBATE_MAX_ROUNDS", "1"))
 
-# 출력 목표: 600~900자 분석. 마크다운 허용 후 실측 평균 ~2000~2200자.
-# 1800 토큰에서 bull 끊김(2073자)/bear 마침(2083자) 관측.
-# 한국어+마크다운은 글자당 ≈ 0.85 토큰 → 2200자 ≈ 1900토큰.
-# 안전 마진 50% 포함 3000으로 상향. 비용 부담 적고 잘림 0 보장.
+# 출력 목표: 900~1000자 이내. 한국어+숫자 혼합 출력은 대략 0.8~1.0토큰/자.
+# 3000 토큰이면 프롬프트 위반으로 길게 써도 마지막 핵심 근거 블록이 잘릴 가능성이 낮다.
 DEBATE_MAX_OUTPUT_TOKENS = int(os.getenv("DEBATE_MAX_OUTPUT_TOKENS", "3000"))
 
 # 토론 자체를 끄고 싶을 때: DEBATE_ENABLED=0

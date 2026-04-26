@@ -28,6 +28,13 @@ class SignalProcessingTests(unittest.TestCase):
         self.assertEqual(signal.judge_verdict, "하방 우위")
         self.assertFalse(signal.judge_aligned)
 
+    def test_confidence_is_clamped_to_one_to_one_hundred(self):
+        low = extract_trading_signal("📊 관점: 중립\n💯 확신도: 0%")
+        high = extract_trading_signal("📊 관점: 중립\n💯 확신도: 150%")
+
+        self.assertEqual(low.confidence, 1)
+        self.assertEqual(high.confidence, 100)
+
 
 if __name__ == "__main__":
     unittest.main()
