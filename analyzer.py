@@ -794,7 +794,11 @@ def parse_trade_levels(text: str) -> dict:
 
 
 def _strip_analysis_json_block(text: str) -> str:
-    """사용자에게 보여줄 리포트에서 기계 판독용 JSON 블록을 제거."""
+    """사용자에게 보여줄 리포트에서 기계 판독용 JSON 블록을 제거.
+
+    1차: <analysis_json>...</analysis_json> 정상 매치
+    2차: 닫는 태그 누락 시 brace counting 으로 JSON 끝 탐지 (fallback)
+    """
     if not text:
         return ""
     cleaned = re.sub(
@@ -804,6 +808,53 @@ def _strip_analysis_json_block(text: str) -> str:
         count=1,
         flags=re.DOTALL | re.IGNORECASE,
     )
+    if cleaned != text:
+        return cleaned.strip()
+
+    # ── 2차 fallback: 닫는 태그 누락 — <analysis_json> 이후 brace counting ──
+    open_match = re.search(
+        r'<analysis_json>\s*(?:```(?:json)?\s*)?', text, flags=re.IGNORECASE
+    )
+    if not open_match:
+        return text.strip()
+    start_pos = open_match.end()
+    json_start = text.find("{", start_pos)
+    if json_start < 0:
+        return text.strip()
+    depth = 0
+    in_string = False
+    escape = False
+    end_pos = -1
+    for i in range(json_start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end_pos = i + 1
+                break
+    if end_pos < 0:
+        return text.strip()
+    tail = text[end_pos:]
+    close_match = re.match(
+        r'\s*(?:```\s*)?(?:</analysis_json>)?\s*',
+        tail,
+        flags=re.IGNORECASE,
+    )
+    consumed = close_match.end() if close_match else 0
+    cleaned = text[: open_match.start()] + text[end_pos + consumed :]
     return cleaned.strip()
 
 

@@ -4865,8 +4865,40 @@ function renderCurrentChart() {
 // ══════════════════════════════════════════════
 // 리포트
 // ══════════════════════════════════════════════
-function renderReport(text, sections = {}, missingSections = []) {
+function stripAnalysisJsonBlock(text) {
+  // 백엔드 stripping 안전망 — close 태그 누락 시에도 JSON 블록 제거
+  if (!text) return "";
+  let s = String(text);
+  // 1차: 정상 케이스
+  let cleaned = s.replace(/\s*<analysis_json>[\s\S]*?<\/analysis_json>\s*/i, "");
+  if (cleaned !== s) return cleaned.trim();
+  // 2차 fallback: <analysis_json> 이후 brace counting
+  const openRe = /<analysis_json>\s*(?:```(?:json)?\s*)?/i;
+  const m = s.match(openRe);
+  if (!m) return s.trim();
+  const blockStart = m.index;
+  const jsonStart = s.indexOf("{", blockStart + m[0].length);
+  if (jsonStart < 0) return s.trim();
+  let depth = 0, inStr = false, esc = false, end = -1;
+  for (let i = jsonStart; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\" && inStr) { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (depth === 0) { end = i + 1; break; } }
+  }
+  if (end < 0) return s.trim();
+  const tail = s.slice(end);
+  const close = tail.match(/^\s*(?:```\s*)?(?:<\/analysis_json>)?\s*/i);
+  const consumed = close ? close[0].length : 0;
+  return (s.slice(0, blockStart) + s.slice(end + consumed)).trim();
+}
+
+function renderReport(rawText, sections = {}, missingSections = []) {
   const box = document.getElementById("report-box");
+  const text = stripAnalysisJsonBlock(rawText);
   if (!text) { box.innerHTML = '<div class="report-placeholder">분석 시작 버튼을 눌러주세요.</div>'; return; }
 
   const hasStructured =
