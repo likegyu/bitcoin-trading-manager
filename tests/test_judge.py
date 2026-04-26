@@ -18,6 +18,20 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(parsed["rubric_scores"]["price_structure"], 2)
         self.assertEqual(parsed["rubric_scores"]["counter_scenario"], -2)
 
+    def test_parse_judge_output_tolerates_markdown_labels(self):
+        parsed = _parse_judge_output(
+            "- **판정:** **상방 우위**\n"
+            "- **점수:** price_structure=2, momentum=1, derivatives=0, macro=0, "
+            "account_risk_fit=1, counter_scenario=-1\n"
+            "- **이유:** 가격 구조가 우세합니다.\n"
+            "- **Bull 핵심:** 저점 상승\n"
+            "- **Bear 핵심:** 저항 근접"
+        )
+
+        self.assertEqual(parsed["verdict"], "상방 우위")
+        self.assertEqual(parsed["rubric_scores"]["momentum"], 1)
+        self.assertEqual(parsed["bull_key"], "저점 상승")
+
     def test_format_judge_block_includes_scores(self):
         block = format_judge_block(
             JudgeResult(

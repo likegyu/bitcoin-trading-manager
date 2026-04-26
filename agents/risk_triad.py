@@ -43,9 +43,12 @@ RISK_MAX_ROUNDS = int(os.getenv("RISK_MAX_ROUNDS", "1"))
 # Risk Triad 자체를 끄고 싶을 때: RISK_ENABLED=0
 RISK_ENABLED = os.getenv("RISK_ENABLED", "1") not in ("0", "false", "False", "")
 
-# 출력 목표: 400~700자 ≈ 200~350 tokens. 안전 마진 포함 1000으로 제한.
-# 기존 7500은 낭비. Risk 에이전트는 리스크 규모 서술이라 조금 더 여유 허용.
-RISK_MAX_OUTPUT_TOKENS = int(os.getenv("RISK_MAX_OUTPUT_TOKENS", "1000"))
+# 출력 목표: Aggressive/Conservative/Neutral 각 800~1100자 + 권고 문단.
+# 마크다운 허용 후 실측: aggressive 2614자/conservative 2600자/neutral 2702자.
+# 2200 토큰에서 모두 마지막 권고 섹션 잘림.
+# 한국어+마크다운 ≈ 글자당 0.85토큰 → 2700자 ≈ 2300토큰.
+# 안전 마진 70% 포함 4000으로 상향. 잘림 0 보장.
+RISK_MAX_OUTPUT_TOKENS = int(os.getenv("RISK_MAX_OUTPUT_TOKENS", "4000"))
 
 
 # 발언 순서 — Aggressive 가 먼저 치고 나가면 Conservative/Neutral 이 반박/중재하는 구조.

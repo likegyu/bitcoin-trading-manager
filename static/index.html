@@ -2738,6 +2738,40 @@ const SIG_CLASS = { "매수":"buy","매도":"sell","홀드":"hold" };
 const SIG_COLOR = { "매수":C.bull,"매도":C.bear,"홀드":C.amber };
 const SIG_EMOJI = { "매수":"▲","매도":"▼","홀드":"●" };
 const SIG_VIEW  = { "매수":"상방 우위","매도":"하방 우위","홀드":"중립" };
+function stripDirectionSyntax(value) {
+  return String(value ?? "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/^\s*(?:[-+*]\s+|>\s*|#{1,6}\s*)/gm, "")
+    .replace(/[`*]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function directionKey(value) {
+  const text = stripDirectionSyntax(value);
+  const candidates = [
+    ["상방", "bull"], ["매수", "bull"],
+    ["하방", "bear"], ["매도", "bear"],
+    ["중립", "neutral"], ["홀드", "neutral"],
+  ];
+  let best = null;
+  for (const [keyword, key] of candidates) {
+    const pos = text.indexOf(keyword);
+    if (pos >= 0 && (!best || pos < best.pos)) best = { pos, key };
+  }
+  return best ? best.key : "";
+}
+function canonicalJudgeVerdict(value) {
+  const key = directionKey(value);
+  if (key === "bull") return "상방 우위";
+  if (key === "bear") return "하방 우위";
+  if (key === "neutral") return "중립";
+  return stripDirectionSyntax(value);
+}
+function directionColor(key) {
+  if (key === "bull") return C.bull;
+  if (key === "bear") return C.bear;
+  return C.dim;
+}
 const ACCOUNT_STREAM_RETRY_MS = 2000;
 // 재연결 jitter — 서버 재시작 시 thundering herd 방지
 function retryDelay(baseMs = 2000, jitterMs = 8000) {
@@ -3421,17 +3455,17 @@ function renderSignalBadge(signal, confidence) {
   // 투자 심판 판정 배지 — state.judge 에서 읽기
   let judgeBadgeHtml = "";
   if (state.judge && state.judge.enabled && state.judge.verdict) {
-    const jv = state.judge.verdict;
-    const jColor = jv === "상방 우위" ? "#0ECB81" : jv === "하방 우위" ? "#F6465D" : "#646D7D";
-    const jAligned = (
-      (signal === "매수" && jv === "상방 우위") ||
-      (signal === "매도" && jv === "하방 우위") ||
-      (signal === "홀드" && jv === "중립")
-    );
+    const jv = canonicalJudgeVerdict(state.judge.verdict);
+    const jKey = directionKey(state.judge.verdict);
+    const signalKey = directionKey(signal || view);
+    const jColor = directionColor(jKey);
+    const jAligned = signalKey && jKey
+      ? signalKey === jKey
+      : Boolean(state.tradingSignal && state.tradingSignal.judge_aligned);
     const alignMark = jAligned ? "[일치]" : "[불일치]";
     judgeBadgeHtml = `
       <div class="card-sub" style="margin-top:5px;padding:3px 6px;background:var(--bg-surface-2);border-radius:6px;font-size:10px;">
-        ${alignMark} 심판: <span style="color:${jColor};font-weight:700">${jv}</span>
+        ${alignMark} 심판: <span style="color:${jColor};font-weight:700">${escapeHtml(jv)}</span>
       </div>`;
   }
 
@@ -4867,7 +4901,7 @@ function renderAgentsPanel() {
     parts.push(`토론 ${rounds}R`);
   }
   if (hasJudge && judge.verdict) {
-    parts.push(`심판 ${judge.verdict}`);
+    parts.push(`심판 ${canonicalJudgeVerdict(judge.verdict)}`);
   }
   if (hasRisk) {
     const rounds = risk.rounds ?? 1;
@@ -4926,9 +4960,8 @@ function renderJudgeTab(judge) {
     return `<div class="agents-error-note">심판 실패 — ${escapeHtml(judge.error)}</div>`;
   }
 
-  const verdictColor = judge.verdict === "상방 우위" ? "#0ECB81"
-    : judge.verdict === "하방 우위" ? "#F6465D"
-    : "#646D7D";
+  const verdict = canonicalJudgeVerdict(judge.verdict || "");
+  const verdictColor = directionColor(directionKey(judge.verdict));
   const elapsed = typeof judge.elapsed_s === "number" ? `${judge.elapsed_s.toFixed(1)}s` : "";
   const errorHtml = judge.error
     ? `<div class="agents-error-note" style="margin-top:8px">일부 실패 — ${escapeHtml(judge.error)}</div>`
@@ -4937,7 +4970,7 @@ function renderJudgeTab(judge) {
   return `
     <div class="agent-turn" style="border-left:3px solid ${verdictColor}">
       <div class="agent-turn-head" style="display:flex;align-items:center;gap:8px">
-        <span style="font-weight:700;font-size:14px;color:${verdictColor}">${escapeHtml(judge.verdict || "판정 없음")}</span>
+        <span style="font-weight:700;font-size:14px;color:${verdictColor}">${escapeHtml(verdict || "판정 없음")}</span>
         ${elapsed ? `<span class="agent-turn-meta" style="margin-left:auto">${elapsed}</span>` : ""}
       </div>
       ${judge.reasoning ? `<div class="agent-turn-body" style="margin-top:6px"><strong>판정 이유:</strong> ${renderMarkdown(judge.reasoning)}</div>` : ""}

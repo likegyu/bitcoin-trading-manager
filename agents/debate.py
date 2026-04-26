@@ -38,9 +38,11 @@ DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-haiku-4-5-20251001")
 # max_rounds=2 → Bull→Bear→Bull반박→Bear반박, 총 4회.
 DEBATE_MAX_ROUNDS = int(os.getenv("DEBATE_MAX_ROUNDS", "1"))
 
-# 출력 목표: 400~700자 ≈ 200~350 tokens. 안전 마진 포함 800으로 제한.
-# 기존 7500은 최악의 경우 과다 출력을 허용 → 비용·속도 모두 손해.
-DEBATE_MAX_OUTPUT_TOKENS = int(os.getenv("DEBATE_MAX_OUTPUT_TOKENS", "800"))
+# 출력 목표: 600~900자 분석. 마크다운 허용 후 실측 평균 ~2000~2200자.
+# 1800 토큰에서 bull 끊김(2073자)/bear 마침(2083자) 관측.
+# 한국어+마크다운은 글자당 ≈ 0.85 토큰 → 2200자 ≈ 1900토큰.
+# 안전 마진 50% 포함 3000으로 상향. 비용 부담 적고 잘림 0 보장.
+DEBATE_MAX_OUTPUT_TOKENS = int(os.getenv("DEBATE_MAX_OUTPUT_TOKENS", "3000"))
 
 # 토론 자체를 끄고 싶을 때: DEBATE_ENABLED=0
 DEBATE_ENABLED = os.getenv("DEBATE_ENABLED", "1") not in ("0", "false", "False", "")

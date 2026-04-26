@@ -30,9 +30,11 @@ except Exception:
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-sonnet-4-6")
 JUDGE_ENABLED = os.getenv("JUDGE_ENABLED", "1") not in ("0", "false", "False", "")
 
-# 출력 포맷: 판정/이유/Bull핵심/Bear핵심 = 4줄 고정 ≈ 150~250 tokens.
-# 안전 마진 포함 500으로 제한. 기존 2500은 낭비.
-JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "500"))
+# 출력 포맷: 판정/점수/이유(2~3줄)/Bull핵심/Bear핵심 = 5블록 ≈ 350~500자.
+# 한국어 ≈ 600~900 토큰. 500 은 Bear 핵심이 마지막에 절단되는 사례 발생
+# (관측: '스테이블코인 7d -0.85B' 직후에서 끊김 — 마지막 줄 미완성).
+# 900 으로 상향: 점수 6축 + 2~3줄 reasoning + 양측 핵심줄 모두 안전 수용.
+JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "900"))
 
 JUDGE_SYSTEM = """당신은 BTC 선물 시장의 'Investment Judge(투자 심판)'입니다.
 역할: Bull Researcher 와 Bear Researcher 의 토론을 공정하게 듣고,
@@ -48,14 +50,16 @@ JUDGE_SYSTEM = """당신은 BTC 선물 시장의 'Investment Judge(투자 심판
 6. 점수는 -2~+2 정수로만 평가하세요. +2는 해당 축이 판정 방향을 강하게 지지,
    0은 중립/불충분, -2는 판정 방향에 강하게 반대한다는 뜻입니다.
 
-출력 형식 (반드시 준수):
+출력 형식 (반드시 준수 — 정확히 5줄, 라벨 표기 그대로):
 판정: [상방 우위 / 하방 우위 / 중립]
 점수: price_structure=0, momentum=0, derivatives=0, macro=0, account_risk_fit=0, counter_scenario=0
-이유: [2~3줄 구체적 근거]
-Bull 핵심: [한 줄]
-Bear 핵심: [한 줄]
+이유: [2~3줄 구체적 근거 — 가격 구조·파생·거시 중 최소 2축 인용]
+Bull 핵심: [한 줄, 60~120자]
+Bear 핵심: [한 줄, 60~120자]
 
-마크다운(**, ##, ---), HTML 금지. 일반 텍스트만."""
+분량 규칙:
+- 전체 350~600자. 'Bull 핵심', 'Bear 핵심' 라벨이 빠지거나 문장이 중간에서 끊기지 않도록 분량을 사전에 조절하세요.
+- HTML 금지. 마크다운(**굵게**)은 핵심 강조에 한해 허용 (### 헤더·--- 가로줄은 출력 형식이 깨지므로 금지)."""
 
 JUDGE_USER_TEMPLATE = """{pair_label} 현재 데이터 및 Bull/Bear 토론 결과입니다.
 
@@ -108,33 +112,63 @@ def _parse_judge_output(text: str) -> dict:
     in_reasoning = False
 
     for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("판정:"):
-            result["verdict"] = stripped[len("판정:"):].strip()
+        stripped = _strip_markdown_line(line)
+        if m := re.match(r"판정\s*[:：]\s*(.+)$", stripped):
+            result["verdict"] = _normalize_verdict(m.group(1))
             in_reasoning = False
-        elif stripped.startswith("점수:"):
-            score_text = stripped[len("점수:"):].strip()
+        elif m := re.match(r"점수\s*[:：]\s*(.+)$", stripped):
+            score_text = m.group(1).strip()
             result["rubric_scores"] = {
                 key: int(val)
                 for key, val in re.findall(r'([a-z_]+)\s*=\s*(-?\d+)', score_text)
             }
             in_reasoning = False
-        elif stripped.startswith("이유:"):
-            val = stripped[len("이유:"):].strip()
+        elif m := re.match(r"이유\s*[:：]\s*(.*)$", stripped):
+            val = m.group(1).strip()
             if val:
                 reasoning_lines.append(val)
             in_reasoning = True
-        elif stripped.startswith("Bull 핵심:"):
-            result["bull_key"] = stripped[len("Bull 핵심:"):].strip()
+        elif m := re.match(r"Bull\s*핵심\s*[:：]\s*(.+)$", stripped, re.IGNORECASE):
+            result["bull_key"] = m.group(1).strip()
             in_reasoning = False
-        elif stripped.startswith("Bear 핵심:"):
-            result["bear_key"] = stripped[len("Bear 핵심:"):].strip()
+        elif m := re.match(r"Bear\s*핵심\s*[:：]\s*(.+)$", stripped, re.IGNORECASE):
+            result["bear_key"] = m.group(1).strip()
             in_reasoning = False
         elif in_reasoning and stripped:
             reasoning_lines.append(stripped)
 
     result["reasoning"] = " ".join(reasoning_lines)
     return result
+
+
+def _strip_markdown_line(line: str) -> str:
+    """판정 라벨 주변의 가벼운 마크다운 문법을 제거한다."""
+    stripped = str(line or "").strip()
+    stripped = re.sub(r"^\s*(?:[-+]\s+|>\s*)+", "", stripped)
+    stripped = re.sub(r"^\s*#{1,6}\s*", "", stripped)
+    stripped = re.sub(r"<[^>]+>", "", stripped)
+    stripped = stripped.replace("`", "").replace("*", "")
+    return stripped.strip()
+
+
+def _normalize_verdict(value: str) -> str:
+    """마크다운/수식어가 섞인 판정을 표준 3값으로 정규화."""
+    cleaned = _strip_markdown_line(value)
+    candidates: list[tuple[int, str]] = []
+    for keyword, verdict in (
+        ("상방", "상방 우위"),
+        ("매수", "상방 우위"),
+        ("하방", "하방 우위"),
+        ("매도", "하방 우위"),
+        ("중립", "중립"),
+        ("홀드", "중립"),
+    ):
+        pos = cleaned.find(keyword)
+        if pos >= 0:
+            candidates.append((pos, verdict))
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return cleaned
 
 
 def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:

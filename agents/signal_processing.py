@@ -97,32 +97,64 @@ class TradingSignal:
 
 # ── 내부 파싱 헬퍼 ────────────────────────────────────
 
+def _strip_markdown_text(text: str) -> str:
+    """시그널/판정 키워드 주변의 가벼운 마크다운 문법을 제거한다."""
+    cleaned = str(text or "")
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"(?m)^\s*(?:[-+*]\s+|>\s*|#{1,6}\s*)", "", cleaned)
+    cleaned = cleaned.replace("`", "").replace("*", "")
+    return cleaned
+
+
+def _normalize_view(value: str) -> str:
+    """마크다운이나 부가 설명이 섞인 방향 텍스트를 표준 관점으로 정규화."""
+    cleaned = re.sub(r"\s+", " ", _strip_markdown_text(value)).strip()
+    candidates: list[tuple[int, str]] = []
+    for keyword, view in (
+        ("상방", "상방 우위"),
+        ("매수", "상방 우위"),
+        ("하방", "하방 우위"),
+        ("매도", "하방 우위"),
+        ("중립", "중립"),
+        ("홀드", "중립"),
+    ):
+        pos = cleaned.find(keyword)
+        if pos >= 0:
+            candidates.append((pos, view))
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return cleaned
+
+
 def _parse_view(text: str) -> str:
     """관점/시그널 행에서 뷰 텍스트 추출."""
+    cleaned_text = _strip_markdown_text(text)
     m = re.search(
-        r'(?:관점|시그널)[^:：\n]*[:：]?\s*(상방 우위|하방 우위|중립|매수|매도|홀드)',
-        text,
+        r'(?:관점|시그널)[^:：\n]*[:：]?\s*(상방(?:\s*우위)?|하방(?:\s*우위)?|중립|매수|매도|홀드)',
+        cleaned_text,
     )
     if m:
-        return m.group(1)
+        return _normalize_view(m.group(1))
     # 앞 300자에서 첫 번째 키워드 위치 기반 폴백
-    front = text[:300]
-    candidates = ["상방 우위", "하방 우위", "중립", "매수", "매도", "홀드"]
+    front = cleaned_text[:300]
+    candidates = ["상방 우위", "하방 우위", "상방", "하방", "중립", "매수", "매도", "홀드"]
     positions = {kw: front.find(kw) for kw in candidates if kw in front}
     if positions:
-        return min(positions, key=positions.get)
+        return _normalize_view(min(positions, key=positions.get))
     return "중립"
 
 
 def _parse_confidence(text: str) -> int:
-    m = re.search(r'(?:확신도|신뢰도)\D*?(\d{1,3})', text)
+    cleaned_text = _strip_markdown_text(text)
+    m = re.search(r'(?:확신도|신뢰도)\D*?(\d{1,3})', cleaned_text)
     if m:
         return min(int(m.group(1)), 100)
     return 50
 
 
 def _parse_regime(text: str) -> str:
-    m = re.search(r'시장\s*레짐\s*[:：]\s*(.+?)(?:\n|$)', text)
+    cleaned_text = _strip_markdown_text(text)
+    m = re.search(r'시장\s*레짐\s*[:：]\s*(.+?)(?:\n|$)', cleaned_text)
     if m:
         return m.group(1).strip()
     return ""
@@ -173,7 +205,7 @@ def extract_trading_signal(
     judge_verdict = ""
     judge_aligned = True
     if judge_result is not None and getattr(judge_result, "enabled", False):
-        judge_verdict = getattr(judge_result, "verdict", "")
+        judge_verdict = _normalize_view(getattr(judge_result, "verdict", ""))
         judge_bias = _JUDGE_BIAS.get(judge_verdict, 0)
 
         if judge_bias != 0 and strength != 0:

@@ -137,10 +137,11 @@ SYSTEM_PROMPT = (
     "출력 원칙:\n"
     "1. 응답 맨 앞에 <analysis_json>...</analysis_json> 블록을 반드시 작성하세요.\n"
     "2. JSON 블록 뒤에는 기존 한국어 리포트 섹션을 작성하세요.\n"
-    "3. 마크다운(**, ##, --- 등)과 HTML 태그는 사용하지 마세요. 단, <analysis_json> 태그만 예외로 허용됩니다.\n"
-    "4. 데이터 감사관이 do_not_use_as_evidence로 표시한 항목은 근거로 쓰지 마세요.\n"
-    "5. 확정 사실, 추론, 대응을 섞지 말고 분리하세요.\n"
-    "6. JSON의 view·confidence·trade.entry/stop/target은 본문 리포트와 부호·방향이 반드시 일치해야 합니다 "
+    "3. 도구 호출(record_analysis)을 사용하더라도 도구 호출만으로 끝내지 말고, 사람이 읽는 한국어 리포트를 반드시 함께 작성하세요.\n"
+    "4. 마크다운(**, ##, --- 등)과 HTML 태그는 사용하지 마세요. 단, <analysis_json> 태그만 예외로 허용됩니다.\n"
+    "5. 데이터 감사관이 do_not_use_as_evidence로 표시한 항목은 근거로 쓰지 마세요.\n"
+    "6. 확정 사실, 추론, 대응을 섞지 말고 분리하세요.\n"
+    "7. JSON의 view·confidence·trade.entry/stop/target은 본문 리포트와 부호·방향이 반드시 일치해야 합니다 "
     "(예: view=상방 우위 → stop < entry < target). 모순되면 출력 전에 본문을 수정해 일치시키세요."
 )
 
@@ -165,7 +166,13 @@ USER_PROMPT_TEMPLATE = """<analysis_request>
 <confidence_rubric>
 확신도는 SYSTEM_PROMPT 의 100점 루브릭(price_structure 25 / momentum 20 / derivatives 20 / macro 15 / account_risk_fit 10 − data_quality_penalty 15 − counter_scenario_penalty 10)으로 산정하세요.
 각 축의 점수 anchor 는 system 측에 명시되어 있습니다. 같은 가격 시계열에서 파생된 중복 지표는 독립 근거로 중복 가산하지 마세요.
-confidence_breakdown 의 각 값을 합치면 confidence 와 정확히 일치해야 합니다 (penalty 는 음수로).
+
+[필수 자가검증 — JSON 출력 직전에 반드시 수행]
+1. confidence_breakdown 의 7개 값(penalty 2개는 음수)을 더하면 confidence 와 정확히 일치해야 합니다.
+   합산이 어긋나면 본문 출력 전에 confidence 또는 breakdown 항목을 스스로 수정하세요.
+2. 본문 💯 확신도 % 와 JSON confidence 가 다르면 둘 다 동일하게 맞추세요.
+3. view 와 trade.entry/stop/target 의 부호 정합 — 상방이면 stop<entry<target, 하방이면 target<entry<stop.
+이 규칙은 사후 자동 보정으로 강제되므로, 처음부터 일관되게 작성하면 보정 메시지가 생기지 않습니다.
 </confidence_rubric>
 
 <json_contract>
@@ -484,6 +491,41 @@ VIEW_TO_SIGNAL = {
     "중립": "홀드",
 }
 
+CONFIDENCE_BREAKDOWN_KEYS = (
+    "price_structure", "momentum", "derivatives", "macro",
+    "account_risk_fit", "data_quality_penalty", "counter_scenario_penalty",
+)
+
+
+def _strip_markdown_text(text: Any) -> str:
+    """파싱 대상 라벨 주변의 가벼운 마크다운 문법을 제거한다."""
+    cleaned = str(text or "")
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"(?m)^\s*(?:[-+*]\s+|>\s*|#{1,6}\s*)", "", cleaned)
+    cleaned = cleaned.replace("`", "").replace("*", "")
+    return cleaned
+
+
+def _normalize_view_label(value: Any) -> str:
+    """상방/하방/중립 계열 표현을 리포트 표준 관점으로 정규화."""
+    cleaned = re.sub(r"\s+", " ", _strip_markdown_text(value)).strip()
+    candidates: list[tuple[int, str]] = []
+    for keyword, view in (
+        ("상방", "상방 우위"),
+        ("매수", "상방 우위"),
+        ("하방", "하방 우위"),
+        ("매도", "하방 우위"),
+        ("중립", "중립"),
+        ("홀드", "중립"),
+    ):
+        pos = cleaned.find(keyword)
+        if pos >= 0:
+            candidates.append((pos, view))
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return cleaned
+
+
 REPORT_SECTION_LABELS = {
     "view": "관점",
     "regime": "시장 레짐",
@@ -596,27 +638,28 @@ def parse_report_sections(text: str) -> dict:
 
 def parse_signal(text: str) -> tuple[str, int]:
     # ── 관점/시그널 파싱: 새 포맷(관점) 우선, 구 포맷(시그널) 폴백 ──
+    cleaned_text = _strip_markdown_text(text)
     signal = "홀드"
     sig_match = re.search(
-        r'(?:관점|시그널)[^:：\n]*[:：]?\s*(상방 우위|하방 우위|중립|매수|매도|홀드)',
-        text,
+        r'(?:관점|시그널)[^:：\n]*[:：]?\s*(상방(?:\s*우위)?|하방(?:\s*우위)?|중립|매수|매도|홀드)',
+        cleaned_text,
     )
     if sig_match:
-        raw_signal = sig_match.group(1)
+        raw_signal = _normalize_view_label(sig_match.group(1))
         signal = VIEW_TO_SIGNAL.get(raw_signal, raw_signal)
     else:
-        front = text[:300]
-        keys = ("상방 우위", "하방 우위", "중립", "매수", "매도", "홀드")
+        front = cleaned_text[:300]
+        keys = ("상방 우위", "하방 우위", "상방", "하방", "중립", "매수", "매도", "홀드")
         positions = {kw: front.find(kw) for kw in keys if kw in front}
         if positions:
-            raw_signal = min(positions, key=positions.get)
+            raw_signal = _normalize_view_label(min(positions, key=positions.get))
             signal = VIEW_TO_SIGNAL.get(raw_signal, raw_signal)
 
     # ── 확신도/신뢰도 파싱 ──
     # [버그 수정] 기존 [^:\n] 패턴은 콜론을 제외해 "신뢰도: 72%" 형식에서 매칭 실패
     # \D*? 로 변경 — 숫자가 아닌 모든 문자(콜론·공백 포함)를 lazily 건너뜀
     confidence = 50
-    conf_match = re.search(r'(?:확신도|신뢰도)\D*?(\d{1,3})', text)
+    conf_match = re.search(r'(?:확신도|신뢰도)\D*?(\d{1,3})', cleaned_text)
     if conf_match:
         confidence = min(int(conf_match.group(1)), 100)
 
@@ -627,13 +670,13 @@ def parse_leverage(text: str) -> Optional[int]:
     """
     Claude 분석 텍스트에서 권장 레버리지를 파싱.
     '권장 레버리지' 필드 우선, 없으면 자유 텍스트에서 탐색.
-    반환: 1~20 범위 정수 or None
+    반환: 1~10 범위 정수 or None
     """
     # 구조화 필드 우선 (매매 파라미터 섹션)
     m = re.search(r'권장\s*레버리지\s*[:：]\s*(\d+)\s*배', text)
     if m:
         val = int(m.group(1))
-        if 1 <= val <= 20:
+        if 1 <= val <= 10:
             return val
 
     # 자유 텍스트 폴백 패턴들
@@ -646,7 +689,7 @@ def parse_leverage(text: str) -> Optional[int]:
         m = re.search(pat, text, re.IGNORECASE)
         if m:
             val = int(m.group(1))
-            if 1 <= val <= 20:
+            if 1 <= val <= 10:
                 return val
     return None
 
@@ -783,12 +826,10 @@ def _int_or_none(value: Any, min_value: int, max_value: int) -> Optional[int]:
 
 
 def _signal_from_structured(analysis_json: dict) -> Optional[str]:
-    view = str(analysis_json.get("view") or "").strip()
+    view = _normalize_view_label(analysis_json.get("view") or "")
     for raw_view, signal in VIEW_TO_SIGNAL.items():
         if raw_view in view:
             return signal
-    if view in ("매수", "매도", "홀드"):
-        return view
     return None
 
 
@@ -807,6 +848,170 @@ def _levels_from_structured(analysis_json: dict) -> dict:
         "stop": _price_or_none(trade.get("stop")),
         "target": _price_or_none(trade.get("target")),
     }
+
+
+def _confidence_from_breakdown(analysis_json: dict) -> Optional[int]:
+    cb = analysis_json.get("confidence_breakdown") if isinstance(analysis_json, dict) else None
+    if not isinstance(cb, dict):
+        return None
+
+    total = 0
+    for key in CONFIDENCE_BREAKDOWN_KEYS:
+        if key not in cb:
+            return None
+        try:
+            total += int(cb[key])
+        except (TypeError, ValueError):
+            return None
+    return max(0, min(100, total))
+
+
+def _normalize_analysis_json(analysis_json: dict) -> tuple[dict, list[str]]:
+    if not isinstance(analysis_json, dict):
+        return {}, []
+
+    normalized = dict(analysis_json)
+    adjustments: list[str] = []
+
+    breakdown_confidence = _confidence_from_breakdown(normalized)
+    stated_confidence = _int_or_none(normalized.get("confidence"), 0, 100)
+    if breakdown_confidence is not None and (
+        stated_confidence is None or abs(stated_confidence - breakdown_confidence) > 2
+    ):
+        normalized["confidence"] = breakdown_confidence
+        before = "N/A" if stated_confidence is None else str(stated_confidence)
+        adjustments.append(
+            f"confidence {before} -> {breakdown_confidence} "
+            "because confidence_breakdown sum is authoritative"
+        )
+
+    return normalized, adjustments
+
+
+def _format_report_price(value: Any) -> str:
+    price = _price_or_none(value)
+    if price is None:
+        return "N/A"
+    if abs(price - round(price)) < 0.005:
+        return f"${price:,.0f}"
+    return f"${price:,.2f}"
+
+
+def _clean_report_text(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
+def _clean_report_items(value: Any, fallback: list[str], limit: int = 3) -> list[str]:
+    if isinstance(value, list):
+        items = [str(v).strip() for v in value if str(v or "").strip()]
+    else:
+        items = []
+    return (items or fallback)[:limit]
+
+
+def _render_report_from_structured(analysis_json: dict) -> str:
+    """
+    Tool use 응답이 구조화 JSON만 남기고 본문 리포트를 생략할 때,
+    UI와 파서가 기대하는 표준 리포트를 서버에서 결정적으로 복원한다.
+    """
+    if not isinstance(analysis_json, dict) or not analysis_json:
+        return ""
+
+    view = _normalize_view_label(analysis_json.get("view") or "중립")
+    if view not in VIEW_TO_SIGNAL:
+        view = "중립"
+
+    confidence = _confidence_from_breakdown(analysis_json)
+    if confidence is None:
+        confidence = _int_or_none(analysis_json.get("confidence"), 0, 100)
+    if confidence is None:
+        confidence = 50
+
+    allowed_regimes = (
+        "상승 추세", "하락 추세", "박스",
+        "변동성 확장", "변동성 축소", "이벤트 대기 중",
+    )
+    regime_raw = str(analysis_json.get("regime") or "").strip()
+    regime = regime_raw if regime_raw in allowed_regimes else "박스"
+
+    levels = analysis_json.get("levels") if isinstance(analysis_json.get("levels"), dict) else {}
+    trade = analysis_json.get("trade") if isinstance(analysis_json.get("trade"), dict) else {}
+    actions = analysis_json.get("actions") if isinstance(analysis_json.get("actions"), dict) else {}
+
+    leverage = _int_or_none(trade.get("leverage"), 1, 10) or 1
+
+    facts = _clean_report_items(
+        analysis_json.get("key_facts"),
+        ["구조화 분석 결과는 있으나 본문 리포트가 누락되어 핵심 사실을 JSON 기준으로 복원했습니다."],
+    )
+    inferences = _clean_report_items(
+        analysis_json.get("inferences"),
+        ["현재 데이터의 방향성과 리스크 요인을 종합해 위 관점을 도출했습니다."],
+    )
+    counters = _clean_report_items(
+        analysis_json.get("counter_scenario"),
+        ["주요 트리거가 반대로 작동하면 현재 관점의 우위가 약해집니다."],
+    )
+
+    aggressive = _clean_report_text(
+        actions.get("aggressive"),
+        "현재 관점의 트리거와 손절 기준을 함께 두고 제한된 사이즈로 대응합니다.",
+    )
+    conservative = _clean_report_text(
+        actions.get("conservative"),
+        "트리거 확인 또는 되돌림 확인 전까지 사이즈를 줄이고 관망합니다.",
+    )
+    invalidation = _clean_report_text(
+        analysis_json.get("invalidation"),
+        "핵심 지지/저항 트리거가 반대로 확정되면 관점을 재검토합니다.",
+    )
+    summary = _clean_report_text(
+        analysis_json.get("summary"),
+        f"{view} 관점이나 트리거 확인과 리스크 관리가 우선입니다.",
+    )
+
+    lines = [
+        f"📊 관점: {view}",
+        f"💯 확신도: {confidence}%",
+        f"🧭 시장 레짐: {regime}",
+        "",
+        "📌 먼저 보이는 사실",
+    ]
+    lines.extend(f"• {item}" for item in facts)
+    lines.extend([
+        "",
+        "🧠 해석",
+    ])
+    lines.extend(f"• {item}" for item in inferences)
+    lines.extend([
+        "",
+        "🔄 반대 시나리오",
+    ])
+    lines.extend(f"• {item}" for item in counters)
+    lines.extend([
+        "",
+        "📍 관심 레벨",
+        f"• 1차 저항: {_format_report_price(levels.get('resistance'))}",
+        f"• 1차 지지: {_format_report_price(levels.get('support'))}",
+        f"• 상방 돌파 트리거: {_format_report_price(levels.get('bull_trigger'))}",
+        f"• 하방 이탈 트리거: {_format_report_price(levels.get('bear_trigger'))}",
+        "",
+        "🤖 매매 파라미터",
+        f"• 진입가: {_format_report_price(trade.get('entry'))}",
+        f"• 손절가: {_format_report_price(trade.get('stop'))}",
+        f"• 목표가: {_format_report_price(trade.get('target'))}",
+        f"• 권장 레버리지: {leverage}배",
+        "",
+        "📝 대응",
+        f"• 공격적: {aggressive}",
+        f"• 보수적: {conservative}",
+        "",
+        f"⚠️ 관점이 약해지는 조건: {invalidation}",
+        "",
+        f"💬 한줄 요약: {summary}",
+    ])
+    return "\n".join(lines)
 
 
 def _system_prompt_param():
@@ -877,6 +1082,7 @@ def _analysis_tool_schema() -> dict:
                         "bull_trigger": {"type": ["number", "null"]},
                         "bear_trigger": {"type": ["number", "null"]},
                     },
+                    "required": ["resistance", "support", "bull_trigger", "bear_trigger"],
                     "additionalProperties": False,
                 },
                 "trade": {
@@ -885,8 +1091,9 @@ def _analysis_tool_schema() -> dict:
                         "entry":    {"type": ["number", "null"]},
                         "stop":     {"type": ["number", "null"]},
                         "target":   {"type": ["number", "null"]},
-                        "leverage": {"type": "integer", "minimum": 1, "maximum": 20},
+                        "leverage": {"type": "integer", "minimum": 1, "maximum": 10},
                     },
+                    "required": ["entry", "stop", "target", "leverage"],
                     "additionalProperties": False,
                 },
                 "actions": {
@@ -895,6 +1102,7 @@ def _analysis_tool_schema() -> dict:
                         "aggressive":   {"type": "string"},
                         "conservative": {"type": "string"},
                     },
+                    "required": ["aggressive", "conservative"],
                     "additionalProperties": False,
                 },
                 "invalidation": {"type": "string"},
@@ -903,7 +1111,8 @@ def _analysis_tool_schema() -> dict:
             "required": [
                 "view", "confidence", "regime",
                 "confidence_breakdown",
-                "trade", "invalidation", "summary",
+                "data_quality_notes", "key_facts", "inferences", "counter_scenario",
+                "levels", "trade", "actions", "invalidation", "summary",
             ],
             "additionalProperties": False,
         },
@@ -958,11 +1167,11 @@ def analyze_with_claude(
     # ── Tool Use opt-in (ANALYST_USE_TOOL_SCHEMA=1) ──
     # JSON 스키마를 tool 로 강제하면 regex parse 실패가 구조적으로 사라짐.
     # 본문 한국어 리포트는 동일 응답의 text 블록에서 함께 받음.
-    _use_tool = _os.getenv("ANALYST_USE_TOOL_SCHEMA", "0").lower() not in ("0", "false", "no", "")
+    _use_tool = _os.getenv("ANALYST_USE_TOOL_SCHEMA", "1").lower() not in ("0", "false", "no", "")
     if _use_tool:
         request_kwargs["tools"] = [_analysis_tool_schema()]
-        # tool_choice 강제하지 않음 — 모델이 본문 텍스트와 tool_use 를 동시에 출력
-        # (tool_choice="any" 는 본문 누락 위험)
+        # tool_choice 강제하지 않음. 모델이 본문을 생략하는 경우는
+        # 아래에서 tool_json 기반 표준 리포트로 결정적으로 복원한다.
 
     # thinking 완전 비활성화 — 최종 분석은 이미 debate/judge/risk 블록이 reasoning을 제공하므로
     # adaptive thinking은 수만 토큰을 소모해 비용을 크게 높임. 구조화 출력에는 불필요.
@@ -1011,18 +1220,30 @@ def analyze_with_claude(
 
     # Tool Use 가 활성화·성공이면 tool_json 우선, 아니면 regex 추출 폴백
     analysis_json = tool_json if tool_json is not None else _extract_analysis_json(raw_text)
+    analysis_adjustments: list[str] = []
+    if isinstance(analysis_json, dict) and analysis_json:
+        analysis_json, analysis_adjustments = _normalize_analysis_json(analysis_json)
     report_text = _strip_analysis_json_block(raw_text) or raw_text
+    report_meta = parse_report_sections(report_text)
+    report_generated_from_json = False
+
+    if isinstance(analysis_json, dict) and analysis_json and not report_meta["format_ok"]:
+        rendered_report = _render_report_from_structured(analysis_json)
+        rendered_meta = parse_report_sections(rendered_report)
+        if rendered_report and rendered_meta["format_ok"]:
+            report_text = rendered_report
+            report_meta = rendered_meta
+            report_generated_from_json = True
 
     signal, confidence = parse_signal(report_text)
     trade_levels = parse_trade_levels(report_text)
-    report_meta = parse_report_sections(report_text)
     claude_leverage = parse_leverage(report_text)
 
     structured_signal = _signal_from_structured(analysis_json)
     structured_confidence = _int_or_none(analysis_json.get("confidence"), 0, 100)
     structured_leverage = None
     if isinstance(analysis_json.get("trade"), dict):
-        structured_leverage = _int_or_none(analysis_json["trade"].get("leverage"), 1, 20)
+        structured_leverage = _int_or_none(analysis_json["trade"].get("leverage"), 1, 10)
 
     if structured_signal:
         signal = structured_signal
@@ -1045,7 +1266,17 @@ def analyze_with_claude(
     trading_signal_dict = None
     if extract_trading_signal is not None:
         try:
-            ts = extract_trading_signal(report_text, judge_result=judge_result)
+            canonical_view = {
+                "매수": "상방 우위",
+                "매도": "하방 우위",
+                "홀드": "중립",
+            }.get(signal, "중립")
+            signal_source_text = (
+                f"📊 관점: {canonical_view}\n"
+                f"💯 확신도: {confidence}%\n"
+                f"{report_text}"
+            )
+            ts = extract_trading_signal(signal_source_text, judge_result=judge_result)
             trading_signal_dict = ts.to_dict()
         except Exception as _ts_exc:
             _memory_logger.warning("extract_trading_signal 실패 — %s", _ts_exc)
@@ -1075,6 +1306,9 @@ def analyze_with_claude(
         "report_sections": report_meta["sections"],
         "report_format_ok": report_meta["format_ok"],
         "report_missing_sections": report_meta["missing_sections"],
+        "report_generated_from_json": report_generated_from_json,
+        "structured_output_used": tool_json is not None,
+        "analysis_adjustments": analysis_adjustments,
         "trading_signal": trading_signal_dict,
         "claude_leverage": claude_leverage,
         "consistency":  consistency,

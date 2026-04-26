@@ -220,6 +220,10 @@ def _persist_analysis_history(payload: dict):
             "summary":     sections.get("summary"),
             "trade_levels": payload.get("trade_levels"),
             "analysis_json": payload.get("analysis_json"),
+            "report_format_ok": payload.get("report_format_ok"),
+            "report_generated_from_json": payload.get("report_generated_from_json"),
+            "analysis_adjustments": payload.get("analysis_adjustments"),
+            "consistency": payload.get("consistency"),
         }
         with open(ANALYSIS_HISTORY_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -478,6 +482,10 @@ def _build_payload(tf_data: dict, price: float, analysis: dict) -> dict:
         "report_sections": analysis.get("report_sections", {}),
         "report_format_ok": analysis.get("report_format_ok", False),
         "report_missing_sections": analysis.get("report_missing_sections", []),
+        "report_generated_from_json": analysis.get("report_generated_from_json", False),
+        "structured_output_used": analysis.get("structured_output_used", False),
+        "analysis_adjustments": analysis.get("analysis_adjustments", []),
+        "consistency": analysis.get("consistency"),
         # 구조화 트레이딩 시그널 (signal_processing.TradingSignal.to_dict())
         "trading_signal": analysis.get("trading_signal"),
         "claude_leverage": analysis.get("claude_leverage"),
