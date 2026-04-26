@@ -167,7 +167,8 @@ def _call_llm(client: anthropic.Anthropic, system: str, user: str) -> str:
         try:
             msg = client.messages.create(
                 model=REFLECTION_MODEL,
-                max_tokens=5000,
+                # 5000 → 6500 상향 — 회고 본문이 길어질 때 마지막 권고 잘림 방지
+                max_tokens=6500,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )

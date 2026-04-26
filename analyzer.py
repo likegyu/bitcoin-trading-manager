@@ -1269,8 +1269,9 @@ def analyze_with_claude(
         lessons_block=lessons_block,
     )
     # 실제 출력 구조: tool_use JSON + 한국어 리포트 10개 섹션 ≈ 1500~3000 tokens.
-    # 기본값 5000: 구조화 출력과 본문을 함께 받을 때 마지막 섹션 잘림을 피하는 여유.
-    _analyst_max_tokens = int(_os.getenv("ANALYST_MAX_TOKENS", "5000"))
+    # 기본값 8000: 구조화 출력과 본문을 함께 받을 때 마지막 섹션 잘림을 피하는 여유.
+    # (5000 → 8000 으로 상향 — 본문이 길어지는 변동성 국면에서 마지막 섹션이 잘리는 사례 관측)
+    _analyst_max_tokens = int(_os.getenv("ANALYST_MAX_TOKENS", "8000"))
     request_kwargs = {
         "model": CLAUDE_MODEL,
         "max_tokens": _analyst_max_tokens,

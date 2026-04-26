@@ -44,8 +44,9 @@ RISK_MAX_ROUNDS = int(os.getenv("RISK_MAX_ROUNDS", "1"))
 RISK_ENABLED = os.getenv("RISK_ENABLED", "1") not in ("0", "false", "False", "")
 
 # 출력 목표: 각 900~1100자 이내 + 마지막 권고 블록.
-# 4000 토큰이면 프롬프트 위반으로 길게 써도 권고 블록이 잘릴 가능성이 낮다.
-RISK_MAX_OUTPUT_TOKENS = int(os.getenv("RISK_MAX_OUTPUT_TOKENS", "4000"))
+# 5500 토큰: 프롬프트 위반으로 길게 써도 권고 블록이 잘릴 가능성이 낮다.
+# (4000 → 5500 상향 — 3개 에이전트가 길게 발언할 때 마지막 권고가 잘리는 사례 관측)
+RISK_MAX_OUTPUT_TOKENS = int(os.getenv("RISK_MAX_OUTPUT_TOKENS", "5500"))
 
 
 # 발언 순서 — Aggressive 가 먼저 치고 나가면 Conservative/Neutral 이 반박/중재하는 구조.

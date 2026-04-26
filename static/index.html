@@ -5472,7 +5472,10 @@ function renderBasicMarkdown(str) {
 
 function renderMarkdown(str) {
   if (!str) return "";
-  const safeSource = escapeMarkdownHtml(str);
+  // GFM 의 strikethrough(~text~ / ~~text~~) 기능을 끄기 위해 ~ 를 HTML 엔티티로 치환.
+  // 한국어 리포트에서 '7~17초', '900~1000자' 처럼 범위 표기에 ~ 가 자주 쓰여
+  // 의도치 않게 취소선 처리되는 문제를 막는다. 렌더링 시 &#126; 는 ~ 로 표시됨.
+  const safeSource = escapeMarkdownHtml(str).replace(/~/g, "&#126;");
   if (typeof marked !== "undefined") {
     try {
       return marked.parse(safeSource, { breaks: true, gfm: true });

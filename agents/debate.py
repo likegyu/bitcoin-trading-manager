@@ -39,8 +39,9 @@ DEBATE_MODEL = os.getenv("DEBATE_MODEL", "claude-haiku-4-5-20251001")
 DEBATE_MAX_ROUNDS = int(os.getenv("DEBATE_MAX_ROUNDS", "1"))
 
 # 출력 목표: 900~1000자 이내. 한국어+숫자 혼합 출력은 대략 0.8~1.0토큰/자.
-# 3000 토큰이면 프롬프트 위반으로 길게 써도 마지막 핵심 근거 블록이 잘릴 가능성이 낮다.
-DEBATE_MAX_OUTPUT_TOKENS = int(os.getenv("DEBATE_MAX_OUTPUT_TOKENS", "3000"))
+# 4500 토큰: 프롬프트 위반으로 길게 써도 마지막 핵심 근거 블록이 잘릴 가능성이 낮다.
+# (3000 → 4500 상향 — Bull/Bear 가 길게 논거를 펼치는 경우 마지막 줄이 끊기는 사례 관측)
+DEBATE_MAX_OUTPUT_TOKENS = int(os.getenv("DEBATE_MAX_OUTPUT_TOKENS", "4500"))
 
 # 토론 자체를 끄고 싶을 때: DEBATE_ENABLED=0
 DEBATE_ENABLED = os.getenv("DEBATE_ENABLED", "1") not in ("0", "false", "False", "")

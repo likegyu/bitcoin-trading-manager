@@ -33,8 +33,9 @@ JUDGE_ENABLED = os.getenv("JUDGE_ENABLED", "1") not in ("0", "false", "False", "
 # 출력 포맷: 판정/점수/이유(2~3줄)/Bull핵심/Bear핵심 = 5블록 ≈ 350~500자.
 # 한국어 ≈ 600~900 토큰. 500 은 Bear 핵심이 마지막에 절단되는 사례 발생
 # (관측: '스테이블코인 7d -0.85B' 직후에서 끊김 — 마지막 줄 미완성).
-# 900 으로 상향: 점수 6축 + 2~3줄 reasoning + 양측 핵심줄 모두 안전 수용.
-JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "900"))
+# 1500 으로 상향: reasoning 이 길어지거나 양측 핵심줄이 풍부해지는 경우에도 안전.
+# (900 → 1500 — 판정 reasoning 이 길어지는 사례에서 마지막 줄 잘림 방지)
+JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "1500"))
 
 JUDGE_SYSTEM = """당신은 BTC 선물 시장의 'Investment Judge(투자 심판)'입니다.
 역할: Bull Researcher 와 Bear Researcher 의 토론을 공정하게 듣고,
